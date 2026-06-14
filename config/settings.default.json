@@ -1,0 +1,23 @@
+{
+  "ssh": {
+    "timeoutSeconds":  1800,
+    "throttleLimit":   10,
+    "jitterMaxMs":     2000,
+    "retryCount":      3
+  },
+  "ui": {
+    "defaultLiveMode":    false,
+    "autoElevate":        false,
+    "dashboardRefreshMs": 500
+  },
+  "log": {
+    "retentionDays":  30,
+    "captureOutput":  false,
+    "captureFleet":   true,
+    "captureSession": false
+  },
+  "tcpkg": {
+    "executablePath":  "tcpkg",
+    "remoteTcpkgPath": "C:\\ProgramData\\Beckhoff\\TcPkg\\TcPkg.exe"
+  }
+}

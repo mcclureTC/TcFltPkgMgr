@@ -1,0 +1,9 @@
+{
+  "beckhoff": {
+    "Stable":   { "url": "https://public.tcpkg.beckhoff-cloud.com/api/v1/feeds/stable/",   "priority": 1 },
+    "Outdated": { "url": "https://public.tcpkg.beckhoff-cloud.com/api/v1/feeds/outdated/", "priority": 2 },
+    "Testing":  { "url": "https://public.tcpkg.beckhoff-cloud.com/api/v1/feeds/testing/",  "priority": 3 },
+    "Preview":  { "url": "https://public.tcpkg.beckhoff-cloud.com/api/v1/feeds/preview/",  "priority": 4 }
+  },
+  "custom": {}
+}

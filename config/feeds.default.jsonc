@@ -1,0 +1,12 @@
+// feeds.local.json template — copy to feeds.local.json and customise.
+// This file is gitignored. Do NOT store passwords here; use Windows Credential Manager.
+// Passwords are keyed as: TcFltPkgMgr/<feedName>
+{
+  "custom": {
+    // "MyFeed": {
+    //   "url":      "https://internal.example.com/tcpkg/feeds/myfeed/",
+    //   "priority": 5,
+    //   "username": "deploy-svc"
+    // }
+  }
+}

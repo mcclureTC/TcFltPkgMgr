@@ -1,0 +1,16 @@
+// settings.local.json template — copy to settings.local.json and customise.
+// This file is gitignored.
+{
+  // "ssh": {
+  //   "timeoutSeconds": 3600,
+  //   "throttleLimit":  20
+  // },
+  // "ui": {
+  //   "defaultLiveMode": true,
+  //   "autoElevate":     true
+  // },
+  // "log": {
+  //   "retentionDays": 90,
+  //   "captureOutput": true
+  // }
+}

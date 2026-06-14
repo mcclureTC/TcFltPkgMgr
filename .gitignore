@@ -1,0 +1,16 @@
+# Local configuration — site-specific, may contain credentials
+config/feeds.local.json
+config/settings.local.json
+config/profiles.json
+
+# Command logs — operational data, not source code
+logs/
+
+# Catch-all for any future .local files
+*.local.json
+
+# PowerShell temp files
+*.tmp
+
+# Targets
+*.csv
