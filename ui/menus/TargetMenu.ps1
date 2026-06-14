@@ -351,105 +351,108 @@ function Invoke-ProfileMenu {
 # ── Setup Menu ────────────────────────────────────────────────────────────────
 
 function Invoke-SetupMenu {
+    $result  = ''
+    $lastCmd = ''
+    $mode    = 'targets'   # 'targets' or 'sources'
+
     while ($true) {
-        Clear-Host
-        Write-Host '  Config & Setup' -ForegroundColor Cyan
-        Write-Host ''
-        Write-Host '   1. Add remote target'
-        Write-Host '   2. Import targets from CSV'
-        Write-Host '   3. Export targets to CSV'
-        Write-Host '   4. Manage feeds / sources'
-        Write-Host '   5. Generate local config files (feeds.local.json, settings.local.json)'
-        Write-Host '   6. Export config (no passwords)'
-        Write-Host '   7. Import config from archive'
-        Write-Host '   8. View command log'
-        $roLabel = if ($Script:FltReadOnly) { 'ON  — commands shown but not executed' } else { 'OFF — commands will execute' }
-        Write-Host ("   9. Read-only mode: {0}" -f $roLabel) `
-            -ForegroundColor $(if ($Script:FltReadOnly) { 'Yellow' } else { 'Green' })
-        Write-Host '   0. Back'
-        Write-Host ''
+        # Fetch fresh data for the dashboard
+        $items = if ($mode -eq 'sources') {
+            @(Get-FltSources)
+        } else {
+            @($Script:FleetTargets)
+        }
+
+        Show-SetupDashboard -Mode $mode -Items $items -Result $result -LastCmd $lastCmd
+        $result  = ''
+        $lastCmd = ''
+
         $choice = (Read-Host '  Choice').Trim()
         if ($choice -eq '0') { return }
 
-        if ($choice -eq '1') { Invoke-TargetMenu; continue }
+        # 1/2/3 → target mode
+        if ($choice -in @('1','2','3')) { $mode = 'targets' }
+        # 4 → source mode
+        if ($choice -eq '4') { $mode = 'sources' }
+
+        if ($choice -eq '1') {
+            Invoke-TargetMenu
+            $Script:FleetTargets = @(Get-FleetTargets -Silent)
+            $result = "Targets updated ($($Script:FleetTargets.Count) configured)"
+            continue
+        }
 
         if ($choice -eq '2') {
-            $path = Read-FltValue 'CSV file path (blank to cancel):' -CancelOnBlank
+            Write-Host '  CSV file path (blank to cancel):' -ForegroundColor Cyan
+            $path = (Read-Host '  Path').Trim()
             if (-not $path) { continue }
             if (-not (Test-Path $path -PathType Leaf)) {
-                Write-Host "  File not found: $path" -ForegroundColor Red
-                Read-Host '  Press Enter'; continue
+                $result = "File not found: $path"; continue
             }
-            # Check if CSV has passwords — if not, offer to provide a shared one
-            $csvRows = Import-Csv -Path $path -Encoding UTF8 -ErrorAction SilentlyContinue
-            $needsPwd = $csvRows -and ($csvRows | Where-Object { -not $_.Password })
+            $csvRows   = Import-Csv -Path $path -Encoding UTF8 -ErrorAction SilentlyContinue
+            $needsPwd  = $csvRows -and ($csvRows | Where-Object { -not $_.Password })
             $sharedPwd = ''
             if ($needsPwd) {
-                Write-Host '  CSV has no passwords. Enter a shared SSH password for all targets,' -ForegroundColor Cyan
-                Write-Host '  or blank to skip adding/updating targets that need one.' -ForegroundColor DarkGray
-                $sharedPwd = (Read-Host '  Shared SSH password (blank to skip)').Trim()
+                Write-Host '  CSV has no passwords — shared SSH password (blank to skip):' -ForegroundColor Cyan
+                $sharedPwd = (Read-Host '  Password').Trim()
             }
             $skip = Read-FltYesNo -Prompt 'Skip unreachable targets?'
             $res  = Import-FleetTargetsCsv -Path $path -SharedPassword $sharedPwd -SkipUnreachable:$skip
-            Write-Host ("  Added: $($res.Added)  Updated: $($res.Updated)  Skipped: $($res.Skipped)") `
-                -ForegroundColor Green
-            if ($res.Errors.Count -gt 0) {
-                $res.Errors | ForEach-Object { Write-Host "  Error: $_" -ForegroundColor Red }
-            }
-            Read-Host '  Press Enter'; continue
+            $Script:FleetTargets = @(Get-FleetTargets -Silent)
+            $result = "Added: $($res.Added)  Updated: $($res.Updated)  Skipped: $($res.Skipped)"
+            if ($res.Errors.Count -gt 0) { $result += "  Errors: $($res.Errors -join '; ')" }
+            continue
         }
 
         if ($choice -eq '3') {
-            $path = Read-FltValue 'Save CSV to (blank to cancel):' -CancelOnBlank
+            Write-Host '  Save CSV to (blank to cancel):' -ForegroundColor Cyan
+            $path = (Read-Host '  Path').Trim()
             if (-not $path) { continue }
-            # If user gave a directory, append a default filename
             if ($path.EndsWith('\') -or $path.EndsWith('/') -or (Test-Path $path -PathType Container)) {
                 $path = Join-Path $path "fleet-targets-$(Get-Date -Format 'yyyy-MM-dd').csv"
             }
-            # Ensure parent directory exists
             $dir = Split-Path $path -Parent
             if ($dir -and -not (Test-Path $dir)) {
-                Write-Host "  Directory not found: $dir" -ForegroundColor Red
-                Read-Host '  Press Enter'; continue
+                $result = "Directory not found: $dir"; continue
             }
             $n = Export-FleetTargetsCsv -Path $path
-            Write-Host "  Exported $n target(s) to $path" -ForegroundColor Green
-            Read-Host '  Press Enter'; continue
+            $result = "Exported $n target(s) to $path"
+            continue
         }
 
-        if ($choice -eq '4') { Invoke-FleetSourceMenu; continue }
+        if ($choice -eq '4') {
+            Invoke-FleetSourceMenu
+            continue
+        }
 
         if ($choice -eq '5') {
             $created = New-FltLocalConfig -ConfigDir $Script:FltConfigDir
-            if ($created.Count -gt 0) {
-                Write-Host "  Created: $($created -join ', ')" -ForegroundColor Green
-            } else {
-                Write-Host '  Local config files already exist.' -ForegroundColor Yellow
-            }
-            Read-Host '  Press Enter'; continue
+            $result  = if ($created.Count -gt 0) { "Created: $($created -join ', ')" } `
+                       else { 'Local config files already exist.' }
+            continue
         }
 
         if ($choice -eq '6') {
-            $path = Read-FltValue 'Save archive to (e.g. TcFltConfig.zip, blank to cancel):' -CancelOnBlank
+            Write-Host '  Save archive to (e.g. TcFltConfig.zip, blank to cancel):' -ForegroundColor Cyan
+            $path = (Read-Host '  Path').Trim()
             if (-not $path) { continue }
-            $ok = Export-FltConfig -DestinationPath $path
-            Write-Host $(if ($ok) { "  Exported to $path" } else { '  Export failed.' }) `
-                -ForegroundColor $(if ($ok) { 'Green' } else { 'Red' })
-            Read-Host '  Press Enter'; continue
+            $ok     = Export-FltConfig -DestinationPath $path
+            $result = if ($ok) { "Exported to $path" } else { 'Export failed.' }
+            continue
         }
 
         if ($choice -eq '7') {
-            $path     = Read-FltValue 'Archive path (blank to cancel):' -CancelOnBlank
+            Write-Host '  Archive path (blank to cancel):' -ForegroundColor Cyan
+            $path = (Read-Host '  Path').Trim()
             if (-not $path) { continue }
             $imported = Import-FltConfig -ArchivePath $path
-            if ($imported.Count -gt 0) {
-                Write-Host "  Imported: $($imported -join ', ')" -ForegroundColor Green
-                # Reload config
-                Initialize-FltConfig -ConfigDir $Script:FltConfigDir
+            if ($imported -and $imported.Count -gt 0) {
+                Initialize-FltConfig -ConfigDir $Script:FltConfigDir | Out-Null
+                $result = "Imported: $($imported -join ', ')"
             } else {
-                Write-Host '  Import failed or nothing to import.' -ForegroundColor Yellow
+                $result = 'Import failed or nothing to import.'
             }
-            Read-Host '  Press Enter'; continue
+            continue
         }
 
         if ($choice -eq '8') {
@@ -469,9 +472,8 @@ function Invoke-SetupMenu {
 
         if ($choice -eq '9') {
             $Script:FltReadOnly = -not $Script:FltReadOnly
-            $state = if ($Script:FltReadOnly) { 'ON' } else { 'OFF' }
-            Write-Host "  Read-only mode $state." -ForegroundColor $(if ($Script:FltReadOnly) { 'Yellow' } else { 'Green' })
-            Start-Sleep -Milliseconds 800; continue
+            $result = "Read-only mode $(if ($Script:FltReadOnly) { 'ON' } else { 'OFF' })."
+            continue
         }
     }
 }

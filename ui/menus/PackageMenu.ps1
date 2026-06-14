@@ -32,9 +32,9 @@ function Invoke-FleetInstallMenu {
 
     # Pick package
     Write-Host '  Results:' -ForegroundColor Cyan
-    Show-FltTable -Items $res.Items -Columns $res.Columns
-    Write-Host '   0. Cancel'; Write-Host ''
-    $pkg = Read-FltNumberedChoice -Items $res.Items -Prompt 'Package number'
+    Show-FltTable -Items $res.Items -Columns $res.Columns -Base 1
+    Write-Host '     0. Cancel'; Write-Host ''
+    $pkg = Read-FltNumberedChoice -Items $res.Items -Prompt 'Package number' -Base 1
     if (-not $pkg) { return }
 
     # Pick version
@@ -46,15 +46,17 @@ function Invoke-FleetInstallMenu {
         Show-FltTable -Items $versions -Columns @(
             @{ Header = 'Version'; Expr = { $_.Version } },
             @{ Header = 'Feed';    Expr = { $_.Source  } }
-        )
-        $latestNum = 11 + $versions.Count   # next number after the list
-        Write-Host ("   $latestNum. Latest (let tcpkg decide)"); Write-Host '   0. Cancel'; Write-Host ''
+        ) -Base 1
+        $latestNum = $versions.Count + 1   # next number after the list
+        Write-Host ("  {0,4}. Latest (let tcpkg decide)" -f $latestNum)
+        Write-Host '     0. Cancel'
+        Write-Host ''
         $vChoice = (Read-Host '  Choice').Trim()
         if ($vChoice -eq '0' -or [string]::IsNullOrWhiteSpace($vChoice)) { return }
         if ($vChoice -match '^\d+$') {
             $vn = [int]$vChoice
-            if ($vn -ge 11 -and $vn -le (10 + $versions.Count)) {
-                $ver     = $versions[$vn - 11]
+            if ($vn -ge 1 -and $vn -le $versions.Count) {
+                $ver     = $versions[$vn - 1]
                 $pkgSpec = "$($pkg.Name.ToLower())=$($ver.Version)"
                 # Source field from tcpkg list -a is the feed name
                 $feedName = if ($ver.Source) { $ver.Source } else { '' }
@@ -82,9 +84,9 @@ function Invoke-FleetUpgradeMenu {
         Write-Host "  No packages found matching '$term'." -ForegroundColor Yellow
         Read-Host '  Press Enter'; return
     }
-    Show-FltTable -Items $res.Items -Columns $res.Columns
-    Write-Host '   0. Cancel'; Write-Host ''
-    $pkg = Read-FltNumberedChoice -Items $res.Items -Prompt 'Package number'
+    Show-FltTable -Items $res.Items -Columns $res.Columns -Base 1
+    Write-Host '     0. Cancel'; Write-Host ''
+    $pkg = Read-FltNumberedChoice -Items $res.Items -Prompt 'Package number' -Base 1
     if (-not $pkg) { return }
     _Invoke-FleetBatchAction -Action 'upgrade' -PackageSpec $pkg.Name.ToLower()
 }
@@ -100,9 +102,9 @@ function Invoke-FleetUninstallMenu {
         Write-Host "  No installed packages found matching '$term'." -ForegroundColor Yellow
         Read-Host '  Press Enter'; return
     }
-    Show-FltTable -Items $res.Items -Columns $res.Columns
-    Write-Host '   0. Cancel'; Write-Host ''
-    $pkg = Read-FltNumberedChoice -Items $res.Items -Prompt 'Package number'
+    Show-FltTable -Items $res.Items -Columns $res.Columns -Base 1
+    Write-Host '     0. Cancel'; Write-Host ''
+    $pkg = Read-FltNumberedChoice -Items $res.Items -Prompt 'Package number' -Base 1
     if (-not $pkg) { return }
     _Invoke-FleetBatchAction -Action 'uninstall' -PackageSpec $pkg.Name.ToLower()
 }
@@ -268,17 +270,19 @@ function _Pick-Feed {
     if ($Feeds.Count -eq 0) { return $Feeds.Count }   # All feeds
 
     Write-Host '  Feed to search:' -ForegroundColor Cyan
+    $allNum = $Feeds.Count + 1   # next number after last feed
     Show-FltTable -Items $Feeds -Columns @(
         @{ Header = 'Feed';     Expr = { $_.Name } },
         @{ Header = 'Priority'; Expr = { $_.Priority }; Align = 'Right' }
-    )
-    $allNum = 11 + $Feeds.Count   # next number after last feed
-    Write-Host "   $allNum. All feeds"; Write-Host '   0. Cancel'; Write-Host ''
+    ) -Base 1
+    Write-Host ("  {0,4}. All feeds" -f $allNum)
+    Write-Host '     0. Cancel'
+    Write-Host ''
     $r = (Read-Host '  Choice').Trim()
     if ($r -eq '0' -or [string]::IsNullOrWhiteSpace($r)) { return -1 }
     if ($r -match '^\d+$') {
         $n = [int]$r
-        if ($n -ge 11 -and $n -le (10 + $Feeds.Count)) { return $n - 11 }
+        if ($n -ge 1 -and $n -le $Feeds.Count) { return $n - 1 }
         if ($n -eq $allNum) { return $Feeds.Count }
     }
     return -1

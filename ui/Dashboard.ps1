@@ -126,7 +126,76 @@ function Show-FleetDashboard {
     Write-Host -NoNewline "`e[$($Script:FltDashHeight);1H"
 }
 
-# ── Sources dashboard ─────────────────────────────────────────────────────────
+# ── Setup menu dashboard ───────────────────────────────────────────────────────
+#
+# Shows either the target list or the source list depending on $Mode,
+# with the setup menu actions pinned below as a footer.
+
+function Show-SetupDashboard {
+    param(
+        [string]    $Mode      = 'targets',   # 'targets' or 'sources'
+        [object[]]  $Items     = @(),          # FleetTarget[] or source pscustomobject[]
+        [string]    $Result    = '',
+        [string]    $LastCmd   = ''
+    )
+    $sw = Get-FltSafeWidth
+    $n  = if ($Items) { $Items.Count } else { 0 }
+
+    Clear-Host
+    Paint-FltTitleBar 1 "Setup  >  $(if ($Mode -eq 'sources') { 'Sources / Feeds' } else { 'Targets' })"
+
+    if ($Mode -eq 'sources') {
+        Paint-FltRow 2 ('  {0,3}  {1,-24} {2,-8} {3,-16} {4}' -f 'Pri','Name','State','Auth','URL') 'Dark'
+        for ($i = 0; $i -lt $n; $i++) {
+            $s   = $Items[$i]
+            $clr = if ($s.State -eq 'enabled') { 'Green' } else { 'Dark' }
+            $url = $s.Url
+            $avail = $sw - 60; if ($avail -lt 10) { $avail = 10 }
+            if ($url.Length -gt $avail) { $url = $url.Substring(0, $avail - 1) + '~' }
+            Paint-FltRow (3 + $i) ('  {0,3}. {1,-24} {2,-8} {3,-16} {4}' -f `
+                ($i + 11), $s.Name, $s.State, $s.Auth, $url) $clr
+        }
+        if ($n -eq 0) { Paint-FltRow 3 '  (no sources configured)' 'Dark' }
+    } else {
+        Paint-FltRow 2 ('  {0,3}  {1,-22} {2,-18} {3,-6} {4,-8} {5}' -f '#','Name','Address','Port','Internet','Status') 'Dark'
+        for ($i = 0; $i -lt $n; $i++) {
+            $t   = $Items[$i]
+            $ia  = if ($t.InternetAccess) { 'Yes' } else { 'No' }
+            Paint-FltRow (3 + $i) ('  {0,3}. {1,-22} {2,-18} {3,-6} {4,-8}' -f `
+                ($i + 11), $t.Name, $t.Address, $t.Port, $ia) ''
+        }
+        if ($n -eq 0) { Paint-FltRow 3 '  (no remote targets configured)' 'Dark' }
+    }
+
+    $sepRow    = [Math]::Max(4, 3 + $n)
+    $footerRow = $sepRow + 1
+    $sepRow2   = $footerRow + 2
+    $resultRow = $sepRow2 + 1
+    $promptRow = $resultRow + 1
+
+    Paint-FltRow $sepRow    ('-' * $sw) 'Dark'
+
+    # Action footer — two lines
+    Paint-FltRow $footerRow '  1. Add target   2. Import CSV   3. Export CSV   4. Sources   5. Gen config' 'Dark'
+    Paint-FltRow ($footerRow + 1) '  6. Export config   7. Import config   8. Log   9. Read-only   0. Back' 'Dark'
+
+    Paint-FltRow $sepRow2 ('-' * $sw) 'Dark'
+
+    $cmdText = if ($LastCmd) { "  > $LastCmd" } else { '' }
+    Paint-FltRow $resultRow $cmdText 'Dark'
+
+    if ($Result) {
+        $clr = if ($Result -match 'OK|uccess|xport|mport|reated') { 'Green' }
+               elseif ($Result -match 'fail|error|not found' ) { 'Red' }
+               else { '' }
+        Paint-FltRow $resultRow "  $Result" $clr
+    }
+
+    Paint-FltRow $promptRow '' ''
+    Write-Host -NoNewline "`e[${promptRow};1H"
+}
+
+
 #
 # Layout:
 #   Row 1       : title bar
