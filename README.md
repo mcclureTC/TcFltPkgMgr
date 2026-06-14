@@ -68,7 +68,7 @@ For each remote TwinCAT PC you want to manage, you will be prompted for:
 
 | Field | Description |
 |-------|-------------|
-| Name | A friendly label (e.g. `DCC-1`) |
+| Name | A friendly label (e.g. `PC-1`) |
 | Address | IP address or hostname |
 | Port | SSH port (default: 22) |
 | User | SSH username |
@@ -90,8 +90,8 @@ The CSV must have these columns:
 
 ```
 Name,Address,Port,User,InternetAccess,Password
-DCC-1,192.168.8.101,22,Administrator,True,
-DCC-2,192.168.8.102,22,Administrator,True,
+PC-1,192.168.100.1,22,Administrator,True
+PC-2,192.168.100.2,22,Administrator,True
 ```
 
 Passwords are not stored in the CSV (the column should be empty). You will be prompted for a shared SSH password during import. You can also export your current targets to a CSV via **Setup > 3. Export targets to CSV**.
