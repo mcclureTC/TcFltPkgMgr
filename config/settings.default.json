@@ -5,6 +5,9 @@
     "jitterMaxMs":     2000,
     "retryCount":      3
   },
+  "security": {
+    "credentialBackend": ""
+  },
   "ui": {
     "defaultLiveMode":    false,
     "autoElevate":        false,

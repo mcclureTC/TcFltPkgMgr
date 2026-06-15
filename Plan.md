@@ -38,77 +38,29 @@ forward. All menus and executors must talk to a stable **display adapter**
 interface, not directly to `Dashboard.ps1`. This is a small refactor now that
 prevents a large migration later when moving to Spectre.Console or a C# UI.
 
-### 0-A.1 — Rename and split `ui/Dashboard.ps1`
+### 0-A.1 — Rename and split `ui/Dashboard.ps1` ✅
 
-- [ ] Rename `ui/Dashboard.ps1` → `ui/DashboardAnsi.ps1`
-      (the existing ANSI cursor-positioning implementation)
-- [ ] Create `ui/DisplayAdapter.ps1` — the stable interface that all menus
-      and executors call. Contains thin wrapper functions that delegate to
-      whichever backend is active:
-      ```powershell
-      # Every public dashboard function lives here as a one-liner delegate.
-      # Menus import only this file — never DashboardAnsi.ps1 directly.
-      function Show-FleetDashboard    { & $Script:FltDisplayBackendFn_ShowFleet    @args }
-      function Show-FleetBatchDashboard { & $Script:FltDisplayBackendFn_ShowBatch  @args }
-      function Show-SetupDashboard    { & $Script:FltDisplayBackendFn_ShowSetup    @args }
-      function Show-SourcesDashboard  { & $Script:FltDisplayBackendFn_ShowSources  @args }
-      function Update-FltBatchRow     { & $Script:FltDisplayBackendFn_UpdateBatch  @args }
-      function Paint-FltTitleBar      { & $Script:FltDisplayBackendFn_TitleBar     @args }
-      function Paint-FltRow           { & $Script:FltDisplayBackendFn_Row          @args }
-      function Show-FltTable          { & $Script:FltDisplayBackendFn_Table        @args }
-      ```
-- [ ] Create `ui/DisplayBackends.ps1` — loads the correct backend and wires
-      the `$Script:FltDisplayBackendFn_*` variables:
-      ```powershell
-      function Set-FltDisplayBackend {
-          param([string]$Backend = 'ansi')  # 'ansi' | 'spectre'
-          $Script:FltDisplayBackend = $Backend
-          if ($Backend -eq 'ansi') {
-              . "$PSScriptRoot/DashboardAnsi.ps1"
-              $Script:FltDisplayBackendFn_ShowFleet   = ${function:_Ansi_ShowFleetDashboard}
-              # ... wire all functions
-          }
-          # Future: elseif ($Backend -eq 'spectre') { ... }
-      }
-      ```
-- [ ] Update `TcFltPkgMgr.ps1` module load order:
-      1. Dot-source `ui/DisplayAdapter.ps1`
-      2. Dot-source `ui/DisplayBackends.ps1`
-      3. Call `Set-FltDisplayBackend -Backend (Get-FltCfgValue 'ui' 'displayBackend' 'ansi')`
-      4. Do NOT dot-source `DashboardAnsi.ps1` directly — `Set-FltDisplayBackend` handles it
-- [ ] Add `"displayBackend": "ansi"` to `settings.default.json`
-- [ ] Verify all menus still work unchanged — the adapter functions have
-      identical signatures to the old `Dashboard.ps1` functions
+- [x] Rename `ui/Dashboard.ps1` → `ui/DashboardAnsi.ps1`
+- [x] Create `ui/DisplayAdapter.ps1` — stable interface, explicit named parameter forwarding
+- [x] Create `ui/DisplayBackends.ps1` — wires `$Script:FltDisplay_*` variables at startup;
+      Spectre.Console branch stubbed with full implementation guide in comments
+- [x] Update `TcFltPkgMgr.ps1` — dot-source backends at script scope, call `Set-FltDisplayBackend`
+- [x] Add `"displayBackend": "ansi"` to `settings.default.json`
+- [x] All 26 diagnostics pass including display adapter wiring and `_Ansi_` function presence
+- [x] Non-blocking key polling loop added to fleet home for live reachability updates
+- [x] Built-in diagnostics moved to `diagnostics/Diagnostics.ps1` (new top-level folder)
 
-### 0-A.2 — Credential backend abstraction
+### 0-A.2 — Credential backend abstraction ✅
 
-The current `CredentialRepository.ps1` uses Windows Credential Manager APIs
-that do not exist on Linux. Abstract this now so Linux support (Phase 12) is
-not blocked by credential storage.
-
-- [ ] Create `data/CredentialAdapter.ps1` with a stable interface:
-      ```powershell
-      function Save-FltCredential   { & $Script:FltCredBackendFn_Save   @args }
-      function Get-FltCredential    { & $Script:FltCredBackendFn_Get    @args }
-      function Remove-FltCredential { & $Script:FltCredBackendFn_Remove @args }
-      ```
-- [ ] Create `data/CredentialBackendWindows.ps1` — current Windows Credential
-      Manager implementation, moved verbatim from `CredentialRepository.ps1`
-- [ ] Create `data/CredentialBackendFile.ps1` — encrypted local file
-      implementation for Linux:
-      - Stores credentials in `config/credentials.local.enc` (gitignored)
-      - Encrypts using `[System.Security.Cryptography.Aes]` with a key derived
-        from a machine-specific secret (hostname + a stored salt)
-      - Not as secure as the Windows credential store but suitable for a
-        controlled operator environment
-- [ ] `Set-FltCredentialBackend` in `DisplayBackends.ps1` (or a new
-      `Backends.ps1`) selects the backend based on OS:
-      ```powershell
-      if ($IsWindows) { Set-FltCredentialBackend 'windows' }
-      else            { Set-FltCredentialBackend 'file'    }
-      ```
-- [ ] All existing code that calls Windows Credential Manager directly
-      is updated to call the adapter instead
+- [x] Create `data/CredentialAdapter.ps1` — `Get/Set/Remove-FltStoredPassword` delegates
+- [x] Create `data/CredentialBackendWindows.ps1` — DPAPI `ProtectedData` implementation
+      (replaced unreliable Win32 P/Invoke; stores in `credentials.win.json`)
+- [x] Create `data/CredentialBackendFile.ps1` — AES-256/PBKDF2 encrypted file for Linux
+      (stores in `credentials.local.enc` + `credentials.salt`)
+- [x] Create `data/CredentialBackends.ps1` — auto-selects `windows` on Windows, `file` on Linux
+- [x] `CredentialRepository.ps1` slimmed to `Resolve-FltPassword` only
+- [x] Add `"security": { "credentialBackend": "" }` to `settings.default.json`
+- [x] Credential round-trip test passes in diagnostics (26/26)
 
 ### 0-A.3 — Cross-platform compatibility audit
 

@@ -350,6 +350,12 @@ function Invoke-ProfileMenu {
 
 # ── Setup Menu ────────────────────────────────────────────────────────────────
 
+# =============================================================================
+#  Internal diagnostics — Setup > 10. Diagnostics
+#  Verifies that the adapter abstractions and key subsystems are correctly
+#  wired and functional. No external calls (no tcpkg, no SSH, no network).
+# =============================================================================
+
 function Invoke-SetupMenu {
     $result  = ''
     $lastCmd = ''
@@ -473,6 +479,13 @@ function Invoke-SetupMenu {
         if ($choice -eq '9') {
             $Script:FltReadOnly = -not $Script:FltReadOnly
             $result = "Read-only mode $(if ($Script:FltReadOnly) { 'ON' } else { 'OFF' })."
+            continue
+        }
+
+        if ($choice -eq '10') {
+            Clear-Host
+            Invoke-FltDiagnostics
+            Read-Host '  Press Enter'
             continue
         }
     }

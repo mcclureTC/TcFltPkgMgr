@@ -149,7 +149,7 @@ function _Ansi_ShowSetupDashboard {
 
     _Ansi_PaintRow $sepRow    ('-' * $sw) 'Dark'
     _Ansi_PaintRow $footerRow '  1. Add target   2. Import CSV   3. Export CSV   4. Sources   5. Gen config' 'Dark'
-    _Ansi_PaintRow ($footerRow + 1) '  6. Export config   7. Import config   8. Log   9. Read-only   0. Back' 'Dark'
+    _Ansi_PaintRow ($footerRow + 1) '  6. Export config   7. Import config   8. Log   9. Read-only   10. Diagnostics   0. Back' 'Dark'
     _Ansi_PaintRow $sepRow2   ('-' * $sw) 'Dark'
 
     $cmdText = if ($LastCmd) { "  > $LastCmd" } else { '' }

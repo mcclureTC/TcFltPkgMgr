@@ -77,7 +77,11 @@ $Root = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
 $modules = @(
     'classes\Models.ps1',
     'data\ConfigRepository.ps1',
-    'data\CredentialRepository.ps1',
+    'data\CredentialAdapter.ps1',         # stable credential interface
+    'data\CredentialBackendWindows.ps1',  # Windows Credential Manager backend
+    'data\CredentialBackendFile.ps1',     # encrypted file backend (Linux)
+    'data\CredentialBackends.ps1',        # backend loader
+    'data\CredentialRepository.ps1',      # Resolve-FltPassword (calls adapter)
     'execution\CommandLog.ps1',
     'data\TargetRepository.ps1',
     'data\PackageRepository.ps1',
@@ -85,9 +89,10 @@ $modules = @(
     'execution\SshExecutor.ps1',
     'execution\FleetExecutor.ps1',
     'ui\Prompts.ps1',
-    'ui\DisplayAdapter.ps1',      # stable interface — menus call this
-    'ui\DashboardAnsi.ps1',       # ANSI backend — dot-sourced at script scope
-    'ui\DisplayBackends.ps1',     # backend loader
+    'ui\DisplayAdapter.ps1',              # stable display interface
+    'ui\DashboardAnsi.ps1',               # ANSI backend — dot-sourced at script scope
+    'ui\DisplayBackends.ps1',             # display backend loader
+    'diagnostics\Diagnostics.ps1',         # built-in diagnostics (Setup > 10)
     'ui\menus\TargetMenu.ps1',
     'ui\menus\PackageMenu.ps1',
     'ui\menus\FleetMenu.ps1'
@@ -103,6 +108,12 @@ foreach ($m in $modules) {
         Write-Warning "Module not found: $path"
     }
 }
+
+# -- Initialise credential backend ---------------------------------------------
+# Auto-selects Windows Credential Manager on Windows, encrypted file on Linux.
+# Override by setting "credentialBackend": "file" in settings.local.json.
+$credBackend = Get-FltCfgValue 'security' 'credentialBackend' ''
+Set-FltCredentialBackend -Backend $credBackend
 
 # -- Initialise display backend ------------------------------------------------
 # Must run after ConfigRepository (for Get-FltCfgValue) and DisplayBackends.

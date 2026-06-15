@@ -3,14 +3,20 @@ config/feeds.local.json
 config/settings.local.json
 config/profiles.json
 
+# Credential stores — never commit these
+config/credentials.win.json
+config/credentials.local.enc
+config/credentials.salt
+config/target-meta.local.json
+
 # Command logs — operational data, not source code
 logs/
 
 # Catch-all for any future .local files
 *.local.json
 
+# Local exports — fleet target CSVs are machine-specific operational data
+*.csv
+
 # PowerShell temp files
 *.tmp
-
-# Targets
-*.csv
