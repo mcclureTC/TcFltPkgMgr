@@ -1,44 +1,52 @@
 # =============================================================================
 #  TcFltPkgMgr — File Credential Backend
-#  Stores credentials in an AES-256 encrypted JSON file.
+#  Stores credentials in an AES-256-CBC encrypted JSON file.
 #  Cross-platform — works on Windows, Linux, and macOS.
 #
-#  Key derivation: PBKDF2-SHA256 using a machine-specific secret
-#  (hostname + a random salt stored alongside the encrypted file).
-#  Not as secure as Windows Credential Manager or the system keyring,
-#  but suitable for a controlled operator environment where the config
-#  directory is protected by filesystem permissions.
+#  Key: a cryptographically random 32-byte key generated once on first use
+#  and stored in credentials.key. Security comes entirely from filesystem
+#  permissions on the config directory — the key is not derived from any
+#  guessable machine property.
+#
+#  On Linux, restrict the config directory:
+#    chmod 700 ~/.config/tcfltpkgmgr
+#
+#  Future (Phase 5): Ansible Vault integration will allow vault passwords
+#  to be stored here, with the vault password itself protected by this backend.
+#  See Plan.md Phase 5.6 for details.
 #
 #  Store location: $Script:FltConfigDir/credentials.local.enc  (gitignored)
-#  Salt location:  $Script:FltConfigDir/credentials.salt       (gitignored)
+#  Key location:   $Script:FltConfigDir/credentials.key        (gitignored)
 #
 #  All functions prefixed _File_ — load via CredentialBackends.ps1 only.
 # =============================================================================
 
-function _File_GetCredPath  { Join-Path $Script:FltConfigDir 'credentials.local.enc' }
-function _File_GetSaltPath  { Join-Path $Script:FltConfigDir 'credentials.salt' }
+function _File_GetCredPath { Join-Path $Script:FltConfigDir 'credentials.local.enc' }
+function _File_GetKeyPath  { Join-Path $Script:FltConfigDir 'credentials.key' }
 
-# Derive a 256-bit AES key from the machine secret and stored salt.
-function _File_DeriveKey {
-    $saltPath = _File_GetSaltPath
+# Load or generate the 256-bit AES machine key.
+# The key is random and stored in credentials.key — never derived from
+# guessable properties like hostname or username.
+function _File_GetOrCreateKey {
+    $keyPath = _File_GetKeyPath
 
-    # Create salt on first use
-    if (-not (Test-Path $saltPath)) {
-        $newSalt = New-Object byte[] 32
-        [System.Security.Cryptography.RandomNumberGenerator]::Fill($newSalt)
-        [System.IO.File]::WriteAllBytes($saltPath, $newSalt)
+    if (-not (Test-Path $keyPath)) {
+        # Generate a cryptographically random 32-byte key on first use
+        $key = New-Object byte[] 32
+        [System.Security.Cryptography.RandomNumberGenerator]::Fill($key)
+        [System.IO.File]::WriteAllBytes($keyPath, $key)
+
+        # On Linux/macOS: restrict key file to owner-read-only (chmod 600)
+        if (-not $IsWindows) {
+            try {
+                & chmod 600 $keyPath 2>$null
+            } catch { }
+        }
+
+        Write-Verbose "TcFltPkgMgr: Generated new credential key at $keyPath"
     }
-    $salt = [System.IO.File]::ReadAllBytes($saltPath)
 
-    # Machine secret: hostname + OS username — not a strong secret but
-    # provides basic protection against casual access to the config dir
-    $machineSecret = "$($env:COMPUTERNAME)$($env:USERNAME)$($env:HOSTNAME)$($env:USER)"
-    $secretBytes   = [System.Text.Encoding]::UTF8.GetBytes($machineSecret)
-
-    $pbkdf2 = New-Object System.Security.Cryptography.Rfc2898DeriveBytes(
-        $secretBytes, $salt, 100000,
-        [System.Security.Cryptography.HashAlgorithmName]::SHA256)
-    return $pbkdf2.GetBytes(32)   # 256-bit key
+    return [System.IO.File]::ReadAllBytes($keyPath)
 }
 
 # Load and decrypt the credential store. Returns a hashtable of name→password.
@@ -51,15 +59,15 @@ function _File_LoadStore {
         if ($data.Length -lt 17) { return @{} }
         $iv         = $data[0..15]
         $ciphertext = $data[16..($data.Length - 1)]
-        $key        = _File_DeriveKey
+        $key        = _File_GetOrCreateKey
 
-        $aes             = [System.Security.Cryptography.Aes]::Create()
-        $aes.Key         = $key
-        $aes.IV          = $iv
-        $aes.Mode        = [System.Security.Cryptography.CipherMode]::CBC
-        $aes.Padding     = [System.Security.Cryptography.PaddingMode]::PKCS7
-        $decryptor       = $aes.CreateDecryptor()
-        $plainBytes      = $decryptor.TransformFinalBlock($ciphertext, 0, $ciphertext.Length)
+        $aes         = [System.Security.Cryptography.Aes]::Create()
+        $aes.Key     = $key
+        $aes.IV      = $iv
+        $aes.Mode    = [System.Security.Cryptography.CipherMode]::CBC
+        $aes.Padding = [System.Security.Cryptography.PaddingMode]::PKCS7
+        $decryptor   = $aes.CreateDecryptor()
+        $plainBytes  = $decryptor.TransformFinalBlock($ciphertext, 0, $ciphertext.Length)
         $aes.Dispose()
 
         $json = [System.Text.Encoding]::UTF8.GetString($plainBytes)
@@ -79,7 +87,7 @@ function _File_SaveStore {
     try {
         $json      = $Store | ConvertTo-Json -Compress
         $plainText = [System.Text.Encoding]::UTF8.GetBytes($json)
-        $key       = _File_DeriveKey
+        $key       = _File_GetOrCreateKey
 
         $aes         = [System.Security.Cryptography.Aes]::Create()
         $aes.Key     = $key
@@ -88,12 +96,13 @@ function _File_SaveStore {
         $aes.Padding = [System.Security.Cryptography.PaddingMode]::PKCS7
         $encryptor   = $aes.CreateEncryptor()
         $ciphertext  = $encryptor.TransformFinalBlock($plainText, 0, $plainText.Length)
-        $aes.Dispose()
 
-        # Prepend IV to ciphertext
+        # Prepend IV to ciphertext — IV is safe to store in plain text
         $output = New-Object byte[] (16 + $ciphertext.Length)
         [Array]::Copy($aes.IV, $output, 16)
         [Array]::Copy($ciphertext, 0, $output, 16, $ciphertext.Length)
+        $aes.Dispose()
+
         [System.IO.File]::WriteAllBytes((_File_GetCredPath), $output)
         return $true
     } catch {

@@ -6,7 +6,7 @@ config/profiles.json
 # Credential stores — never commit these
 config/credentials.win.json
 config/credentials.local.enc
-config/credentials.salt
+config/credentials.key
 config/target-meta.local.json
 
 # Command logs — operational data, not source code

@@ -382,6 +382,41 @@ The current background reachability job checks all targets sequentially in a
 - [ ] No push bucket for Linux
 - [ ] Merge results into `$allResults`
 
+### 5.6 — Ansible Vault integration (`execution/AnsibleExecutor.ps1`)
+
+Ansible Vault encrypts secrets (SSH sudo passwords, API keys, service account
+credentials) stored alongside playbooks using AES-256. The vault password is
+the only secret needed to decrypt — encrypted files can be safely committed to
+the repo.
+
+**Two-tier credential model:**
+- Tier 1: TcFltPkgMgr credential store protects the Ansible Vault password
+          (DPAPI on Windows, random-key AES-256 on Linux)
+- Tier 2: Ansible Vault protects playbook secrets using that vault password
+The operator enters the vault password once; the tool manages it from there.
+
+- [ ] Add `_Get-VaultPasswordFile` helper — retrieves vault password from
+      `Get-FltStoredPassword -CredentialName 'ansible_vault'` and writes it
+      to a temp file passed as `--vault-password-file` to `ansible-playbook`
+- [ ] `Invoke-FltAnsibleBatch` passes `--vault-password-file` when a vault
+      password is stored; omits the flag if none is configured (playbooks
+      without encrypted vars work without a vault password)
+- [ ] Add `Invoke-FltVaultSetup` in the Linux Admin menu — prompts for vault
+      password and saves it via `Set-FltStoredPassword -CredentialName 'ansible_vault'`
+- [ ] Add `ansible/` folder at project root for vault-encrypted variable files:
+      ```
+      ansible/
+      ├── group_vars/
+      │   └── all.yml.vault   # encrypted: SSH passwords, sudo credentials
+      └── host_vars/
+          └── <hostname>.yml.vault   # per-host secret overrides
+      ```
+- [ ] Vault files are safe to commit encrypted — add to `.gitignore` only if
+      secrets should not be in the repo at all
+- [ ] Document vault password rotation in README:
+      `ansible-vault rekey ansible/group_vars/all.yml.vault`
+      then update via TcFltPkgMgr Setup > Linux Admin
+
 ---
 
 ## Phase 6 — Ansible UI

@@ -90,8 +90,8 @@ The CSV must have these columns:
 
 ```
 Name,Address,Port,User,InternetAccess,Password
-PC-1,192.168.100.1,22,Administrator,True
-PC-2,192.168.100.2,22,Administrator,True
+PC-1,192.168.100.101,22,Administrator,True,
+PC-2,192.168.100.102,22,Administrator,True,
 ```
 
 Passwords are not stored in the CSV (the column should be empty). You will be prompted for a shared SSH password during import. You can also export your current targets to a CSV via **Setup > 3. Export targets to CSV**.
@@ -126,7 +126,37 @@ Targets with Internet Access = Yes install via parallel SSH. Targets missing the
 
 ---
 
-## Command Log
+## Credential Storage
+
+Passwords (SSH credentials, feed passwords) are stored encrypted on disk — never in plain text and never committed to the repository.
+
+| Platform | Backend | Store location |
+|----------|---------|---------------|
+| Windows | Windows DPAPI (`ProtectedData`) | `config/credentials.win.json` |
+| Linux / macOS | AES-256, random machine key | `config/credentials.local.enc` |
+
+On Windows, credentials can only be decrypted by the same user account that saved them. On Linux, a cryptographically random 256-bit key is generated on first use and stored in `config/credentials.key`. Security is provided by filesystem permissions on the config directory — restrict with `chmod 700 ~/.config/tcfltpkgmgr` on Linux.
+
+When Ansible support is added (Phase 5), Ansible Vault passwords will also be stored here, providing a two-tier model: the TcFltPkgMgr credential store protects the vault password, and Ansible Vault protects playbook secrets.
+
+All credential files are listed in `.gitignore` and will never be committed.
+
+---
+
+## Built-in Diagnostics
+
+Run **Setup → 10. Diagnostics** at any time to verify the tool is correctly configured. The diagnostics check:
+
+- Display adapter wiring (all 10 backend functions)
+- Credential adapter wiring and round-trip (Set → Get → Remove)
+- All required functions and script variables are loaded
+- Config sections and directories exist
+- Key subsystem functions work correctly (JSON parsing, config reads, process spawning)
+- Posh-SSH is installed and available
+
+All checks run offline — no network, SSH, or tcpkg calls.
+
+---
 
 All `tcpkg` commands run by this tool are logged to `logs/commands.ndjson` (newline-delimited JSON). Each entry includes timestamp, session ID, target, command, exit code, and duration.
 
@@ -183,11 +213,22 @@ TcFltPkgMgr/
 │   ├── feeds.default.json    # Built-in Beckhoff feed presets (do not edit)
 │   ├── feeds.local.json      # Your local feed overrides (gitignored)
 │   ├── settings.default.json
-│   └── settings.local.json   # Your local settings (gitignored)
+│   ├── settings.local.json   # Your local settings (gitignored)
+│   └── credentials.win.json  # Encrypted credentials — Windows (gitignored)
+├── diagnostics/
+│   └── Diagnostics.ps1       # Built-in self-test (Setup > 10)
 ├── logs/
 │   └── commands.ndjson       # Command log (gitignored)
-├── classes/                  # PS class definitions
+├── classes/                  # PS class definitions (FleetTarget etc.)
 ├── data/                     # Config, credential, target, package repositories
+│   ├── CredentialAdapter.ps1        # Stable credential interface
+│   ├── CredentialBackendWindows.ps1 # DPAPI backend (Windows)
+│   ├── CredentialBackendFile.ps1    # AES-256 backend (Linux)
+│   └── CredentialBackends.ps1       # Backend selector
 ├── execution/                # SSH executor, fleet executor, command log writer
-└── ui/                       # Dashboard, menus, prompts
+└── ui/
+    ├── DisplayAdapter.ps1    # Stable display interface (replaceable)
+    ├── DashboardAnsi.ps1     # ANSI terminal backend
+    ├── DisplayBackends.ps1   # Display backend selector
+    └── menus/                # Menu screens
 ```
