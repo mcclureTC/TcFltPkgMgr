@@ -14,11 +14,11 @@ function Invoke-FleetInstallMenu {
     $term = Read-FltPackageSearch -Prompt 'Package name to install (blank to cancel):'
     if (-not $term) { return }
 
-    # Pick feed
-    $feeds   = @($Script:FltFeeds | Sort-Object Priority)
-    $feedIdx = _Pick-Feed $feeds
+    # Pick feed — use live source list from tcpkg, not static config
+    $liveSources = @(Get-FltSources | Where-Object { $_.State -eq 'enabled' } | Sort-Object Pri)
+    $feedIdx     = _Pick-Feed-Live $liveSources
     if ($feedIdx -lt 0) { return }
-    $feedFilter = if ($feedIdx -lt $feeds.Count) { $feeds[$feedIdx].Name } else { '' }
+    $feedFilter  = if ($feedIdx -lt $liveSources.Count) { $liveSources[$feedIdx].Name } else { '' }
 
     # Search feed
     $listArgs = @('list', $term)
@@ -263,7 +263,34 @@ function Invoke-OutdatedCheckMenu {
     }
 }
 
-# ── Helper: feed picker ───────────────────────────────────────────────────────
+# ── Helper: feed picker (live — from tcpkg source list) ──────────────────────
+# Uses the actual configured sources rather than the static feeds config.
+# Returns index into $Sources array, or $Sources.Count for "All feeds", or -1 to cancel.
+
+function _Pick-Feed-Live {
+    param([object[]]$Sources)
+    if (-not $Sources -or $Sources.Count -eq 0) { return 0 }   # no sources = all
+
+    Write-Host '  Feed to search:' -ForegroundColor Cyan
+    Show-FltTable -Items $Sources -Columns @(
+        @{ Header = 'Feed';     Expr = { $_.Name } },
+        @{ Header = 'Priority'; Expr = { $_.Pri  }; Align = 'Right' }
+    ) -Base 1
+    $allNum = $Sources.Count + 1
+    Write-Host ("  {0,4}. All feeds" -f $allNum)
+    Write-Host '     0. Cancel'
+    Write-Host ''
+    $r = (Read-Host '  Choice').Trim()
+    if ($r -eq '0' -or [string]::IsNullOrWhiteSpace($r)) { return -1 }
+    if ($r -match '^\d+$') {
+        $n = [int]$r
+        if ($n -ge 1 -and $n -le $Sources.Count) { return $n - 1 }
+        if ($n -eq $allNum) { return $Sources.Count }
+    }
+    return -1
+}
+
+# ── Helper: feed picker (static config) ──────────────────────────────────────
 
 function _Pick-Feed {
     param([FeedDefinition[]]$Feeds)

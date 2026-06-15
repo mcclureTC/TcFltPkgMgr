@@ -8,7 +8,8 @@
   "ui": {
     "defaultLiveMode":    false,
     "autoElevate":        false,
-    "dashboardRefreshMs": 500
+    "dashboardRefreshMs": 500,
+    "displayBackend":     "ansi"
   },
   "log": {
     "retentionDays":  30,

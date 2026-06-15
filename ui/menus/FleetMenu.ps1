@@ -5,19 +5,15 @@
 #  The dashboard is always visible; only the content zone below it changes.
 # =============================================================================
 
-function Invoke-FleetMenu {
-    # Load fleet targets
-    $Script:FleetTargets = @(Get-FleetTargets -Silent)
-
-    $Script:FltMenuLastCmd     = ''
-    $Script:FltMenuResultLines = @()
-
-    # Kick off a background reachability check
-    $reachJob = Start-Job -ScriptBlock {
-        param($targets, $cfgPath)
-        # minimal inline check — no module imports needed for TCP
+# Start a background TCP reachability check for a list of targets.
+# Returns a Job object. Results are [pscustomobject]@{ Name; Reachable }.
+function Start-FltReachJob {
+    param([FleetTarget[]]$Targets)
+    $addrs = @($Targets | ForEach-Object { [pscustomobject]@{ Name=$_.Name; Address=$_.Address; Port=$_.Port } })
+    Start-Job -ScriptBlock {
+        param($addrs)
         $results = @()
-        foreach ($t in $targets) {
+        foreach ($t in $addrs) {
             try {
                 $tcp = [System.Net.Sockets.TcpClient]::new()
                 $ar  = $tcp.BeginConnect($t.Address, $t.Port, $null, $null)
@@ -29,36 +25,95 @@ function Invoke-FleetMenu {
             }
         }
         return $results
-    } -ArgumentList $Script:FleetTargets, ''
+    } -ArgumentList (,$addrs)
+}
+
+# Reload targets from tcpkg, preserve prior reachability state, start new check.
+# Returns the new reachability job.
+function Invoke-FltReloadTargets {
+    param([object]$ReachJob)
+    # Cancel any running job
+    if ($ReachJob) { Remove-Job $ReachJob -Force -ErrorAction SilentlyContinue }
+
+    # Capture prior reachability before reloading
+    $priorReach = @{}
+    foreach ($t in $Script:FleetTargets) { $priorReach[$t.Name] = $t.Reachable }
+
+    # Reload fresh from tcpkg
+    $Script:FleetTargets = @(Get-FleetTargets -Silent)
+
+    # Restore prior status so dashboard doesn't flash 'unknown'
+    foreach ($t in $Script:FleetTargets) {
+        $t.Reachable = if ($priorReach.ContainsKey($t.Name)) { $priorReach[$t.Name] } else { 'checking' }
+    }
+
+    # Mark all as 'checking' and kick off a new job
+    foreach ($t in $Script:FleetTargets) { $t.Reachable = 'checking' }
+    return Start-FltReachJob $Script:FleetTargets
+}
+
+function Invoke-FleetMenu {
+    # Load fleet targets and start initial reachability check
+    $Script:FleetTargets       = @(Get-FleetTargets -Silent)
+    $Script:FltMenuLastCmd     = ''
+    $Script:FltMenuResultLines = @()
+    $reachJob                  = Start-FltReachJob $Script:FleetTargets
 
     # Mark all targets as 'checking' while the background job runs
     foreach ($t in $Script:FleetTargets) { $t.Reachable = 'checking' }
     Show-FleetDashboard -Targets $Script:FleetTargets `
         -LastCommand $Script:FltMenuLastCmd -ResultLines $Script:FltMenuResultLines
+    Write-Host -NoNewline '  Choice: '
 
     while ($true) {
-        # Poll reachability job non-blockingly
-        if ($reachJob -and $reachJob.State -in @('Completed','Failed')) {
-            if ($reachJob.State -eq 'Completed') {
-                $reachResults = Receive-Job $reachJob
-                foreach ($r in $reachResults) {
-                    $tgt = $Script:FleetTargets | Where-Object { $_.Name -eq $r.Name } | Select-Object -First 1
-                    if ($tgt) { $tgt.Reachable = if ($r.Reachable) { 'online' } else { 'offline' } }
+        # Non-blocking input loop — polls reachability job while waiting for keypress
+        $inputBuffer = ''
+        while ($true) {
+            # Check reachability job
+            if ($reachJob -and $reachJob.State -in @('Completed','Failed')) {
+                if ($reachJob.State -eq 'Completed') {
+                    $reachResults = Receive-Job $reachJob
+                    foreach ($r in $reachResults) {
+                        $tgt = $Script:FleetTargets | Where-Object { $_.Name -eq $r.Name } | Select-Object -First 1
+                        if ($tgt) { $tgt.Reachable = if ($r.Reachable) { 'online' } else { 'offline' } }
+                    }
+                    # Repaint dashboard then restore prompt and any typed chars
+                    Show-FleetDashboard -Targets $Script:FleetTargets `
+                        -LastCommand $Script:FltMenuLastCmd -ResultLines $Script:FltMenuResultLines
+                    Write-Host -NoNewline "  Choice: $inputBuffer"
                 }
+                Remove-Job $reachJob -Force
+                $reachJob = $null
             }
-            Remove-Job $reachJob -Force
-            $reachJob = $null
-            Show-FleetDashboard -Targets $Script:FleetTargets `
-                -LastCommand $Script:FltMenuLastCmd -ResultLines $Script:FltMenuResultLines
-        }
 
-        $choice = (Read-Host '  Choice').Trim()
-        $n      = $Script:FleetTargets.Count
+            # Check for keypress without blocking
+            if ([Console]::KeyAvailable) {
+                $key = [Console]::ReadKey($true)
+                if ($key.Key -eq [ConsoleKey]::Enter) { break }
+                if ($key.Key -eq [ConsoleKey]::Backspace) {
+                    if ($inputBuffer.Length -gt 0) {
+                        $inputBuffer = $inputBuffer.Substring(0, $inputBuffer.Length - 1)
+                        Write-Host -NoNewline "`b `b"
+                    }
+                } elseif ($key.KeyChar -ne [char]0) {
+                    $inputBuffer += $key.KeyChar
+                    Write-Host -NoNewline $key.KeyChar
+                }
+            } elseif ($reachJob) {
+                # Only sleep while the background job is running
+                Start-Sleep -Milliseconds 50
+            }
+        }
+        Write-Host ''   # newline after Enter
+        $choice = $inputBuffer.Trim()
+
+        $n = $Script:FleetTargets.Count
 
         if ($choice -notmatch '^\d+$') {
             $Script:FltMenuResultLines = @('Please enter a number.')
             Show-FleetDashboard -Targets $Script:FleetTargets `
                 -LastCommand $Script:FltMenuLastCmd -ResultLines $Script:FltMenuResultLines
+            Write-Host -NoNewline '  Choice: '
             continue
         }
 
@@ -85,23 +140,29 @@ function Invoke-FleetMenu {
                 $ok = Test-FleetTargetVerify -Name $tgt.Name
                 $Script:FltMenuResultLines = @(if ($ok) { "Verified: $($tgt.Name) -- OK" } else { "Verify FAILED: $($tgt.Name)" })
                 $Script:FltMenuLastCmd = "tcpkg remote verify $($tgt.Name)"
-                $Script:FleetTargets = @(Get-FleetTargets -Silent)
+                $reachJob = Invoke-FltReloadTargets $reachJob
 
             } elseif ($verb -eq '2') {
                 Invoke-TargetMenu -Target $tgt
-                $Script:FleetTargets = @(Get-FleetTargets -Silent)
+                $reachJob = Invoke-FltReloadTargets $reachJob
                 $Script:FltMenuResultLines = @("Target '$($tgt.Name)' updated.")
 
             } elseif ($verb -eq '3') {
                 $Script:FltMenuResultLines = @("Remove '$($tgt.Name)'?  1. Yes  0. No")
                 Show-FleetDashboard -Targets $Script:FleetTargets `
                     -LastCommand $Script:FltMenuLastCmd -ResultLines $Script:FltMenuResultLines
-                $confirm = (Read-Host '  Choice').Trim()
+                Write-Host -NoNewline '  Choice: '
+                $confirm = $null
+                while (-not $confirm) {
+                    if ([Console]::KeyAvailable) { $confirm = [Console]::ReadKey($true).KeyChar }
+                    else { Start-Sleep -Milliseconds 100 }
+                }
+                Write-Host $confirm
                 if ($confirm -eq '1') {
                     $ok = Remove-FleetTarget -Name $tgt.Name
                     $Script:FltMenuLastCmd = "tcpkg remote remove $($tgt.Name)"
                     $Script:FltMenuResultLines = @(if ($ok) { "Removed: $($tgt.Name)" } else { "Remove FAILED: $($tgt.Name)" })
-                    $Script:FleetTargets = @(Get-FleetTargets -Silent)
+                    $reachJob = Invoke-FltReloadTargets $reachJob
                 } else {
                     $Script:FltMenuResultLines = @()
                 }
@@ -111,22 +172,24 @@ function Invoke-FleetMenu {
 
             Show-FleetDashboard -Targets $Script:FleetTargets `
                 -LastCommand $Script:FltMenuLastCmd -ResultLines $Script:FltMenuResultLines
+            Write-Host -NoNewline '  Choice: '
             continue
         }
 
         # Fixed operations
-        if ($num -eq 1) { Invoke-FleetInstallMenu;   $Script:FleetTargets = @(Get-FleetTargets -Silent) }
-        elseif ($num -eq 2) { Invoke-FleetUpgradeMenu;   $Script:FleetTargets = @(Get-FleetTargets -Silent) }
-        elseif ($num -eq 3) { Invoke-FleetUninstallMenu; $Script:FleetTargets = @(Get-FleetTargets -Silent) }
+        if ($num -eq 1) { Invoke-FleetInstallMenu;   $reachJob = Invoke-FltReloadTargets $reachJob }
+        elseif ($num -eq 2) { Invoke-FleetUpgradeMenu;   $reachJob = Invoke-FltReloadTargets $reachJob }
+        elseif ($num -eq 3) { Invoke-FleetUninstallMenu; $reachJob = Invoke-FltReloadTargets $reachJob }
         elseif ($num -eq 4) { Invoke-PackageStatusMenu }
         elseif ($num -eq 5) { Invoke-OutdatedCheckMenu }
         elseif ($num -eq 6) { Invoke-ProfileMenu }
-        elseif ($num -eq 7) { Invoke-SetupMenu; $Script:FleetTargets = @(Get-FleetTargets -Silent) }
+        elseif ($num -eq 7) { Invoke-SetupMenu; $reachJob = Invoke-FltReloadTargets $reachJob }
         else {
             $Script:FltMenuResultLines = @("Enter 11-$(10+$n) for a target, 1-7 for operations, 0 to exit.")
         }
 
         Show-FleetDashboard -Targets $Script:FleetTargets `
             -LastCommand $Script:FltMenuLastCmd -ResultLines $Script:FltMenuResultLines
+        Write-Host -NoNewline '  Choice: '
     }
 }

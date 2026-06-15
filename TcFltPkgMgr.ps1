@@ -85,7 +85,9 @@ $modules = @(
     'execution\SshExecutor.ps1',
     'execution\FleetExecutor.ps1',
     'ui\Prompts.ps1',
-    'ui\Dashboard.ps1',
+    'ui\DisplayAdapter.ps1',      # stable interface — menus call this
+    'ui\DashboardAnsi.ps1',       # ANSI backend — dot-sourced at script scope
+    'ui\DisplayBackends.ps1',     # backend loader
     'ui\menus\TargetMenu.ps1',
     'ui\menus\PackageMenu.ps1',
     'ui\menus\FleetMenu.ps1'
@@ -101,6 +103,13 @@ foreach ($m in $modules) {
         Write-Warning "Module not found: $path"
     }
 }
+
+# -- Initialise display backend ------------------------------------------------
+# Must run after ConfigRepository (for Get-FltCfgValue) and DisplayBackends.
+# The $Root\ui path is passed so the backend can find DashboardAnsi.ps1.
+Set-FltDisplayBackend `
+    -Backend (Get-FltCfgValue 'ui' 'displayBackend' 'ansi') `
+    -UiRoot  (Join-Path $Root 'ui')
 
 # -- Global state --------------------------------------------------------------
 

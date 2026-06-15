@@ -119,7 +119,7 @@ function Invoke-FleetSourceMenu {
                 } else { "Failed (exit $Script:FltLastExit)" }
                 $sources = Get-FltSources
             } else {
-                $result = "No source at position $choice"
+                $result = "No source at position $choice (idx=$idx count=$($sources.Count))"
             }
             continue
         }
