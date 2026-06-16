@@ -134,6 +134,7 @@ $Script:FltTargetFilter   = New-FltSortFilterState
 $Script:FltSourcesSort    = New-FltSortFilterState
 $Script:FltSourcesFilter  = New-FltSortFilterState
 $Script:FltDisplayTargets = @()
+$Script:FltReachCache     = @{}   # TargetName → DateTime of last confirmed online
 
 
 $Script:FltReadOnly = -not $Live

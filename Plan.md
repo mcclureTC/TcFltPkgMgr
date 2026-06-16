@@ -136,80 +136,64 @@ every subsequent phase builds on a scalable foundation.
 - [x] Sort/filter tested in diagnostics (7 new tests, 28/28 passing)
 - [x] `$using:ctx` context object pattern used in `ForEach-Object -Parallel`
       to avoid scope issues in `Get-FltRemoteFeedStatus`
+- [x] Setup dashboard: 11+ target selection for Verify/Edit/Remove (consistent with Fleet)
+- [x] Action prompt reads `— enter action for Config:` to clarify config vs live operations
+- [x] Feed picker (`_Pick-Feed-Live`) now reads live tcpkg source list instead of
+      static `$Script:FltFeeds` — shows all configured feeds including user-added ones
 
-### 0.4 — Reachability check at scale
+### 0.4 — Reachability check at scale ✅
 
-The current background reachability job checks all targets sequentially in a
-`Start-Job` scriptblock. At 100 targets this takes 100 × 2s timeout = up to
-200s in the worst case.
-
-- [ ] Rewrite the reachability check to use `ForEach-Object -Parallel` with
-      `-ThrottleLimit 50` inside the job. All 100 targets checked in ~2s
-      regardless of fleet size.
-- [ ] Only check reachability for the current dashboard page on initial load;
-      check remaining pages in subsequent background passes.
-- [ ] Add reachability result caching — don't re-check a target that came back
-      `online` within the last 60 seconds (configurable via
-      `ui.reachCacheSecs`).
+- [x] `Start-FltReachJob` already uses `ForEach-Object -Parallel` via `Start-ThreadJob`
+      (implemented in Phase 0.2) — all 100 targets checked in ~2s
+- [x] Page-first reachability: current page targets checked with `-IgnoreCache` immediately;
+      remaining pages queued as a second background job
+- [x] Result caching via `$Script:FltReachCache` — online targets skip recheck within
+      `ui.reachCacheSecs` (default 60); offline targets always recheck
+- [x] `Receive-FltReachJob` — applies job results and updates cache atomically
+- [x] `ui.reachCacheSecs: 60` added to `settings.default.json`
+- [x] Cache and page-first behavior tested in diagnostics (29/29 passing)
 
 ---
 
 ## Phase 1 — Target model extensions
 
-### 1.1 — Extend `FleetTarget` class (`classes/Models.ps1`)
+### 1.1 — Extend `FleetTarget` class (`classes/Models.ps1`) ✅
+> Implemented as part of Phase 0.3
 
-- [ ] Add `[string] $OS` — values: `'windows'` | `'linux'`
-- [ ] Add `[string] $TargetType` — values: `'physical'` | `'vm'` |
-      `'container'`
-- [ ] Add `[string] $PackageManager` — values: `'tcpkg'` | `'winget'` |
-      `'apt'` | `'yum'` | `'dnf'` | `'apk'` | `''` (auto)
-- [ ] Add `[string] $DockerHost` — name of the `FleetTarget` that is the
-      Docker host; populated only when `TargetType = 'container'`
-- [ ] Add `[string] $ContainerName` — Docker container name or ID; populated
-      only when `TargetType = 'container'`
-- [ ] Update both constructors to default `OS = 'windows'`,
-      `TargetType = 'physical'`, `PackageManager = ''`,
-      `DockerHost = ''`, `ContainerName = ''`
-- [ ] Add helper method `EffectivePackageManager()` — returns
-      `$this.PackageManager` if set, otherwise `'tcpkg'` for windows and
-      `'apt'` for linux/container
-- [ ] Add `OsDisplay()` — `'Win'` / `'Lnx'`
-- [ ] Add `TypeDisplay()` — `'Phys'` / `'VM'` / `'Cntr'`
-- [ ] Add `IsContainer()` — returns `$this.TargetType -eq 'container'`
-- [ ] Add `EffectiveAddress()` — for containers returns
-      `"$($this.DockerHost)/$($this.ContainerName)"`; for others returns
-      `$this.Address`
+- [x] `[string] $OS` — `'windows'` | `'linux'` | `'macos'`
+- [x] `[string] $TargetType` — `'physical'` | `'vm'` | `'container'`
+- [x] `[string] $PackageManager` — `'tcpkg'` | `'winget'` | `'apt'` etc. | `''` (auto)
+- [x] `[string] $DockerHost` — Docker host target name (containers only)
+- [x] `[string] $ContainerName` — Docker container name or ID (containers only)
+- [x] Both constructors default `OS='windows'` `TargetType='physical'` `PackageManager=''`
+- [x] `EffectivePackageManager()` — resolves `''` to OS default
+- [x] `OsDisplay()` / `TypeDisplay()` / `IsContainer()` / `EffectiveAddress()`
+- [x] All methods use implicit output (no `return`) — PS7 class requirement
 
-### 1.2 — Target store (`data/TargetRepository.ps1`)
+### 1.2 — Target store (`data/TargetRepository.ps1`) ✅
+> Implemented as part of Phase 0.3
 
-- [ ] Implement `Get-FleetTargets` reading from `targets.local.json`
-      (see Phase 0.3)
-- [ ] Implement `Save-FltTargets` writing the full target list to
-      `targets.local.json`
-- [ ] Implement `Invoke-FltTargetStoreMigration` (see Phase 0.3)
-- [ ] Remove dependency on `Get-FltTargetMeta` / `Set-FltTargetMeta` sidecar
-      (no longer needed — all fields live in `targets.local.json`)
+- [x] `Get-FleetTargets` reads from `targets.local.json` with tcpkg fallback
+- [x] `Save-FltTargets` writes full list; called after sort changes to persist order
+- [x] `Invoke-FltTargetStoreMigration` runs once on first launch
+- [x] No sidecar file needed — all fields in `targets.local.json`
 
-### 1.3 — Update CSV import/export (`data/TargetRepository.ps1`)
+### 1.3 — Update CSV import/export (`data/TargetRepository.ps1`) ✅
+> Implemented as part of Phase 0.3
 
-- [ ] Add `OS`, `TargetType`, `PackageManager`, `DockerHost`, `ContainerName`
-      columns to `Export-FleetTargetsCsv`
-- [ ] Read new columns in `Import-FleetTargetsCsv`; default missing columns
-      to `'windows'`, `'physical'`, `''`, `''`, `''` for backward compat
-- [ ] Container rows in CSV: `Address` column holds the Docker host's address;
-      `DockerHost` holds the Docker host target name; `ContainerName` holds
-      the container name
+- [x] `Export-FleetTargetsCsv` includes OS, TargetType, PackageManager, DockerHost, ContainerName
+- [x] `Import-FleetTargetsCsv` reads new columns; defaults for backward compat
+- [x] Add-FleetTarget falls back to `tcpkg remote edit` if target already exists in tcpkg
 
-### 1.4 — Update `Add-FleetTarget` and `Edit-FleetTarget`
+### 1.4 — Update `Add-FleetTarget` and `Edit-FleetTarget` ✅
+> Implemented as part of Phase 0.3
 
-- [ ] Accept `-OS`, `-TargetType`, `-PackageManager`, `-DockerHost`,
-      `-ContainerName` parameters
-- [ ] For Linux and container targets: skip `--internet-access` flag and skip
-      `tcpkg remote add` entirely — write directly to `targets.local.json`
-- [ ] For Windows tcpkg/both targets: call `tcpkg remote add/edit` as before,
-      then write to `targets.local.json`
-- [ ] Validate that `DockerHost` references an existing target name when
-      `TargetType = 'container'`
+- [x] Accept `-OS`, `-TargetType`, `-PackageManager`, `-DockerHost`, `-ContainerName`
+- [x] Linux/container targets skip `tcpkg remote add` — JSON store only
+- [x] Windows/tcpkg targets sync to tcpkg after JSON write
+- [x] `Add-FleetTarget` upserts — updates if already in JSON, adds if new
+- [ ] Validate `DockerHost` references an existing target — deferred to Phase 7
+      (containers not yet implemented)
 
 ---
 

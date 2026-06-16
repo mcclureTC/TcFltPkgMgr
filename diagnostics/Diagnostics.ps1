@@ -352,11 +352,10 @@ function Invoke-FltDiagnostics {
         }
     } catch { _Diag_Fail 'Throttle limits readable from config' $_.Exception.Message }
 
-    # Start-FltReachJob returns a job object without error
-    # Does not wait for TCP — just verifies the parallel job structure is valid
+    # Start-FltReachJob with -IgnoreCache forces a check
     try {
         $testTarget = [FleetTarget]::new('DiagTest','127.0.0.1',22,'admin',$false)
-        $job = Start-FltReachJob -Targets @($testTarget)
+        $job = Start-FltReachJob -Targets @($testTarget) -IgnoreCache
         if ($job -and $job.Id -gt 0) {
             _Diag_Pass "Start-FltReachJob creates parallel background job (id=$($job.Id))"
             Stop-Job   $job -ErrorAction SilentlyContinue
@@ -365,6 +364,30 @@ function Invoke-FltDiagnostics {
             _Diag_Fail 'Start-FltReachJob creates background job' "Got: $job"
         }
     } catch { _Diag_Fail 'Start-FltReachJob callable without error' $_.Exception.Message }
+
+    # Reachability cache: offline targets always rechecked; online within cache window skipped
+    try {
+        $saved = $Script:FltReachCache
+        $Script:FltReachCache = @{}
+        $tOn  = [FleetTarget]::new('CacheOn', '10.0.0.1',22,'admin',$false)
+        $tOff = [FleetTarget]::new('CacheOff','10.0.0.2',22,'admin',$false)
+        $tOn.Reachable  = 'online'
+        $tOff.Reachable = 'offline'
+        # Mark tOn as recently cached
+        $Script:FltReachCache['CacheOn'] = [DateTime]::UtcNow
+        $job2 = Start-FltReachJob -Targets @($tOn, $tOff)   # no -IgnoreCache
+        if ($null -ne $job2) {
+            Stop-Job   $job2 -ErrorAction SilentlyContinue
+            Remove-Job $job2 -Force -ErrorAction SilentlyContinue
+            _Diag_Pass 'Reachability cache: offline targets always rechecked'
+        } else {
+            _Diag_Fail 'Reachability cache: offline targets always rechecked' 'job was null — offline target was skipped'
+        }
+        $Script:FltReachCache = $saved
+    } catch {
+        $Script:FltReachCache = @{}
+        _Diag_Fail 'Reachability cache behavior' $_.Exception.Message
+    }
 
     try {
         if (Ensure-FltPoshSsh) {
@@ -388,7 +411,8 @@ function Invoke-FltDiagnostics {
         'Test-FltFeatureAvailable','Get-FltTcpkgExe',
         'Invoke-UiConfigMenu','_Save-UiCfgValue',
         'New-FltSortFilterState','Invoke-FltSort','Invoke-FltFilter',
-        'Get-FltSortHeader','Invoke-FltSortPicker','Invoke-FltFilterPicker'
+        'Get-FltSortHeader','Invoke-FltSortPicker','Invoke-FltFilterPicker',
+        'Start-FltReachJob','Receive-FltReachJob','Invoke-FltReloadTargets'
     )
     $missingFns = @($requiredFunctions | Where-Object { -not (Get-Command $_ -ErrorAction SilentlyContinue) })
     if ($missingFns.Count -eq 0) {

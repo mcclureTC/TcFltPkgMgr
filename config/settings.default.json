@@ -13,7 +13,8 @@
     "autoElevate":        false,
     "dashboardRefreshMs": 500,
     "displayBackend":     "ansi",
-    "dashboardPageSize":  20
+    "dashboardPageSize":  20,
+    "reachCacheSecs":     60
   },
   "log": {
     "retentionDays":  30,

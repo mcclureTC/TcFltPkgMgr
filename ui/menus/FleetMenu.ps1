@@ -6,17 +6,36 @@
 # =============================================================================
 
 # Start a background TCP reachability check for a list of targets.
-# Uses ForEach-Object -Parallel so all targets are checked simultaneously
-# rather than sequentially — critical at 100+ targets where sequential
-# checks with a 2s timeout would take up to 200s.
+# Skips targets that are cached as online within reachCacheSecs.
+# Uses ForEach-Object -Parallel so all targets are checked simultaneously.
 # Returns a Job object. Results are [pscustomobject]@{ Name; Reachable }.
 function Start-FltReachJob {
-    param([FleetTarget[]]$Targets)
-    $addrs    = @($Targets | ForEach-Object { [pscustomobject]@{ Name=$_.Name; Address=$_.Address; Port=$_.Port } })
+    param(
+        [FleetTarget[]] $Targets,
+        [switch]        $IgnoreCache   # force recheck even if cached
+    )
+    $cacheSecs = [int](Get-FltCfgValue 'ui' 'reachCacheSecs' 60)
+    $now       = [DateTime]::UtcNow
+
+    # Filter out recently confirmed online targets unless forced
+    $toCheck = if ($IgnoreCache -or -not $Script:FltReachCache) {
+        @($Targets)
+    } else {
+        @($Targets | Where-Object {
+            $cached = $Script:FltReachCache[$_.Name]
+            # Re-check if: not in cache, was offline/checking, or cache expired
+            -not $cached -or
+            $_.Reachable -ne 'online' -or
+            ($now - $cached).TotalSeconds -gt $cacheSecs
+        })
+    }
+
+    if ($toCheck.Count -eq 0) { return $null }   # all targets cached — no job needed
+
+    $addrs    = @($toCheck | ForEach-Object { [pscustomobject]@{ Name=$_.Name; Address=$_.Address; Port=$_.Port } })
     $throttle = [Math]::Min(50, [int](Get-FltCfgValue 'ssh' 'throttleLimit' 25))
 
     # ThreadJob runs in the same process — no serialization issues with pscustomobject arrays.
-    # ForEach-Object -Parallel checks all targets simultaneously rather than sequentially.
     Start-ThreadJob -ScriptBlock {
         param($addrs, $throttle)
         $addrs | ForEach-Object -Parallel {
@@ -34,7 +53,29 @@ function Start-FltReachJob {
     } -ArgumentList $addrs, $throttle
 }
 
-# Reload targets from tcpkg, preserve prior reachability state, start new check.
+# Apply reachability job results to targets and update the cache.
+function Receive-FltReachJob {
+    param([object]$ReachJob)
+    if (-not $ReachJob) { return }
+    $results = Receive-Job $ReachJob
+    $now     = [DateTime]::UtcNow
+    foreach ($r in $results) {
+        $tgt = $Script:FleetTargets | Where-Object { $_.Name -eq $r.Name } | Select-Object -First 1
+        if ($tgt) {
+            $tgt.Reachable = if ($r.Reachable) { 'online' } else { 'offline' }
+            # Update cache — only cache online results; offline targets always recheck
+            if (-not $Script:FltReachCache) { $Script:FltReachCache = @{} }
+            if ($r.Reachable) {
+                $Script:FltReachCache[$r.Name] = $now
+            } else {
+                $Script:FltReachCache.Remove($r.Name)
+            }
+        }
+    }
+    Remove-Job $ReachJob -Force
+}
+
+# Reload targets from JSON store, preserve prior reachability state, start new check.
 # Returns the new reachability job.
 function Invoke-FltReloadTargets {
     param([object]$ReachJob)
@@ -45,7 +86,7 @@ function Invoke-FltReloadTargets {
     $priorReach = @{}
     foreach ($t in $Script:FleetTargets) { $priorReach[$t.Name] = $t.Reachable }
 
-    # Reload fresh from tcpkg
+    # Reload fresh from JSON store
     $Script:FleetTargets = @(Get-FleetTargets -Silent)
 
     # Restore prior status so dashboard doesn't flash 'unknown'
@@ -53,20 +94,32 @@ function Invoke-FltReloadTargets {
         $t.Reachable = if ($priorReach.ContainsKey($t.Name)) { $priorReach[$t.Name] } else { 'checking' }
     }
 
-    # Mark all as 'checking' and kick off a new job
+    # Reset to page 0 on reload (sort/filter preserved)
+    $Script:FltDashPage = 0
+    # Mark all as 'checking' and kick off a new job (ignore cache on explicit reload)
     foreach ($t in $Script:FleetTargets) { $t.Reachable = 'checking' }
-    return Start-FltReachJob $Script:FleetTargets
+    return Start-FltReachJob $Script:FleetTargets -IgnoreCache
 }
 
 function Invoke-FleetMenu {
-    # Load fleet targets and start initial reachability check
+    # Load fleet targets
     $Script:FleetTargets       = @(Get-FleetTargets -Silent)
-    $names = ($Script:FleetTargets | ForEach-Object { $_.Name }) -join ', '
     $Script:FltMenuLastCmd     = ''
     $Script:FltMenuResultLines = @()
     $Script:FltDashPage        = 0
     # Sort/filter state persists — initialized in TcFltPkgMgr.ps1, not reset here
-    $reachJob                  = Start-FltReachJob $Script:FleetTargets
+
+    # Page-first reachability: check current page targets immediately,
+    # queue remaining pages as a second job (uses cache for non-page targets)
+    $pageSize     = [Math]::Max(1, [int](Get-FltCfgValue 'ui' 'dashboardPageSize' 20))
+    $pageTargets  = @($Script:FleetTargets | Select-Object -First $pageSize)
+    $restTargets  = @($Script:FleetTargets | Select-Object -Skip  $pageSize)
+
+    foreach ($t in $Script:FleetTargets) { $t.Reachable = 'checking' }
+    $reachJob     = Start-FltReachJob $pageTargets -IgnoreCache
+    $reachJobRest = if ($restTargets.Count -gt 0) {
+        Start-FltReachJob $restTargets   # respects cache for off-page targets
+    } else { $null }
 
     # Column definitions for sort/filter pickers
     $sortCols  = @('Name','Address','Port','Internet Access','Status')
@@ -95,30 +148,41 @@ function Invoke-FleetMenu {
         Write-Host -NoNewline '  Choice: '
     }
 
-    # Mark all targets as 'checking' while the background job runs
+    # Mark all targets as 'checking' while background jobs run
     foreach ($t in $Script:FleetTargets) { $t.Reachable = 'checking' }
     & $repaint
 
     while ($true) {
-        # Non-blocking input loop — polls reachability job while waiting for keypress
+        # Non-blocking input loop — polls reachability jobs while waiting for keypress
         $inputBuffer = ''
         while ($true) {
-            # Check reachability job
+            # Check page-first job (current page targets)
             if ($reachJob -and $reachJob.State -in @('Completed','Failed')) {
                 if ($reachJob.State -eq 'Completed') {
-                    $reachResults = Receive-Job $reachJob
-                    foreach ($r in $reachResults) {
-                        $tgt = $Script:FleetTargets | Where-Object { $_.Name -eq $r.Name } | Select-Object -First 1
-                        if ($tgt) { $tgt.Reachable = if ($r.Reachable) { 'online' } else { 'offline' } }
-                    }
-                    # Repaint dashboard then restore prompt and any typed chars
+                    Receive-FltReachJob $reachJob
                     Show-FleetDashboard -Targets $Script:FleetTargets -Page $Script:FltDashPage `
                         -LastCommand $Script:FltMenuLastCmd -ResultLines $Script:FltMenuResultLines `
                         -SortState $Script:FltTargetSort -FilterState $Script:FltTargetFilter
                     Write-Host -NoNewline "  Choice: $inputBuffer"
+                } else {
+                    Remove-Job $reachJob -Force
                 }
-                Remove-Job $reachJob -Force
                 $reachJob = $null
+            }
+
+            # Check rest-of-fleet job (off-page targets)
+            if ($reachJobRest -and $reachJobRest.State -in @('Completed','Failed')) {
+                if ($reachJobRest.State -eq 'Completed') {
+                    Receive-FltReachJob $reachJobRest
+                    # Only repaint if this page's targets were affected
+                    Show-FleetDashboard -Targets $Script:FleetTargets -Page $Script:FltDashPage `
+                        -LastCommand $Script:FltMenuLastCmd -ResultLines $Script:FltMenuResultLines `
+                        -SortState $Script:FltTargetSort -FilterState $Script:FltTargetFilter
+                    Write-Host -NoNewline "  Choice: $inputBuffer"
+                } else {
+                    Remove-Job $reachJobRest -Force
+                }
+                $reachJobRest = $null
             }
 
             # Check for keypress without blocking
@@ -134,8 +198,8 @@ function Invoke-FleetMenu {
                     $inputBuffer += $key.KeyChar
                     Write-Host -NoNewline $key.KeyChar
                 }
-            } elseif ($reachJob) {
-                # Only sleep while the background job is running
+            } elseif ($reachJob -or $reachJobRest) {
+                # Only sleep while background jobs are running
                 Start-Sleep -Milliseconds 50
             }
         }

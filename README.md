@@ -168,6 +168,8 @@ On Linux, menu options that require a local tcpkg installation are shown with a 
 
 The tool detects the operating system at startup and gates features accordingly via `Test-FltFeatureAvailable`.
 
+**Reachability caching:** The fleet dashboard checks TCP port 22 on each target to determine online/offline status. Targets confirmed online are cached for 60 seconds (configurable via `ui.reachCacheSecs`) so navigating between menus doesn't re-check targets unnecessarily. Offline targets are always re-checked. The current page of targets is checked first on startup, with remaining pages queued as a background job.
+
 ---
 
 ## Built-in Diagnostics
