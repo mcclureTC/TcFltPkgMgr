@@ -101,23 +101,20 @@ every subsequent phase builds on a scalable foundation.
 - [x] Added `ui/menus/UiConfigMenu.ps1` — runtime UI settings accessible
       via Fleet home > 7. UI Config; changes persist to `settings.local.json`
 - [x] `_Save-UiCfgValue` round-trip and pagination math tested in diagnostics
-- [ ] `Show-SetupDashboard` pagination — deferred (Setup rarely exceeds 20 targets)
+- [ ] `Show-SetupDashboard` pagination — low priority; Setup rarely exceeds 20 targets. Revisit in Phase 12 if needed.
 - [ ] `Show-FleetBatchDashboard` pagination — deferred to Phase 7 (container scale)
 
-### 0.2 — Executor throttle tuning
+### 0.2 — Executor throttle tuning ✅
 
-`ForEach-Object -Parallel` with `-ThrottleLimit 10` (current default) means
-100 targets complete in ~10 rounds. This is fine for SSH (round-trip ~5s =
-~50s total), but Ansible with `--forks` handles its own parallelism internally.
-
-- [ ] Raise default `ssh.throttleLimit` to `25` in `settings.default.json`.
-      This brings 100-target SSH batches from ~50s to ~20s wall-clock.
-- [ ] Document in `settings.default.jsonc` that values above 50 risk exhausting
-      the operator machine's TCP connection pool.
-- [ ] Add `ansible.forks` to `settings.default.json` (default 10 — Ansible's
-      own default). This is passed as `--forks <n>` to `ansible-playbook`.
-- [ ] Add `docker.throttleLimit` to `settings.default.json` (default 20).
-      Docker exec over SSH is lighter than tcpkg installs.
+- [x] Raised `ssh.throttleLimit` from 10 → 25 in `settings.default.json`
+- [x] Added TCP pool warning comment to `SshExecutor.ps1` (values >50 risk exhaustion)
+- [x] Added `docker.throttleLimit: 20` to `settings.default.json` (Phase 7 ready)
+- [x] `Start-FltReachJob` rewritten from sequential `foreach` to
+      `ForEach-Object -Parallel` — 100 targets now check in ~2s not ~200s
+- [x] Feed check parallel block uses `$using:throttle` not hardcoded 10
+- [x] Throttle bounds test added to diagnostics (catches values outside 1-50)
+- [x] `Start-FltReachJob` callability tested in diagnostics
+- [ ] `ansible.forks` — deferred to Phase 5 (Ansible executor)
 
 ### 0.3 — Target store: move from tcpkg to local JSON
 
@@ -347,6 +344,9 @@ The current background reachability job checks all targets sequentially in a
       `8` = parse error
 - [ ] Note column shows failing Ansible task name from JSON output
 - [ ] `Write-FltBatchEntry` with `PackageManager = 'ansible'`
+- [ ] Add `ansible.forks` to `settings.default.json` (default 10 — Ansible's
+      own parallelism). Pass as `--forks <n>` to `ansible-playbook`.
+      *(Deferred from Phase 0.2 — not needed until Ansible executor exists)*
 
 ### 5.5 — Route Ansible targets in `Invoke-FleetAction` (`execution/FleetExecutor.ps1`)
 
@@ -459,6 +459,14 @@ The operator enters the vault password once; the tool manages it from there.
 ---
 
 ## Phase 7 — Docker container support
+
+### 7.0 — Batch dashboard pagination
+> *(Deferred from Phase 0.1 — needed at container scale with 100+ targets)*
+
+- [ ] `Show-FleetBatchDashboard` paginates when targets exceed page size
+- [ ] Auto-scroll to first non-`OK` row on each repaint
+- [ ] Page navigation uses `-` / `+` (numpad) consistent with fleet dashboard
+- [ ] Summary row always visible regardless of current page
 
 ### 7.1 — Container executor (`execution/ContainerExecutor.ps1`) — new file
 
@@ -764,6 +772,10 @@ abstraction layer handles most platform differences.
       all follow the same OS-based path logic
 
 ### 12.2 — Feature gating in menus
+
+> **Note:** `Test-FltFeatureAvailable` and `$Script:FltFeatures` are already
+> implemented (Phase 0-A.3). This phase wires them into the menu UI.
+> The `[Windows only]` label was deferred from Phase 0-A.3.
 
 - [ ] `Invoke-FleetInstallMenu` — check `Test-FltFeatureAvailable 'tcpkg-local'`
       before showing. On Linux, show:

@@ -53,7 +53,11 @@ function Invoke-FltSshBatch {
         [System.Management.Automation.PSCredential] $Credential = $null,
         [string]        $KeyFile           = '',
         [int]           $TimeoutSecs       = 1800,
-        [int]           $ThrottleLimit     = 10,
+        # ThrottleLimit controls how many parallel SSH connections are opened simultaneously.
+        # Default matches ssh.throttleLimit in settings.default.json (25).
+        # Values above 50 risk exhausting the operator machine's TCP connection pool,
+        # particularly on Windows where ephemeral port exhaustion can occur under load.
+        [int]           $ThrottleLimit     = 25,
         [hashtable]     $InitialNotes      = $null,   # TargetName -> note to preserve in dict
         # Optional callback: receives the ConcurrentDictionary and is called every 500ms.
         # Use this to update a dashboard. If $null, progress is silent.

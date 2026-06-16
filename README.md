@@ -197,7 +197,11 @@ To view recent log entries from inside the tool: **Setup > 8. View command log**
 {
   "ssh": {
     "timeoutSeconds": 1800,   // per-target SSH timeout
-    "throttleLimit":  10      // max parallel SSH connections
+    "throttleLimit":  25      // max parallel SSH connections (keep ≤50 to avoid TCP pool exhaustion)
+  },
+  "docker": {
+    "throttleLimit": 20,      // max parallel docker exec connections
+    "logTailLines":  50       // lines shown by Container > View logs
   },
   "tcpkg": {
     "executablePath":  "tcpkg",                                       // local tcpkg command

@@ -6,26 +6,31 @@
 # =============================================================================
 
 # Start a background TCP reachability check for a list of targets.
+# Uses ForEach-Object -Parallel so all targets are checked simultaneously
+# rather than sequentially — critical at 100+ targets where sequential
+# checks with a 2s timeout would take up to 200s.
 # Returns a Job object. Results are [pscustomobject]@{ Name; Reachable }.
 function Start-FltReachJob {
     param([FleetTarget[]]$Targets)
-    $addrs = @($Targets | ForEach-Object { [pscustomobject]@{ Name=$_.Name; Address=$_.Address; Port=$_.Port } })
+    $addrs    = @($Targets | ForEach-Object { [pscustomobject]@{ Name=$_.Name; Address=$_.Address; Port=$_.Port } })
+    $throttle = [Math]::Min(50, [int](Get-FltCfgValue 'ssh' 'throttleLimit' 25))
+
     Start-Job -ScriptBlock {
-        param($addrs)
-        $results = @()
-        foreach ($t in $addrs) {
+        param($addrs, $throttle)
+        $results = $addrs | ForEach-Object -Parallel {
+            $t = $_
             try {
                 $tcp = [System.Net.Sockets.TcpClient]::new()
                 $ar  = $tcp.BeginConnect($t.Address, $t.Port, $null, $null)
                 $ok  = $ar.AsyncWaitHandle.WaitOne(2000, $false)
                 $tcp.Close()
-                $results += [pscustomobject]@{ Name = $t.Name; Reachable = $ok }
+                [pscustomobject]@{ Name = $t.Name; Reachable = $ok }
             } catch {
-                $results += [pscustomobject]@{ Name = $t.Name; Reachable = $false }
+                [pscustomobject]@{ Name = $t.Name; Reachable = $false }
             }
-        }
+        } -ThrottleLimit $throttle
         return $results
-    } -ArgumentList (,$addrs)
+    } -ArgumentList (,$addrs), $throttle
 }
 
 # Reload targets from tcpkg, preserve prior reachability state, start new check.

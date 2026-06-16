@@ -64,7 +64,7 @@ function Get-FltRemoteFeedStatus {
         } catch { $hasFlag = $false }
 
         [pscustomobject]@{ Name = $t.Name; HasFeed = $hasFlag }
-    } -ThrottleLimit 10
+    } -ThrottleLimit $using:throttle
 
     foreach ($f in $findings) { $result[$f.Name] = $f.HasFeed }
     return $result

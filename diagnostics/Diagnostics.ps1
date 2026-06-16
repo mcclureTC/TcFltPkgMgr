@@ -337,6 +337,35 @@ function Invoke-FltDiagnostics {
     } catch {
         _Diag_Fail 'Pagination math' $_.Exception.Message
     }
+
+    # Throttle limits are within safe operating bounds (Phase 0.2)
+    try {
+        $sshThrottle    = [int](Get-FltCfgValue 'ssh'    'throttleLimit' 25)
+        $dockerThrottle = [int](Get-FltCfgValue 'docker' 'throttleLimit' 20)
+        $errors = @()
+        if ($sshThrottle    -lt 1 -or $sshThrottle    -gt 50) { $errors += "ssh.throttleLimit=$sshThrottle (must be 1-50)" }
+        if ($dockerThrottle -lt 1 -or $dockerThrottle -gt 50) { $errors += "docker.throttleLimit=$dockerThrottle (must be 1-50)" }
+        if ($errors.Count -eq 0) {
+            _Diag_Pass "Throttle limits in safe range (ssh=$sshThrottle docker=$dockerThrottle)"
+        } else {
+            _Diag_Fail 'Throttle limits in safe range' ($errors -join '; ')
+        }
+    } catch { _Diag_Fail 'Throttle limits readable from config' $_.Exception.Message }
+
+    # Start-FltReachJob returns a job object without error
+    # Does not wait for TCP — just verifies the parallel job structure is valid
+    try {
+        $testTarget = [FleetTarget]::new('DiagTest','127.0.0.1',22,'admin',$false)
+        $job = Start-FltReachJob -Targets @($testTarget)
+        if ($job -and $job.Id -gt 0) {
+            _Diag_Pass "Start-FltReachJob creates parallel background job (id=$($job.Id))"
+            Stop-Job   $job -ErrorAction SilentlyContinue
+            Remove-Job $job -Force -ErrorAction SilentlyContinue
+        } else {
+            _Diag_Fail 'Start-FltReachJob creates background job' "Got: $job"
+        }
+    } catch { _Diag_Fail 'Start-FltReachJob callable without error' $_.Exception.Message }
+
     try {
         if (Ensure-FltPoshSsh) {
             _Diag_Pass 'Posh-SSH module available'
