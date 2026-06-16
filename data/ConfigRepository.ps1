@@ -121,6 +121,8 @@ function Get-FltProfilePath {
     return Join-Path $Script:FltConfigDir 'profiles.json'
 }
 
+# Load fleet profiles from profiles.json. Returns an empty array if the file
+# does not exist yet (profiles are optional).
 function Read-FltProfiles {
     $path = Get-FltProfilePath
     if (-not (Test-Path $path)) { return @() }
@@ -141,6 +143,7 @@ function Read-FltProfiles {
     }
 }
 
+# Persist fleet profiles to profiles.json in the config directory.
 function Save-FltProfiles {
     param([FleetProfile[]]$Profiles)
     $path = Get-FltProfilePath

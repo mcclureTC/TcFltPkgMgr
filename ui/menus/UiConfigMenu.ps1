@@ -75,6 +75,10 @@ function _Save-UiCfgValue {
     }
 }
 
+# UI settings screen (Fleet > 7. UI Config). Allows runtime changes to
+# display preferences that persist to settings.local.json immediately.
+# Currently manages: page size, display backend.
+# Future: color scheme, date/time format, column visibility.
 function Invoke-UiConfigMenu {
     $result = ''
 

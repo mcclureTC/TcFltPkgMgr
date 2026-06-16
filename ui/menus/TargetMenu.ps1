@@ -92,6 +92,8 @@ function Get-FltSources {
     } | Sort-Object Pri)
 }
 
+# Standalone Sources/Feeds screen. Shows all tcpkg sources with live state.
+# Allows enabling/disabling sources and adding Beckhoff presets or custom feeds.
 function Invoke-FleetSourceMenu {
     $sources = Get-FltSources
     $lastCmd = ''

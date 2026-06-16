@@ -22,6 +22,8 @@ function Repair-FltSourcePriorities {
     }
 }
 
+# Spawn a process with stdin piped from a string. Used for tcpkg commands that
+# require password input. Returns the process exit code. Sets $Script:FltLastCmd.
 function Invoke-FltWithStdin {
     param(
         [string]   $Exe,
@@ -53,6 +55,8 @@ function Invoke-FltWithStdin {
     return $proc.ExitCode
 }
 
+# Run a local tcpkg command and log it. In read-only mode, prints the command
+# without executing it. Returns the raw output ($null in read-only mode).
 function Invoke-FltTcpkg {
     param(
         [string[]] $ArgList,
@@ -86,6 +90,9 @@ function Invoke-FltTcpkg {
     return $raw
 }
 
+# Parse JSON from tcpkg output. Handles the version banner that tcpkg writes to
+# stderr (which appears as ErrorRecord objects in the pipeline) by filtering them out
+# before locating and parsing the JSON array.
 function ConvertFrom-FltTcpkgJson {
     param([object[]]$Raw)
     $text  = ($Raw | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] } |
@@ -158,8 +165,6 @@ function Save-FltTargets {
 # One-time migration: reads existing targets from tcpkg and writes them to
 # targets.local.json. Called automatically by Get-FleetTargets on first run.
 function Invoke-FltTargetStoreMigration {
-    $caller = (Get-PSCallStack | Select-Object -Skip 1 -First 3 | ForEach-Object { "$($_.Command):$($_.ScriptLineNumber)" }) -join ' → '
-    Add-Content -Path "$env:TEMP\tcflt_debug.txt" -Value "$(Get-Date -Format 'HH:mm:ss') MIGRATION CALLED from: $caller" -Encoding UTF8
     Write-Verbose "TcFltPkgMgr: Migrating targets from tcpkg to targets.local.json"
 
     $raw  = Invoke-FltTcpkg -ArgList @('remote','list','--as-json') -Silent
@@ -194,7 +199,6 @@ function Get-FleetTargets {
     param([switch]$Silent)
 
     $path = Get-FltTargetStorePath
-    Add-Content -Path "$env:TEMP\tcflt_debug.txt" -Value "$(Get-Date -Format 'HH:mm:ss') Get-FleetTargets: exists=$(Test-Path $path) path=$path" -Encoding UTF8
     if (-not (Test-Path $path)) {
         if (-not $Silent) {
             Write-Host '  First run: migrating targets from tcpkg to local store...' `
@@ -214,6 +218,8 @@ function Get-FleetTargets {
     }
 }
 
+# Quick TCP port check to determine if a target is reachable. Used by the
+# reachability background job. Returns $true if port accepts a connection.
 function Test-FleetTargetReachable {
     param([FleetTarget]$Target, [int]$TimeoutMs = 2000)
     try {
@@ -225,6 +231,8 @@ function Test-FleetTargetReachable {
     } catch { return $false }
 }
 
+# Update Reachable status on a list of FleetTarget objects using parallel TCP checks.
+# Modifies targets in place. Used internally by the reachability subsystem.
 function Update-FleetReachability {
     param([FleetTarget[]]$Targets)
     $results = $Targets | ForEach-Object -Parallel {
@@ -333,6 +341,8 @@ function Add-FleetTarget {
     return Save-FltTargets -Targets $targets
 }
 
+# Update an existing target in targets.local.json and (for Windows/tcpkg targets)
+# sync the change to tcpkg remote config. Pass only the fields to change.
 function Edit-FleetTarget {
     param(
         [string] $Name,
@@ -389,6 +399,8 @@ function Edit-FleetTarget {
     return Save-FltTargets -Targets $targets
 }
 
+# Remove a target from targets.local.json and (for Windows/tcpkg targets)
+# remove it from tcpkg remote config. Non-tcpkg targets are only removed from JSON.
 function Remove-FleetTarget {
     param([string]$Name)
 
@@ -409,6 +421,8 @@ function Remove-FleetTarget {
     return Save-FltTargets -Targets $remaining
 }
 
+# Toggle the InternetAccess flag on a target — both in tcpkg (for push-from-local
+# routing) and in targets.local.json. Called by the executor before/after pushing.
 function Set-FleetTargetInternetAccess {
     param([string]$Name, [bool]$Value)
     # Update tcpkg first (used by push-from-local path)
@@ -426,6 +440,9 @@ function Set-FleetTargetInternetAccess {
     return $true
 }
 
+# Ask tcpkg to verify a target's config registration. Tests that the stored
+# connection details are valid in tcpkg's database, NOT a live network check.
+# For live connectivity, use the TCP reachability check in FleetMenu.
 function Test-FleetTargetVerify {
     param([string]$Name)
     $raw = Invoke-FltTcpkg -ArgList @('remote','verify',$Name)
@@ -457,6 +474,9 @@ function Export-FleetTargetsCsv {
     return $targets.Count
 }
 
+# Import targets from a CSV file. New targets are added; existing targets are
+# updated if any fields changed. Windows/tcpkg targets also sync to tcpkg remote.
+# Returns a summary object with Added, Updated, Skipped, and Errors counts.
 function Import-FleetTargetsCsv {
     param(
         [string] $Path,

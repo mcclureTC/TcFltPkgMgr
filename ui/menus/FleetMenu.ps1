@@ -101,6 +101,10 @@ function Invoke-FltReloadTargets {
     return Start-FltReachJob $Script:FleetTargets -IgnoreCache
 }
 
+# The Fleet home screen — the application entry point after startup.
+# Shows all targets with reachability status. Handles sort, filter, pagination,
+# target selection (11+), and routes to all sub-menus (Install, Setup, etc.).
+# Manages two background reachability jobs: page-first and rest-of-fleet.
 function Invoke-FleetMenu {
     # Load fleet targets
     $Script:FleetTargets       = @(Get-FleetTargets -Silent)

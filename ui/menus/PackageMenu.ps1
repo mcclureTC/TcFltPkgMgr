@@ -73,6 +73,7 @@ function Invoke-FleetInstallMenu {
     _Invoke-FleetBatchAction -Action 'install' -PackageSpec $pkgSpec -FeedName $feedName
 }
 
+# Fleet upgrade flow: search → pick package → pick version → select targets → batch.
 function Invoke-FleetUpgradeMenu {
     Clear-Host
     Write-Host '  Fleet Upgrade' -ForegroundColor Cyan
@@ -91,6 +92,7 @@ function Invoke-FleetUpgradeMenu {
     _Invoke-FleetBatchAction -Action 'upgrade' -PackageSpec $pkg.Name.ToLower()
 }
 
+# Fleet uninstall flow: search installed packages → pick → select targets → batch.
 function Invoke-FleetUninstallMenu {
     Clear-Host
     Write-Host '  Fleet Uninstall' -ForegroundColor Cyan
