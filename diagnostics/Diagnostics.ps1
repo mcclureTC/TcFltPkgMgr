@@ -378,6 +378,7 @@ function Invoke-FltDiagnostics {
     $requiredFunctions = @(
         'Get-FleetTargets','Add-FleetTarget','Edit-FleetTarget','Remove-FleetTarget',
         'Import-FleetTargetsCsv','Export-FleetTargetsCsv',
+        'Save-FltTargets','Get-FltTargetStorePath','Invoke-FltTargetStoreMigration',
         'Invoke-FltTcpkg','Invoke-FltSshBatch','Invoke-FleetAction',
         'Get-FltSources','Repair-FltSourcePriorities',
         'Show-FleetDashboard','Show-SetupDashboard','Show-SourcesDashboard',
@@ -385,7 +386,9 @@ function Invoke-FltDiagnostics {
         'Get-FltStoredPassword','Set-FltStoredPassword','Remove-FltStoredPassword',
         'Resolve-FltPassword','Write-FltBatchEntry','Invoke-FltWithStdin',
         'Test-FltFeatureAvailable','Get-FltTcpkgExe',
-        'Invoke-UiConfigMenu','_Save-UiCfgValue'
+        'Invoke-UiConfigMenu','_Save-UiCfgValue',
+        'New-FltSortFilterState','Invoke-FltSort','Invoke-FltFilter',
+        'Get-FltSortHeader','Invoke-FltSortPicker','Invoke-FltFilterPicker'
     )
     $missingFns = @($requiredFunctions | Where-Object { -not (Get-Command $_ -ErrorAction SilentlyContinue) })
     if ($missingFns.Count -eq 0) {
@@ -395,7 +398,136 @@ function Invoke-FltDiagnostics {
             "Missing: $($missingFns -join ', ')"
     }
 
-    # ── Summary ────────────────────────────────────────────────────────────────
+    # ── Phase 0.3 — Target store and sort/filter ────────────────────────────────
+    _Diag_Section 'Target store and sort/filter (Phase 0.3)'
+
+    # New-FltSortFilterState returns correct default shape
+    try {
+        $state = New-FltSortFilterState
+        if ($state -is [hashtable] -and
+            $state.ContainsKey('SortColumn') -and
+            $state.ContainsKey('SortDesc') -and
+            $state.ContainsKey('FilterColumn') -and
+            $state.ContainsKey('FilterValue') -and
+            $state.SortColumn -eq '' -and
+            $state.SortDesc -eq $false) {
+            _Diag_Pass 'New-FltSortFilterState returns correct default shape'
+        } else {
+            _Diag_Fail 'New-FltSortFilterState returns correct default shape' "Got: $($state | ConvertTo-Json -Compress)"
+        }
+    } catch { _Diag_Fail 'New-FltSortFilterState' $_.Exception.Message }
+
+    # Invoke-FltSort — sorts by property ascending and descending
+    try {
+        $items = @(
+            [pscustomobject]@{ Name='Zebra';  Port=22 },
+            [pscustomobject]@{ Name='Alpha';  Port=80 },
+            [pscustomobject]@{ Name='Mango';  Port=443 }
+        )
+        $asc  = @(Invoke-FltSort -Items $items -Column 'Name' -Descending $false)
+        $desc = @(Invoke-FltSort -Items $items -Column 'Name' -Descending $true)
+        if ($asc[0].Name -eq 'Alpha' -and $asc[2].Name -eq 'Zebra' -and
+            $desc[0].Name -eq 'Zebra' -and $desc[2].Name -eq 'Alpha') {
+            _Diag_Pass 'Invoke-FltSort: ascending and descending by Name correct'
+        } else {
+            _Diag_Fail 'Invoke-FltSort: sort order' "asc=$($asc.Name -join ',') desc=$($desc.Name -join ',')"
+        }
+    } catch { _Diag_Fail 'Invoke-FltSort' $_.Exception.Message }
+
+    # Invoke-FltFilter — case-insensitive contains match
+    try {
+        $items = @(
+            [pscustomobject]@{ Name='PC-Online';  Reachable='online' },
+            [pscustomobject]@{ Name='PC-Offline'; Reachable='offline' },
+            [pscustomobject]@{ Name='PC-Check';   Reachable='checking' }
+        )
+        $filtered = @(Invoke-FltFilter -Items $items -Column 'Reachable' -Value 'online')
+        if ($filtered.Count -eq 1 -and $filtered[0].Name -eq 'PC-Online') {
+            _Diag_Pass 'Invoke-FltFilter: filters to matching items only'
+        } else {
+            _Diag_Fail 'Invoke-FltFilter: filter result' "Count=$($filtered.Count) Names=$($filtered.Name -join ',')"
+        }
+    } catch { _Diag_Fail 'Invoke-FltFilter' $_.Exception.Message }
+
+    # Get-FltSortHeader — appends arrow indicator when column is active
+    try {
+        $state = New-FltSortFilterState
+        $state.SortColumn = 'Name'
+        $state.SortDesc   = $false
+        $ascHeader  = Get-FltSortHeader 'Target' 'Name' $state
+        $state.SortDesc = $true
+        $descHeader = Get-FltSortHeader 'Target' 'Name' $state
+        $noHeader   = Get-FltSortHeader 'Address' 'Address' $state  # different column
+        if ($ascHeader -eq 'Target ▲' -and $descHeader -eq 'Target ▼' -and $noHeader -eq 'Address') {
+            _Diag_Pass 'Get-FltSortHeader: correct indicators for active/inactive/asc/desc'
+        } else {
+            _Diag_Fail 'Get-FltSortHeader: indicators' "asc='$ascHeader' desc='$descHeader' other='$noHeader'"
+        }
+    } catch { _Diag_Fail 'Get-FltSortHeader' $_.Exception.Message }
+
+    # Get-FltTargetStorePath — returns non-empty path in config dir
+    try {
+        $storePath = Get-FltTargetStorePath
+        $expectedDir = $Script:FltConfigDir
+        if ($storePath -and $storePath.StartsWith($expectedDir) -and $storePath.EndsWith('targets.local.json')) {
+            _Diag_Pass "Get-FltTargetStorePath: '$storePath'"
+        } else {
+            _Diag_Fail 'Get-FltTargetStorePath: path in config dir' "Got: '$storePath'"
+        }
+    } catch { _Diag_Fail 'Get-FltTargetStorePath' $_.Exception.Message }
+
+    # FleetTarget serialization round-trip via _Target-ToHashtable / _Target-FromHashtable
+    try {
+        $orig = [FleetTarget]::new('RoundTripTest','10.0.0.99',2222,'admin',$true)
+        $orig.OS          = 'linux'
+        $orig.TargetType  = 'vm'
+        $orig.PackageManager = 'apt'
+        $ht   = _Target-ToHashtable $orig
+        $back = _Target-FromHashtable $ht
+        $errors = @()
+        if ($back.Name    -ne 'RoundTripTest') { $errors += "Name='$($back.Name)'" }
+        if ($back.Address -ne '10.0.0.99')     { $errors += "Address='$($back.Address)'" }
+        if ($back.Port    -ne 2222)            { $errors += "Port=$($back.Port)" }
+        if ($back.OS      -ne 'linux')         { $errors += "OS='$($back.OS)'" }
+        if ($back.TargetType -ne 'vm')         { $errors += "TargetType='$($back.TargetType)'" }
+        if ($back.PackageManager -ne 'apt')    { $errors += "PackageManager='$($back.PackageManager)'" }
+        if ($errors.Count -eq 0) {
+            _Diag_Pass 'FleetTarget serialization round-trip (ToHashtable → FromHashtable)'
+        } else {
+            _Diag_Fail 'FleetTarget serialization round-trip' ($errors -join ', ')
+        }
+    } catch { _Diag_Fail 'FleetTarget serialization round-trip' $_.Exception.Message }
+
+    # Save-FltTargets / Get-FleetTargets JSON round-trip
+    # Uses a temp path to avoid touching the real targets.local.json
+    try {
+        $realPath  = Get-FltTargetStorePath
+        $tempPath  = $realPath + '.diag_test'
+        $testTargets = @(
+            [FleetTarget]::new('DiagTarget1','192.168.1.1',22,'admin',$true),
+            [FleetTarget]::new('DiagTarget2','192.168.1.2',22,'admin',$false)
+        )
+        # Temporarily redirect store path
+        $testTargets | ForEach-Object { _Target-ToHashtable $_ } |
+            ConvertTo-Json -Depth 5 |
+            Set-Content -Path $tempPath -Encoding UTF8 -Force
+
+        $loaded = @(Get-Content $tempPath -Raw -Encoding UTF8 |
+            ConvertFrom-Json |
+            ForEach-Object { _Target-FromHashtable $_ })
+
+        Remove-Item $tempPath -Force -ErrorAction SilentlyContinue
+
+        if ($loaded.Count -eq 2 -and
+            $loaded[0].Name -eq 'DiagTarget1' -and
+            $loaded[1].Name -eq 'DiagTarget2' -and
+            $loaded[0].InternetAccess -eq $true -and
+            $loaded[1].InternetAccess -eq $false) {
+            _Diag_Pass 'Target JSON store round-trip: save and reload correct'
+        } else {
+            _Diag_Fail 'Target JSON store round-trip' "Count=$($loaded.Count) Names=$($loaded.Name -join ',')"
+        }
+    } catch { _Diag_Fail 'Target JSON store round-trip' $_.Exception.Message }
     Write-Host ''
     Write-Host "  $('-' * 64)" -ForegroundColor DarkGray
     $total = $Script:_diagPass + $Script:_diagFail + $Script:_diagWarn

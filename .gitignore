@@ -9,6 +9,9 @@ config/credentials.local.enc
 config/credentials.key
 config/target-meta.local.json
 
+# Target store — machine-specific fleet configuration
+config/targets.local.json
+
 # Command logs — operational data, not source code
 logs/
 
@@ -20,3 +23,6 @@ logs/
 
 # PowerShell temp files
 *.tmp
+
+# Debug logs — never commit
+debug.log

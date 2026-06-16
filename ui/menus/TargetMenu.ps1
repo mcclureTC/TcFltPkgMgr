@@ -357,29 +357,115 @@ function Invoke-ProfileMenu {
 # =============================================================================
 
 function Invoke-SetupMenu {
-    $result  = ''
-    $lastCmd = ''
-    $mode    = 'targets'   # 'targets' or 'sources'
+    $result      = ''
+    $lastCmd     = ''
+    $mode        = 'targets'
+
+    # Column definitions vary by mode
+    $targetCols  = @('Name','Address','Port','Internet Access')
+    $targetProps = @('Name','Address','Port','InternetAccess')
+    $sourceCols  = @('Priority','Name','State')
+    $sourceProps = @('Pri','Name','State')
+
+    $repaint = {
+        # Use persistent script-scope sort/filter state
+        $sortState   = if ($mode -eq 'sources') { $Script:FltSourcesSort   } else { $Script:FltTargetSort   }
+        $filterState = if ($mode -eq 'sources') { $Script:FltSourcesFilter } else { $Script:FltTargetFilter }
+        Show-SetupDashboard -Mode $mode -Items $items -Result $result -LastCmd $lastCmd `
+            -SortState $sortState -FilterState $filterState
+    }
 
     while ($true) {
-        # Fetch fresh data for the dashboard
+        # Fetch fresh data
         $items = if ($mode -eq 'sources') {
             @(Get-FltSources)
         } else {
             @($Script:FleetTargets)
         }
 
-        Show-SetupDashboard -Mode $mode -Items $items -Result $result -LastCmd $lastCmd
+        & $repaint
         $result  = ''
         $lastCmd = ''
 
         $choice = (Read-Host '  Choice').Trim()
         if ($choice -eq '0') { return }
 
-        # 1/2/3 → target mode
-        if ($choice -in @('1','2','3')) { $mode = 'targets' }
-        # 4 → source mode
+        # Sort/filter
+        if ($choice -eq '*') {
+            $cols  = if ($mode -eq 'sources') { $sourceCols }  else { $targetCols }
+            $props = if ($mode -eq 'sources') { $sourceProps } else { $targetProps }
+            $activeSortState = if ($mode -eq 'sources') { $Script:FltSourcesSort } else { $Script:FltTargetSort }
+            Invoke-FltSortPicker -Columns $cols -Properties $props -State $activeSortState | Out-Null
+            # Persist new sort order to targets.local.json (targets only — sources managed by tcpkg)
+            if ($mode -ne 'sources' -and $Script:FltTargetSort.SortColumn) {
+                $sorted = @(Invoke-FltSort -Items $Script:FleetTargets `
+                    -Column $Script:FltTargetSort.SortColumn -Descending $Script:FltTargetSort.SortDesc)
+                Save-FltTargets -Targets $sorted | Out-Null
+                $Script:FleetTargets = $sorted
+            }
+            continue
+        }
+        if ($choice -eq '/') {
+            $cols  = if ($mode -eq 'sources') { $sourceCols }  else { $targetCols }
+            $props = if ($mode -eq 'sources') { $sourceProps } else { $targetProps }
+            $activeFilterState = if ($mode -eq 'sources') { $Script:FltSourcesFilter } else { $Script:FltTargetFilter }
+            Invoke-FltFilterPicker -Columns $cols -Properties $props -State $activeFilterState | Out-Null
+            continue
+        }
+
+        # 1/2/3 → target mode; 4 → source mode
+        if ($choice -in @('1','2','3') -or ($choice -match '^\d+$' -and [int]$choice -ge 11)) {
+            $mode = 'targets'
+        }
         if ($choice -eq '4') { $mode = 'sources' }
+
+        # 11+ → select a target for Verify/Edit/Remove (from sorted/filtered display)
+        if ($choice -match '^\d+$' -and [int]$choice -ge 11) {
+            # Build sorted/filtered display to get correct target
+            $activeSortState   = if ($mode -eq 'sources') { $Script:FltSourcesSort   } else { $Script:FltTargetSort   }
+            $activeFilterState = if ($mode -eq 'sources') { $Script:FltSourcesFilter } else { $Script:FltTargetFilter }
+            $display = if ($activeFilterState.FilterColumn) {
+                @(Invoke-FltFilter -Items $items -Column $activeFilterState.FilterColumn -Value $activeFilterState.FilterValue)
+            } else { @($items) }
+            if ($activeSortState.SortColumn) {
+                $display = @(Invoke-FltSort -Items $display -Column $activeSortState.SortColumn -Descending $activeSortState.SortDesc)
+            }
+            $idx = [int]$choice - 11
+            if ($idx -ge 0 -and $idx -lt $display.Count) {
+                $tgt = $display[$idx]
+                $result = "$($tgt.Name)  ($($tgt.Address))  — enter action for Config:"
+                Show-SetupDashboard -Mode 'targets' -Items $items -Result $result `
+                    -SortState $activeSortState -FilterState $activeFilterState
+                Write-Host '  1. Verify   2. Edit   3. Remove   0. Cancel' -ForegroundColor Cyan
+                $verb = (Read-Host '  Action').Trim()
+
+                if ($verb -eq '1') {
+                    $ok = Test-FleetTargetVerify -Name $tgt.Name
+                    $result = if ($ok) { "Verified: $($tgt.Name) — OK" } else { "Verify FAILED: $($tgt.Name)" }
+                } elseif ($verb -eq '2') {
+                    Invoke-TargetMenu -Target $tgt
+                    $Script:FleetTargets = @(Get-FleetTargets -Silent)
+                    $result = "Updated: $($tgt.Name)"
+                } elseif ($verb -eq '3') {
+                    Show-SetupDashboard -Mode 'targets' -Items $targetItems `
+                        -Result "Remove '$($tgt.Name)'?"
+                    Write-Host '  1. Yes   0. No' -ForegroundColor Cyan
+                    $confirm = (Read-Host '  Confirm').Trim()
+                    if ($confirm -eq '1') {
+                        $ok = Remove-FleetTarget -Name $tgt.Name
+                        $Script:FleetTargets = @(Get-FleetTargets -Silent)
+                        $result = if ($ok) { "Removed: $($tgt.Name)" } else { "Remove failed: $($tgt.Name)" }
+                    } else {
+                        $result = 'Remove cancelled.'
+                    }
+                } else {
+                    $result = ''
+                }
+            } else {
+                $result = "No target at position $choice — $($display.Count) targets shown"
+            }
+            continue
+        }
 
         if ($choice -eq '1') {
             Invoke-TargetMenu

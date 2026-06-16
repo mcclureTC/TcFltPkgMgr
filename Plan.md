@@ -116,29 +116,26 @@ every subsequent phase builds on a scalable foundation.
 - [x] `Start-FltReachJob` callability tested in diagnostics
 - [ ] `ansible.forks` — deferred to Phase 5 (Ansible executor)
 
-### 0.3 — Target store: move from tcpkg to local JSON
+### 0.3 — Target store: move from tcpkg to local JSON ✅
 
-With 100 targets, `tcpkg remote list --as-json` on every menu open becomes
-slow (~0.6s × every navigation). More importantly, Docker containers cannot
-be registered in tcpkg at all (no `tcpkg remote add` equivalent).
-
-- [ ] Create `config/targets.local.json` as the primary target store.
-      Schema mirrors the existing `FleetTarget` fields plus the new meta
-      fields from Phase 1. Gitignored.
-- [ ] `Get-FleetTargets` reads from `targets.local.json` first; falls back
-      to `tcpkg remote list` if the file does not exist (backward compat).
-- [ ] `Add-FleetTarget`, `Edit-FleetTarget`, `Remove-FleetTarget` write to
-      `targets.local.json`. For Windows targets with `PackageManager = 'tcpkg'`
-      or `'both'`, also call `tcpkg remote add/edit/remove` to keep tcpkg's
-      own store in sync (needed for `tcpkg -r` push operations).
-- [ ] `Import-FleetTargetsCsv` writes to `targets.local.json` directly.
-      No longer iterates `tcpkg remote add` for every row — only calls tcpkg
-      for Windows/tcpkg targets.
-- [ ] This is the only store for Linux targets and container targets.
-      tcpkg never hears about them.
-- [ ] Add a migration function `Invoke-FltTargetStoreMigration` that, on first
-      run with the new code, reads existing targets from tcpkg and writes them
-      to `targets.local.json` automatically.
+- [x] `config/targets.local.json` — primary target store, all target types (gitignored)
+- [x] `Get-FleetTargets` reads from JSON; falls back to `tcpkg remote list` on
+      first run and migrates automatically via `Invoke-FltTargetStoreMigration`
+- [x] `Add/Edit/Remove-FleetTarget` write to JSON first; also sync tcpkg for
+      Windows/tcpkg targets (needed for push-from-local)
+- [x] `Import/Export-FleetTargetsCsv` includes new OS/TargetType/PackageManager columns
+- [x] Linux and container targets stored in JSON only — tcpkg never involved
+- [x] `FleetTarget` class extended with `OS`, `TargetType`, `PackageManager`,
+      `DockerHost`, `ContainerName` fields and helper methods
+- [x] Add/Edit/Remove accessible from both Fleet (11+) and Setup (11+) with
+      consistent `— enter action for Config:` prompt
+- [x] Sort and filter added to Fleet and Setup dashboards (`*` / `/` keys)
+- [x] Sort order persisted to `targets.local.json` immediately on change
+- [x] Sort/filter state shared across Fleet and Setup (Option C — always in sync)
+- [x] Filter shows active state in nav row: `[Filter: col='val']  N→M targets`
+- [x] Sort/filter tested in diagnostics (7 new tests, 28/28 passing)
+- [x] `$using:ctx` context object pattern used in `ForEach-Object -Parallel`
+      to avoid scope issues in `Get-FltRemoteFeedStatus`
 
 ### 0.4 — Reachability check at scale
 

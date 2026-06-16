@@ -15,9 +15,11 @@ function Start-FltReachJob {
     $addrs    = @($Targets | ForEach-Object { [pscustomobject]@{ Name=$_.Name; Address=$_.Address; Port=$_.Port } })
     $throttle = [Math]::Min(50, [int](Get-FltCfgValue 'ssh' 'throttleLimit' 25))
 
-    Start-Job -ScriptBlock {
+    # ThreadJob runs in the same process — no serialization issues with pscustomobject arrays.
+    # ForEach-Object -Parallel checks all targets simultaneously rather than sequentially.
+    Start-ThreadJob -ScriptBlock {
         param($addrs, $throttle)
-        $results = $addrs | ForEach-Object -Parallel {
+        $addrs | ForEach-Object -Parallel {
             $t = $_
             try {
                 $tcp = [System.Net.Sockets.TcpClient]::new()
@@ -28,9 +30,8 @@ function Start-FltReachJob {
             } catch {
                 [pscustomobject]@{ Name = $t.Name; Reachable = $false }
             }
-        } -ThrottleLimit $throttle
-        return $results
-    } -ArgumentList (,$addrs), $throttle
+        } -ThrottleLimit $using:throttle
+    } -ArgumentList $addrs, $throttle
 }
 
 # Reload targets from tcpkg, preserve prior reachability state, start new check.
@@ -60,16 +61,43 @@ function Invoke-FltReloadTargets {
 function Invoke-FleetMenu {
     # Load fleet targets and start initial reachability check
     $Script:FleetTargets       = @(Get-FleetTargets -Silent)
+    $names = ($Script:FleetTargets | ForEach-Object { $_.Name }) -join ', '
     $Script:FltMenuLastCmd     = ''
     $Script:FltMenuResultLines = @()
     $Script:FltDashPage        = 0
+    # Sort/filter state persists — initialized in TcFltPkgMgr.ps1, not reset here
     $reachJob                  = Start-FltReachJob $Script:FleetTargets
+
+    # Column definitions for sort/filter pickers
+    $sortCols  = @('Name','Address','Port','Internet Access','Status')
+    $sortProps = @('Name','Address','Port','InternetAccess','Reachable')
+
+    # Helper: repaint with current sort/filter/page state
+    # Also updates $Script:FltDisplayTargets — the sorted+filtered view used for selection
+    $repaint = {
+        # Compute the sorted+filtered display order
+        $display = if ($Script:FltTargetFilter.FilterColumn) {
+            @(Invoke-FltFilter -Items $Script:FleetTargets `
+                -Column $Script:FltTargetFilter.FilterColumn `
+                -Value  $Script:FltTargetFilter.FilterValue)
+        } else { @($Script:FleetTargets) }
+
+        if ($Script:FltTargetSort.SortColumn) {
+            $display = @(Invoke-FltSort -Items $display `
+                -Column $Script:FltTargetSort.SortColumn `
+                -Descending $Script:FltTargetSort.SortDesc)
+        }
+        $Script:FltDisplayTargets = $display
+
+        Show-FleetDashboard -Targets $Script:FleetTargets -Page $Script:FltDashPage `
+            -LastCommand $Script:FltMenuLastCmd -ResultLines $Script:FltMenuResultLines `
+            -SortState $Script:FltTargetSort -FilterState $Script:FltTargetFilter
+        Write-Host -NoNewline '  Choice: '
+    }
 
     # Mark all targets as 'checking' while the background job runs
     foreach ($t in $Script:FleetTargets) { $t.Reachable = 'checking' }
-    Show-FleetDashboard -Targets $Script:FleetTargets -Page $Script:FltDashPage `
-        -LastCommand $Script:FltMenuLastCmd -ResultLines $Script:FltMenuResultLines
-    Write-Host -NoNewline '  Choice: '
+    & $repaint
 
     while ($true) {
         # Non-blocking input loop — polls reachability job while waiting for keypress
@@ -85,7 +113,8 @@ function Invoke-FleetMenu {
                     }
                     # Repaint dashboard then restore prompt and any typed chars
                     Show-FleetDashboard -Targets $Script:FleetTargets -Page $Script:FltDashPage `
-                        -LastCommand $Script:FltMenuLastCmd -ResultLines $Script:FltMenuResultLines
+                        -LastCommand $Script:FltMenuLastCmd -ResultLines $Script:FltMenuResultLines `
+                        -SortState $Script:FltTargetSort -FilterState $Script:FltTargetFilter
                     Write-Host -NoNewline "  Choice: $inputBuffer"
                 }
                 Remove-Job $reachJob -Force
@@ -113,33 +142,50 @@ function Invoke-FleetMenu {
         Write-Host ''   # newline after Enter
         $choice = $inputBuffer.Trim()
 
-        $n        = $Script:FleetTargets.Count
+        $n        = if ($Script:FltDisplayTargets) { $Script:FltDisplayTargets.Count } else { $Script:FleetTargets.Count }
         $pageSize = [Math]::Max(1, [int](Get-FltCfgValue 'ui' 'dashboardPageSize' 20))
         $maxPage  = [Math]::Max(0, [Math]::Ceiling($n / $pageSize) - 1)
+
+        # Sort picker — *
+        if ($choice -eq '*') {
+            Invoke-FltSortPicker -Columns $sortCols -Properties $sortProps -State $Script:FltTargetSort | Out-Null
+            $Script:FltDashPage = 0
+            # Persist the new sort order to targets.local.json
+            if ($Script:FltTargetSort.SortColumn) {
+                $sorted = @(Invoke-FltSort -Items $Script:FleetTargets `
+                    -Column $Script:FltTargetSort.SortColumn -Descending $Script:FltTargetSort.SortDesc)
+                Save-FltTargets -Targets $sorted | Out-Null
+                $Script:FleetTargets = $sorted
+            }
+            & $repaint
+            continue
+        }
+
+        # Filter picker — /
+        if ($choice -eq '/') {
+            Invoke-FltFilterPicker -Columns $sortCols -Properties $sortProps -State $Script:FltTargetFilter | Out-Null
+            $Script:FltDashPage = 0
+            & $repaint
+            continue
+        }
 
         # Page navigation — numpad - (prev) and + (next)
         if ($choice -eq '-') {
             $Script:FltDashPage = [Math]::Max(0, $Script:FltDashPage - 1)
             $Script:FltMenuResultLines = @()
-            Show-FleetDashboard -Targets $Script:FleetTargets -Page $Script:FltDashPage `
-                -LastCommand $Script:FltMenuLastCmd -ResultLines $Script:FltMenuResultLines
-            Write-Host -NoNewline '  Choice: '
+            & $repaint
             continue
         }
         if ($choice -eq '+') {
             $Script:FltDashPage = [Math]::Min($maxPage, $Script:FltDashPage + 1)
             $Script:FltMenuResultLines = @()
-            Show-FleetDashboard -Targets $Script:FleetTargets -Page $Script:FltDashPage `
-                -LastCommand $Script:FltMenuLastCmd -ResultLines $Script:FltMenuResultLines
-            Write-Host -NoNewline '  Choice: '
+            & $repaint
             continue
         }
 
-        if ($choice -notmatch '^\d+$' -and $choice -notin @('-','+')) {
-            $Script:FltMenuResultLines = @('Please enter a number, - (prev page), or + (next page).')
-            Show-FleetDashboard -Targets $Script:FleetTargets -Page $Script:FltDashPage `
-                -LastCommand $Script:FltMenuLastCmd -ResultLines $Script:FltMenuResultLines
-            Write-Host -NoNewline '  Choice: '
+        if ($choice -notmatch '^\d+$' -and $choice -notin @('-','+','*','/')) {
+            $Script:FltMenuResultLines = @('Please enter a number, - (prev page), + (next), * (sort), / (filter).')
+            & $repaint
             continue
         }
 
@@ -151,15 +197,15 @@ function Invoke-FleetMenu {
             return
         }
 
-        # 11..10+n — target selected: global numbering, works across all pages
+        # 11..10+n — target selected: index into display order (sorted/filtered)
         if ($num -ge 11 -and $num -le (10 + $n)) {
-            $tgt = $Script:FleetTargets[$num - 11]
+            $tgt = $Script:FltDisplayTargets[$num - 11]
             $Script:FltMenuResultLines = @(
-                "$($tgt.Name)  ($($tgt.Address))  Internet: $(if ($tgt.InternetAccess) {'Yes'} else {'No'})",
+                "$($tgt.Name)  ($($tgt.Address))  — enter action for Config:",
                 '1. Verify   2. Edit   3. Remove   0. Cancel'
             )
-            Show-FleetDashboard -Targets $Script:FleetTargets -Page $Script:FltDashPage `
-                -LastCommand $Script:FltMenuLastCmd -ResultLines $Script:FltMenuResultLines
+            & $repaint
+            Write-Host ''
             $verb = (Read-Host '  Action').Trim()
 
             if ($verb -eq '1') {
@@ -175,9 +221,7 @@ function Invoke-FleetMenu {
 
             } elseif ($verb -eq '3') {
                 $Script:FltMenuResultLines = @("Remove '$($tgt.Name)'?  1. Yes  0. No")
-                Show-FleetDashboard -Targets $Script:FleetTargets -Page $Script:FltDashPage `
-                    -LastCommand $Script:FltMenuLastCmd -ResultLines $Script:FltMenuResultLines
-                Write-Host -NoNewline '  Choice: '
+                & $repaint
                 $confirm = $null
                 while (-not $confirm) {
                     if ([Console]::KeyAvailable) { $confirm = [Console]::ReadKey($true).KeyChar }
@@ -196,9 +240,7 @@ function Invoke-FleetMenu {
                 $Script:FltMenuResultLines = @()
             }
 
-            Show-FleetDashboard -Targets $Script:FleetTargets -Page $Script:FltDashPage `
-                -LastCommand $Script:FltMenuLastCmd -ResultLines $Script:FltMenuResultLines
-            Write-Host -NoNewline '  Choice: '
+            & $repaint
             continue
         }
 
@@ -215,8 +257,6 @@ function Invoke-FleetMenu {
             $Script:FltMenuResultLines = @("Enter 11-$(10+$n) for a target, 1-8 for operations, 0 to exit.")
         }
 
-        Show-FleetDashboard -Targets $Script:FleetTargets -Page $Script:FltDashPage `
-            -LastCommand $Script:FltMenuLastCmd -ResultLines $Script:FltMenuResultLines
-        Write-Host -NoNewline '  Choice: '
+        & $repaint
     }
 }

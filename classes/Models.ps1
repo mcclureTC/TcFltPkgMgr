@@ -11,7 +11,22 @@ class FleetTarget {
     [bool]   $InternetAccess
     [string] $Reachable       # 'checking' | 'online' | 'offline' | 'unknown'
 
-    FleetTarget() { $this.Port = 22; $this.Reachable = 'unknown' }
+    # Phase 1 — extended fields for multi-OS / container fleet support
+    [string] $OS              # 'windows' | 'linux' | 'macos'
+    [string] $TargetType      # 'physical' | 'vm' | 'container'
+    [string] $PackageManager  # 'tcpkg' | 'winget' | 'both' | 'apt' | 'yum' | 'dnf' | 'apk' | ''
+    [string] $DockerHost      # name of the FleetTarget that is the Docker host (containers only)
+    [string] $ContainerName   # Docker container name or ID (containers only)
+
+    FleetTarget() {
+        $this.Port          = 22
+        $this.Reachable     = 'unknown'
+        $this.OS            = 'windows'
+        $this.TargetType    = 'physical'
+        $this.PackageManager = ''
+        $this.DockerHost    = ''
+        $this.ContainerName = ''
+    }
 
     FleetTarget([string]$Name, [string]$Address, [int]$Port,
                 [string]$User, [bool]$InternetAccess) {
@@ -21,6 +36,50 @@ class FleetTarget {
         $this.User           = $User
         $this.InternetAccess = $InternetAccess
         $this.Reachable      = 'unknown'
+        $this.OS             = 'windows'
+        $this.TargetType     = 'physical'
+        $this.PackageManager = ''
+        $this.DockerHost     = ''
+        $this.ContainerName  = ''
+    }
+
+    # Returns the effective package manager — resolves empty string to OS default
+    EffectivePackageManager() {
+        if ($this.PackageManager -and $this.PackageManager -ne '') {
+            $this.PackageManager
+        } elseif ($this.OS -eq 'windows') {
+            'tcpkg'
+        } else {
+            'apt'
+        }
+    }
+
+    # Returns a short OS display string for dashboard columns
+    OsDisplay() {
+        if ($this.OS -eq 'linux')  { 'Lnx' }
+        elseif ($this.OS -eq 'macos')  { 'Mac' }
+        else { 'Win' }
+    }
+
+    # Returns a short type display string for dashboard columns
+    TypeDisplay() {
+        if ($this.TargetType -eq 'vm')        { 'VM'   }
+        elseif ($this.TargetType -eq 'container') { 'Cntr' }
+        else { 'Phys' }
+    }
+
+    # Returns true when this target is a Docker container
+    IsContainer() {
+        $this.TargetType -eq 'container'
+    }
+
+    # Returns the display address — containers show host/container
+    EffectiveAddress() {
+        if ($this.TargetType -eq 'container' -and $this.DockerHost -and $this.ContainerName) {
+            "$($this.DockerHost)/$($this.ContainerName)"
+        } else {
+            $this.Address
+        }
     }
 
     InternetAccessDisplay() {

@@ -34,19 +34,25 @@ function Show-FleetDashboard {
         [FleetTarget[]] $Targets,
         [string[]]      $ResultLines = @(),
         [string]        $LastCommand = '',
-        [int]           $Page        = 0
+        [int]           $Page        = 0,
+        [hashtable]     $SortState   = $null,
+        [hashtable]     $FilterState = $null
     )
-    & $Script:FltDisplay_ShowFleetDashboard -Targets $Targets -ResultLines $ResultLines -LastCommand $LastCommand -Page $Page
+    & $Script:FltDisplay_ShowFleetDashboard -Targets $Targets -ResultLines $ResultLines `
+        -LastCommand $LastCommand -Page $Page -SortState $SortState -FilterState $FilterState
 }
 
 function Show-SetupDashboard {
     param(
-        [string]   $Mode    = 'targets',
-        [object[]] $Items   = @(),
-        [string]   $Result  = '',
-        [string]   $LastCmd = ''
+        [string]    $Mode        = 'targets',
+        [object[]]  $Items       = @(),
+        [string]    $Result      = '',
+        [string]    $LastCmd     = '',
+        [hashtable] $SortState   = $null,
+        [hashtable] $FilterState = $null
     )
-    & $Script:FltDisplay_ShowSetupDashboard -Mode $Mode -Items $Items -Result $Result -LastCmd $LastCmd
+    & $Script:FltDisplay_ShowSetupDashboard -Mode $Mode -Items $Items -Result $Result `
+        -LastCmd $LastCmd -SortState $SortState -FilterState $FilterState
 }
 
 function Show-SourcesDashboard {

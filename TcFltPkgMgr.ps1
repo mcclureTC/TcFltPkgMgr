@@ -92,6 +92,7 @@ $modules = @(
     'ui\DisplayAdapter.ps1',              # stable display interface
     'ui\DashboardAnsi.ps1',               # ANSI backend — dot-sourced at script scope
     'ui\DisplayBackends.ps1',             # display backend loader
+    'ui\SortFilter.ps1',                  # sort/filter helpers
     'diagnostics\Diagnostics.ps1',         # built-in diagnostics (Setup > 10)
     'ui\menus\TargetMenu.ps1',
     'ui\menus\PackageMenu.ps1',
@@ -125,7 +126,16 @@ Set-FltDisplayBackend `
 
 # -- Global state --------------------------------------------------------------
 
-# Read-only mode - true = no changes are made; commands are shown but not run.
+# Sort and filter state — persistent across menu calls
+# One shared state for all target dashboards (Fleet + Setup targets)
+# Separate state for sources (different columns)
+$Script:FltTargetSort     = New-FltSortFilterState
+$Script:FltTargetFilter   = New-FltSortFilterState
+$Script:FltSourcesSort    = New-FltSortFilterState
+$Script:FltSourcesFilter  = New-FltSortFilterState
+$Script:FltDisplayTargets = @()
+
+
 $Script:FltReadOnly = -not $Live
 
 # OS detection — used for feature gating and backend selection.

@@ -16,20 +16,26 @@ function Get-FltRemoteFeedStatus {
         [string]        $KeyFile = ''
     )
 
-    $result  = @{}
-    $useKey  = -not [string]::IsNullOrWhiteSpace($KeyFile)
+    $result   = @{}
+    $useKey   = -not [string]::IsNullOrWhiteSpace($KeyFile)
+    $throttle = [int](Get-FltCfgValue 'ssh' 'throttleLimit' 25)
     # remoteTcpkgPath is the path to tcpkg on the REMOTE Windows target machine —
     # not the local operator machine. Safe to use even when operator runs on Linux.
     $remoteTcpkg = (Get-FltCfgValue 'tcpkg' 'remoteTcpkgPath' 'C:\ProgramData\Beckhoff\TcPkg\TcPkg.exe')
 
-    $findings = $Targets | ForEach-Object -Parallel {
-        $t           = $_
-        $feedName    = $using:FeedName
-        $cred        = $using:Credential
-        $kf          = $using:KeyFile
-        $useKey      = $using:useKey
-        $tcpkgPath   = $using:remoteTcpkg
+    # Bundle all variables into a single context object — avoids $using: scope
+    # issues with ForEach-Object -Parallel inside a function
+    $ctx = [pscustomobject]@{
+        FeedName    = $FeedName
+        Credential  = $Credential
+        KeyFile     = $KeyFile
+        UseKey      = $useKey
+        RemoteTcpkg = $remoteTcpkg
+    }
 
+    $findings = $Targets | ForEach-Object -Parallel {
+        $t       = $_
+        $ctx     = $using:ctx
         $hasFlag = $false
         try {
             $sessionParams = @{
@@ -38,22 +44,22 @@ function Get-FltRemoteFeedStatus {
                 AcceptKey    = $true
                 ErrorAction  = 'Stop'
             }
-            if ($useKey) {
+            if ($ctx.UseKey) {
                 $sessionParams['Username'] = $t.User
-                $sessionParams['KeyFile']  = $kf
+                $sessionParams['KeyFile']  = $ctx.KeyFile
             } else {
-                $sessionParams['Credential'] = $cred
+                $sessionParams['Credential'] = $ctx.Credential
             }
             $session = New-SSHSession @sessionParams
             try {
-                $cmd    = '"' + $tcpkgPath + '" source list --as-json'
+                $cmd    = '"' + $ctx.RemoteTcpkg + '" source list --as-json'
                 $result = Invoke-SSHCommand -SessionId $session.SessionId -Command $cmd -TimeOut 30
                 $text   = $result.Output -join "`n"
                 $s = $text.IndexOf('['); $e = $text.LastIndexOf(']')
                 if ($s -ge 0 -and $e -gt $s) {
                     $json = $text.Substring($s, $e - $s + 1) | ConvertFrom-Json
                     foreach ($src in $json) {
-                        if ($src.Name -and $src.Name.ToLower() -eq $feedName.ToLower()) {
+                        if ($src.Name -and $src.Name.ToLower() -eq $ctx.FeedName.ToLower()) {
                             $hasFlag = $true; break
                         }
                     }
@@ -64,7 +70,7 @@ function Get-FltRemoteFeedStatus {
         } catch { $hasFlag = $false }
 
         [pscustomobject]@{ Name = $t.Name; HasFeed = $hasFlag }
-    } -ThrottleLimit $using:throttle
+    } -ThrottleLimit $throttle
 
     foreach ($f in $findings) { $result[$f.Name] = $f.HasFeed }
     return $result
@@ -95,7 +101,7 @@ function Invoke-FleetAction {
     if ($TimeoutSecs -le 0) {
         $TimeoutSecs = [int]((Get-FltCfgValue 'ssh' 'timeoutSeconds' 1800))
     }
-    $throttle    = [int]((Get-FltCfgValue 'ssh' 'throttleLimit' 10))
+    $throttle    = [int]((Get-FltCfgValue 'ssh' 'throttleLimit' 25))
     $remoteTcpkg = (Get-FltCfgValue 'tcpkg' 'remoteTcpkgPath' 'C:\ProgramData\Beckhoff\TcPkg\TcPkg.exe')
     $remoteCmd   = '"{0}" {1} {2} -y' -f $remoteTcpkg, $Action, $PackageSpec
 

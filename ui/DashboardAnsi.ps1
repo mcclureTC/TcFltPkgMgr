@@ -48,35 +48,52 @@ function _Ansi_ShowFleetDashboard {
         [FleetTarget[]] $Targets,
         [string[]]      $ResultLines = @(),
         [string]        $LastCommand = '',
-        [int]           $Page        = 0   # 0-based current page
+        [int]           $Page        = 0,
+        [hashtable]     $SortState   = $null,
+        [hashtable]     $FilterState = $null
     )
     $sw       = _Ansi_GetSafeWidth
     $total    = $Targets.Count
-    $pageSize = [Math]::Max(1, [int](Get-FltCfgValue 'ui' 'dashboardPageSize' 20))
 
-    # Slice targets for current page
-    $totalPages = [Math]::Max(1, [Math]::Ceiling($total / $pageSize))
-    $page       = [Math]::Max(0, [Math]::Min($page, $totalPages - 1))
-    $offset     = $page * $pageSize
-    $pageTargets = @($Targets | Select-Object -Skip $offset -First $pageSize)
-    $n          = $pageTargets.Count
+    # Apply filter then sort before slicing for page
+    $display = if ($FilterState -and $FilterState.FilterColumn) {
+        @(Invoke-FltFilter -Items $Targets -Column $FilterState.FilterColumn -Value $FilterState.FilterValue)
+    } else { @($Targets) }
+
+    if ($SortState -and $SortState.SortColumn) {
+        $display = @(Invoke-FltSort -Items $display -Column $SortState.SortColumn -Descending $SortState.SortDesc)
+    }
+
+    $filteredCount = $display.Count
+    $pageSize      = [Math]::Max(1, [int](Get-FltCfgValue 'ui' 'dashboardPageSize' 20))
+    $totalPages    = [Math]::Max(1, [Math]::Ceiling($filteredCount / $pageSize))
+    $page          = [Math]::Max(0, [Math]::Min($page, $totalPages - 1))
+    $offset        = $page * $pageSize
+    $pageTargets   = @($display | Select-Object -Skip $offset -First $pageSize)
+    $n             = $pageTargets.Count
 
     $maxResult = 4
-    $Script:FltDashHeight = 1 + 1 + $n + 1 + 1 + $(if ($totalPages -gt 1) { 2 } else { 1 }) + 1 + $maxResult + 1
+    $Script:FltDashHeight = 1 + 1 + $n + 1 + 1 + 2 + 1 + $maxResult + 1
 
     Clear-Host
-
     _Ansi_PaintTitleBar 1 'Fleet'
 
     $nameColW = [Math]::Min(24, [Math]::Max(14,
         ($Targets | ForEach-Object { $_.Name.Length } | Measure-Object -Maximum).Maximum ?? 14))
-    $hdrLine = '  {0,3}  {1} {2,-18} {3,-6} {4,-8} {5}' -f `
-        '#', 'Target'.PadRight($nameColW), 'Host', 'Port', 'Internet', 'Status'
-    _Ansi_PaintRow 2 $hdrLine 'Dark'
+
+    # Column headers with sort indicators
+    $hName   = Get-FltSortHeader 'Target'   'Name'           $SortState
+    $hHost   = Get-FltSortHeader 'Address'  'Address'        $SortState
+    $hPort   = Get-FltSortHeader 'Port'     'Port'           $SortState
+    $hIA     = Get-FltSortHeader 'Internet' 'InternetAccess' $SortState
+    $hStatus = Get-FltSortHeader 'Status'   'Reachable'      $SortState
+    _Ansi_PaintRow 2 ('  {0,3}  {1} {2,-18} {3,-6} {4,-8} {5}' -f `
+        '#', $hName.PadRight($nameColW), $hHost, $hPort, $hIA, $hStatus) 'Dark'
 
     for ($i = 0; $i -lt $n; $i++) {
         $t      = $pageTargets[$i]
-        $num    = 11 + $offset + $i   # global target number
+        # Global number = position in filtered+sorted display, not raw $Targets
+        $num    = 11 + $offset + $i
         $ia     = if ($t.InternetAccess) { 'Yes' } else { 'No' }
         $icon   = $t.ReachableIcon()
         $status = "$icon $($t.Reachable)"
@@ -91,22 +108,29 @@ function _Ansi_ShowFleetDashboard {
     $sepRow1   = 3 + $n
     $footerRow = $sepRow1 + 1
     $navRow    = $footerRow + 1
-    $sepRow2   = $navRow + $(if ($totalPages -gt 1) { 1 } else { 0 })
+    $sepRow2   = $navRow + 1
     $cmdRow    = $sepRow2 + 1
 
     _Ansi_PaintRow $sepRow1   ('-' * $sw) 'Dark'
     _Ansi_PaintRow $footerRow '  1. Install   2. Upgrade   3. Uninstall   4. Status   5. Outdated   6. Profiles   7. UI Config   8. Setup   0. Exit' 'Dark'
 
+    # Nav row: pagination info + sort/filter hints
+    $navParts = @()
     if ($totalPages -gt 1) {
-        $pageInfo = "  Page $($page + 1) of $totalPages"
-        if ($page -gt 0)              { $pageInfo += "   [-] Prev" }
-        if ($page -lt $totalPages-1)  { $pageInfo += "   [+] Next" }
+        $pageInfo = "Page $($page + 1) of $totalPages"
+        if ($page -gt 0)              { $pageInfo += "  [-]" }
+        if ($page -lt $totalPages-1)  { $pageInfo += "  [+]" }
         $firstNum = $offset + 11
         $lastNum  = $offset + $n + 10
-        $totalNum = $total + 10
-        $pageInfo += "   (showing $firstNum-$lastNum of $totalNum)"
-        _Ansi_PaintRow $navRow $pageInfo 'Dark'
+        $pageInfo += "  ($firstNum-$lastNum of $filteredCount)"
+        $navParts += $pageInfo
     }
+    if ($FilterState -and $FilterState.FilterColumn) {
+        $navParts += "[Filter: $($FilterState.FilterColumn)='$($FilterState.FilterValue)']  $total→$filteredCount"
+    }
+    $navParts += "[*] Sort  [/] Filter"
+
+    _Ansi_PaintRow $navRow ("  " + ($navParts -join "   ")) 'Dark'
 
     _Ansi_PaintRow $sepRow2   ('-' * $sw) 'Dark'
 
@@ -130,21 +154,35 @@ function _Ansi_ShowFleetDashboard {
 
 function _Ansi_ShowSetupDashboard {
     param(
-        [string]   $Mode    = 'targets',
-        [object[]] $Items   = @(),
-        [string]   $Result  = '',
-        [string]   $LastCmd = ''
+        [string]    $Mode       = 'targets',
+        [object[]]  $Items      = @(),
+        [string]    $Result     = '',
+        [string]    $LastCmd    = '',
+        [hashtable] $SortState  = $null,
+        [hashtable] $FilterState = $null
     )
     $sw = _Ansi_GetSafeWidth
-    $n  = if ($Items) { $Items.Count } else { 0 }
+
+    # Apply filter then sort
+    $display = if ($FilterState -and $FilterState.FilterColumn) {
+        @(Invoke-FltFilter -Items $Items -Column $FilterState.FilterColumn -Value $FilterState.FilterValue)
+    } else { @($Items) }
+
+    if ($SortState -and $SortState.SortColumn) {
+        $display = @(Invoke-FltSort -Items $display -Column $SortState.SortColumn -Descending $SortState.SortDesc)
+    }
+    $n = if ($display) { $display.Count } else { 0 }
 
     Clear-Host
     _Ansi_PaintTitleBar 1 "Setup  >  $(if ($Mode -eq 'sources') { 'Sources / Feeds' } else { 'Targets' })"
 
     if ($Mode -eq 'sources') {
-        _Ansi_PaintRow 2 ('  {0,3}  {1,-24} {2,-8} {3,-16} {4}' -f 'Pri','Name','State','Auth','URL') 'Dark'
+        $hPri  = Get-FltSortHeader 'Pri'   'Pri'   $SortState
+        $hName = Get-FltSortHeader 'Name'  'Name'  $SortState
+        $hSt   = Get-FltSortHeader 'State' 'State' $SortState
+        _Ansi_PaintRow 2 ('  {0,3}  {1,-24} {2,-8} {3,-16} {4}' -f $hPri,$hName,$hSt,'Auth','URL') 'Dark'
         for ($i = 0; $i -lt $n; $i++) {
-            $s   = $Items[$i]
+            $s   = $display[$i]
             $clr = if ($s.State -eq 'enabled') { 'Green' } else { 'Dark' }
             $url = $s.Url
             $avail = $sw - 60; if ($avail -lt 10) { $avail = 10 }
@@ -154,9 +192,13 @@ function _Ansi_ShowSetupDashboard {
         }
         if ($n -eq 0) { _Ansi_PaintRow 3 '  (no sources configured)' 'Dark' }
     } else {
-        _Ansi_PaintRow 2 ('  {0,3}  {1,-22} {2,-18} {3,-6} {4,-8} {5}' -f '#','Name','Address','Port','Internet','Status') 'Dark'
+        $hName = Get-FltSortHeader 'Name'     'Name'          $SortState
+        $hAddr = Get-FltSortHeader 'Address'  'Address'       $SortState
+        $hPort = Get-FltSortHeader 'Port'     'Port'          $SortState
+        $hIA   = Get-FltSortHeader 'Internet' 'InternetAccess' $SortState
+        _Ansi_PaintRow 2 ('  {0,3}  {1,-22} {2,-18} {3,-6} {4,-8} {5}' -f '#',$hName,$hAddr,$hPort,$hIA,'Status') 'Dark'
         for ($i = 0; $i -lt $n; $i++) {
-            $t  = $Items[$i]
+            $t  = $display[$i]
             $ia = if ($t.InternetAccess) { 'Yes' } else { 'No' }
             _Ansi_PaintRow (3 + $i) ('  {0,3}. {1,-22} {2,-18} {3,-6} {4,-8}' -f `
                 ($i + 11), $t.Name, $t.Address, $t.Port, $ia) ''
@@ -166,13 +208,22 @@ function _Ansi_ShowSetupDashboard {
 
     $sepRow    = [Math]::Max(4, 3 + $n)
     $footerRow = $sepRow + 1
-    $sepRow2   = $footerRow + 2
+    $navRow    = $footerRow + 2
+    $sepRow2   = $navRow + 1
     $resultRow = $sepRow2 + 1
     $promptRow = $resultRow + 1
 
     _Ansi_PaintRow $sepRow    ('-' * $sw) 'Dark'
     _Ansi_PaintRow $footerRow '  1. Add target   2. Import CSV   3. Export CSV   4. Sources   5. Gen config' 'Dark'
-    _Ansi_PaintRow ($footerRow + 1) '  6. Export config   7. Import config   8. Log   9. Read-only   10. Diagnostics   0. Back' 'Dark'
+    _Ansi_PaintRow ($footerRow + 1) '  6. Export config   7. Import config   8. Log   9. Read-only   10. Diagnostics   11+. Select   0. Back' 'Dark'
+
+    # Nav row with sort/filter hints
+    $navParts = @()
+    if ($FilterState -and $FilterState.FilterColumn) {
+        $navParts += "[Filter: $($FilterState.FilterColumn)='$($FilterState.FilterValue)']  $($Items.Count)→$n"
+    }
+    $navParts += "[*] Sort  [/] Filter"
+    _Ansi_PaintRow $navRow ("  " + ($navParts -join "   ")) 'Dark'
     _Ansi_PaintRow $sepRow2   ('-' * $sw) 'Dark'
 
     $cmdText = if ($LastCmd) { "  > $LastCmd" } else { '' }
