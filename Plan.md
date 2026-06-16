@@ -199,30 +199,37 @@ every subsequent phase builds on a scalable foundation.
 
 ## Phase 2 — Fleet dashboard updates
 
-### 2.1 — `Show-FleetDashboard` (`ui/Dashboard.ps1`)
+### 2.1 — `Show-FleetDashboard` (`ui/DashboardAnsi.ps1`)
 
-- [ ] Add `Type` column (`Phys` / `VM` / `Cntr`) after the `#` column
-- [ ] Add `OS` column (`Win` / `Lnx`) after `Type`
-- [ ] For container targets: show `<DockerHost>/<ContainerName>` in the
-      address column instead of an IP
-- [ ] Color rows by type: Windows = default, Linux = Cyan, Container = Magenta
-- [ ] Hide `Internet` column for Linux and container targets — show `---`
-- [ ] Implement pagination (see Phase 0.1)
-- [ ] Dashboard footer shows page navigation when fleet exceeds page size
+> Pagination, sort/filter, `-`/`+` nav, and `EffectiveAddress()` are already
+> implemented (Phases 0.1, 0.3). Remaining items are cosmetic column additions
+> that are low value until Linux/container targets actually exist in the fleet.
+> **Defer all of 2.1 to Phase 9** — do alongside the full type/OS Add Target flow
+> so columns are visible with real data immediately.
 
-### 2.2 — `Show-SetupDashboard` (`ui/Dashboard.ps1`)
+- [ ] Add `OS` column (`Win`/`Lnx`) and `Type` column (`Phys`/`VM`/`Cntr`) —
+      defer to Phase 9 (after Add Target supports OS/Type selection)
+- [ ] Color rows by type: Linux = Cyan, Container = Magenta — defer to Phase 9
+- [ ] Show `---` in Internet column for Linux/container targets — defer to Phase 9
+- [ ] Container address column shows `<DockerHost>/<ContainerName>` — already
+      implemented via `EffectiveAddress()` in `FleetTarget` class ✅
 
-- [ ] Add `Type` and `OS` columns to targets view
-- [ ] Implement pagination
+### 2.2 — `Show-SetupDashboard` (`ui/DashboardAnsi.ps1`)
 
-### 2.3 — `Show-FleetBatchDashboard` (`ui/Dashboard.ps1`)
+> Defer to Phase 9 alongside 2.1. Setup pagination deferred to Phase 12 (low priority).
 
-- [ ] Add `Type` column to batch rows
-- [ ] Implement pagination with auto-scroll to first non-OK row
-- [ ] Update `Mode` row: `Parallel SSH (tcpkg)` | `WinGet SSH` |
-      `Ansible` | `Docker exec` | `Mixed`
-- [ ] Summary row counts by executor:
-      `tcpkg: 3 OK  |  WinGet: 2 OK  |  Ansible: 5 OK  |  Docker: 90 OK`
+- [ ] Add `OS` and `Type` columns to targets view — defer to Phase 9
+- [ ] Pagination — low priority; Setup rarely exceeds 20 targets (revisit Phase 12)
+
+### 2.3 — `Show-FleetBatchDashboard` (`ui/DashboardAnsi.ps1`)
+
+> Pagination deferred to Phase 7.0. Mode/Summary row updates depend on
+> having multiple executors — defer to Phase 10 (after all executors exist).
+
+- [ ] Pagination with auto-scroll to first non-OK row — deferred to Phase 7.0 ✓
+- [ ] `Type` column in batch rows — defer to Phase 9 (alongside 2.1)
+- [ ] Multi-executor `Mode` row and per-executor summary counts —
+      defer to Phase 10 (after WinGet, Ansible, Docker executors exist)
 
 ---
 
@@ -260,8 +267,14 @@ every subsequent phase builds on a scalable foundation.
 
 ### 4.1 — Fleet menu (`ui/menus/FleetMenu.ps1`)
 
-- [ ] Add `6. WinGet` (renumber Profiles → 7, Setup → 8)
-- [ ] Update dashboard footer hint
+> Current layout (1-8): Install, Upgrade, Uninstall, Status, Outdated,
+> Profiles, UI Config, Setup. Each new executor phase shifts Setup by 1.
+> Final layout after Phases 4+6+8: Install, Upgrade, Uninstall, Status,
+> Outdated, WinGet, Linux Admin, Containers, Profiles, UI Config, Setup.
+> UI Config stays adjacent to Setup (operator muscle memory).
+
+- [ ] Add `6. WinGet`; Profiles→7, UI Config→8, Setup→9
+- [ ] Update dashboard footer hint (may need second footer line at 119 cols)
 
 ### 4.2 — WinGet menu (`ui/menus/WinGetMenu.ps1`) — new file
 
@@ -274,10 +287,14 @@ every subsequent phase builds on a scalable foundation.
 
 ### 4.3 — Setup: target OS/PackageManager prompts (`ui/menus/TargetMenu.ps1`)
 
-- [ ] Add `OS: 1. Windows  2. Linux  (default 1):` prompt in Add/Edit
-- [ ] If Windows: `Package manager: 1. tcpkg  2. WinGet  3. Both  (default 1):`
-- [ ] If Linux: skip Internet Access prompt
-- [ ] Show `OS`, `Type`, `PackageManager` in setup dashboard
+> These prompts are a subset of Phase 9.1 (full type/OS/container flow).
+> Implementing 4.3 now means 9.1 won't need to redo this work.
+> **Implement alongside Phase 9.1** — do both together rather than
+> adding Windows-only prompts now and re-editing for containers later.
+> Marked as dependency: Phase 9.1 satisfies 4.3.
+
+- [ ] OS and PackageManager prompts — implement in Phase 9.1 (full flow)
+- [ ] Show `OS`, `Type`, `PackageManager` in Setup dashboard — implement in Phase 9
 
 ---
 
@@ -378,7 +395,11 @@ The operator enters the vault password once; the tool manages it from there.
 
 ### 6.1 — Fleet menu (`ui/menus/FleetMenu.ps1`)
 
-- [ ] Add `7. Linux Admin` (Profiles → 8, Setup → 9)
+> Depends on Phase 4.1 already having added WinGet at 6.
+> After this phase: WinGet=6, Linux Admin=7, Profiles=8, UI Config=9, Setup=10.
+
+- [ ] Add `7. Linux Admin`; Profiles→8, UI Config→9, Setup→10
+- [ ] Update dashboard footer hint
 
 ### 6.2 — Linux Admin menu (`ui/menus/LinuxMenu.ps1`) — new file
 
@@ -502,16 +523,18 @@ Containers are reached via a two-hop model: SSH to the Docker host, then
 
 ### 8.1 — Fleet menu (`ui/menus/FleetMenu.ps1`)
 
-- [ ] Add `8. Containers` (Setup → 9, now at 9)
+> Depends on Phase 6.1. After this phase:
+> WinGet=6, Linux Admin=7, Containers=8, Profiles=9, UI Config=10, Setup=11.
+
+- [ ] Add `8. Containers`; Profiles→9, UI Config→10, Setup→11
 - [ ] Final menu layout:
       ```
-       1. Fleet Install (tcpkg)    5. Outdated Check
-       2. Fleet Upgrade            6. WinGet
-       3. Fleet Uninstall          7. Linux Admin
-       4. Package Status           8. Containers
-                                   9. Setup
-                                   0. Exit
+       1. Install (tcpkg)    5. Outdated Check    9. Profiles
+       2. Upgrade            6. WinGet           10. UI Config
+       3. Uninstall          7. Linux Admin      11. Setup
+       4. Package Status     8. Containers        0. Exit
       ```
+- [ ] Footer will need two lines at 119 col width — already supported
 
 ### 8.2 — Container Admin menu (`ui/menus/ContainerMenu.ps1`) — new file
 
@@ -577,54 +600,52 @@ Containers are reached via a two-hop model: SSH to the Docker host, then
 
 ### 9.1 — Add target: full type/OS flow (`ui/menus/TargetMenu.ps1`)
 
+> Also satisfies Phase 4.3 (Windows OS/PackageManager prompts) and
+> Phase 7.4 (container target Add flow). Implement all together here.
+> Currently `Invoke-TargetMenu` only asks Name/Host/Port/User/Password/
+> InternetAccess — all OS/Type/PackageManager fields default to 'windows'/
+> 'physical'/'' and are not editable via the menu yet.
+
 - [ ] `TargetType: 1. Physical  2. VM  3. Container  (default 1):`
-- [ ] `OS: 1. Windows  2. Linux  (default 1):` (skip for containers —
-      inferred from Docker host or set explicitly)
+- [ ] `OS: 1. Windows  2. Linux  (default 1):` (skip for containers)
 - [ ] If Windows: `Package manager: 1. tcpkg  2. WinGet  3. Both`
-- [ ] If Linux/VM: skip Internet Access
-- [ ] If Container: prompt for Docker host and container name (see Phase 7.4)
+- [ ] If Linux/VM: skip Internet Access prompt
+- [ ] If Container: prompt Docker host (must match existing target name) and
+      container name; skip Address/Port/User (inherited from Docker host)
+- [ ] Edit flow: show current OS/Type/PackageManager, allow changes
+- [ ] Add `OS`, `Type`, `PackageManager` columns to Setup dashboard
+      (also satisfies Phase 2.1, 2.2 for Setup view)
 
 ### 9.2 — Prerequisites check (`ui/menus/TargetMenu.ps1`)
 
-- [ ] Add `10. Check prerequisites` to Setup menu
-- [ ] Checks:
-      - `tcpkg` — version and path
-      - `Posh-SSH` — installed and version
-      - `winget` — available and version
-      - `ansible-playbook` — available (native or WSL) and version
-      - Python 3 — required by Ansible control node
-      - `community.docker` Ansible collection — installed
-      - Docker CLI (`docker`) — available locally (for log/inspect operations)
-- [ ] Green/red per item in result row
-- [ ] Offer to fix where possible:
-      - Posh-SSH: `Install-Module Posh-SSH -Scope CurrentUser`
+> The built-in diagnostics (Setup > 10) already cover tcpkg, Posh-SSH, and
+> core subsystems. This phase adds a user-facing prerequisites check that is
+> lighter than full diagnostics — focused on external tool availability only.
+> Rename current `10. Diagnostics` → keep as-is; add new prerequisites check
+> as a separate Setup menu item or integrate into diagnostics Phase 2.
+
+- [ ] Check external tools: `winget`, `ansible-playbook`, `python3`, `docker`
+- [ ] Check Ansible collection: `community.docker`
+- [ ] Green/amber/red per item; offer to fix where possible:
+      `Install-Module Posh-SSH`, `ansible-galaxy collection install community.docker`
+- [ ] Integrate into existing Diagnostics screen as a new section, not a
+      separate menu item (avoids Setup menu number inflation)
       - community.docker: `ansible-galaxy collection install community.docker`
 
 ### 9.3 — Settings for new executors (`config/settings.default.json`)
 
-- [ ] Add:
-      ```json
-      "winget": {
-        "executablePath": "winget",
-        "remoteWinGetPath": "C:\\Users\\Administrator\\AppData\\Local\\Microsoft\\WindowsApps\\winget.exe"
-      },
-      "ansible": {
-        "executablePath": "ansible-playbook",
-        "useWsl": false,
-        "wslDistro": "",
-        "tempDir": "",
-        "forks": 10
-      },
-      "docker": {
-        "throttleLimit": 20,
-        "logTailLines": 50
-      },
-      "ui": {
-        "dashboardPageSize": 20,
-        "reachCacheSecs": 60
-      }
-      ```
-- [ ] Add corresponding entries to `settings.default.jsonc` with comments
+> `docker` (throttleLimit=20, logTailLines=50) and `ui` (dashboardPageSize=20,
+> reachCacheSecs=60) sections already exist. Remaining: `winget` and `ansible`.
+
+- [x] `docker.throttleLimit: 20` — already in `settings.default.json`
+- [x] `docker.logTailLines: 50` — already in `settings.default.json`
+- [x] `ui.dashboardPageSize: 20` — already in `settings.default.json`
+- [x] `ui.reachCacheSecs: 60` — already in `settings.default.json`
+- [ ] Add `winget` section (add when Phase 3 executor is implemented):
+      `executablePath`, `remoteWinGetPath`
+- [ ] Add `ansible` section (add when Phase 5 executor is implemented):
+      `executablePath`, `useWsl`, `wslDistro`, `tempDir`, `forks: 10`
+- [ ] `settings.default.jsonc` — add when the above sections are added
 
 ---
 
@@ -632,10 +653,13 @@ Containers are reached via a two-hop model: SSH to the Docker host, then
 
 ### 10.1 — `Write-FltBatchEntry` (`execution/CommandLog.ps1`)
 
-- [ ] Add `PackageManager` field — `'tcpkg'` / `'winget'` / `'ansible'` /
-      `'docker-exec'` / `'docker-lifecycle'`
-- [ ] Add `TargetType` field per result row — `'physical'` / `'vm'` /
-      `'container'`
+> Depends on Phases 3, 5, 7 (WinGet, Ansible, Docker executors) being built
+> first so the new PackageManager values are actually emitted.
+> Implement incrementally: add `PackageManager` when Phase 3 lands,
+> add `TargetType` when Phase 7 lands.
+
+- [ ] Add `PackageManager` field — implement when Phase 3 (WinGet) is done
+- [ ] Add `TargetType` field per result row — implement when Phase 7 (Docker) is done
 
 ### 10.2 — Log viewer
 
@@ -649,7 +673,7 @@ Containers are reached via a two-hop model: SSH to the Docker host, then
 ### Scale
 - [ ] Load 100 targets from `targets.local.json` — startup time < 2s
 - [ ] Dashboard pagination renders correctly at 20, 50, 100 targets
-- [ ] Page navigation (P/N) works without losing target numbering
+- [ ] Page navigation (`-`/`+` numpad) works without losing target numbering
 - [ ] Reachability check completes for 100 targets in < 5s
 - [ ] Batch dashboard with 100 targets paginates correctly
 
@@ -691,33 +715,36 @@ Containers are reached via a two-hop model: SSH to the Docker host, then
 
 ## New files summary
 
-| File | Purpose |
-|------|---------|
-| `config/targets.local.json` | Primary target store — all target types (gitignored) |
-| `data/WinGetRepository.ps1` | WinGet package search and version listing |
-| `data/AnsibleRepository.ps1` | Ansible availability and collection checks |
-| `execution/WinGetExecutor.ps1` | SSH batch executor using winget |
-| `execution/AnsibleExecutor.ps1` | Inventory/playbook builder and Ansible runner |
-| `execution/ContainerExecutor.ps1` | Docker exec and lifecycle batch executor |
-| `ui/menus/WinGetMenu.ps1` | WinGet install / upgrade / uninstall / status |
-| `ui/menus/LinuxMenu.ps1` | Linux Admin: packages, users, services, playbooks |
-| `ui/menus/ContainerMenu.ps1` | Container Admin: packages, lifecycle, logs, health |
+| File | Status | Purpose |
+|------|--------|---------|
+| `config/targets.local.json` | ✅ exists | Primary target store — all target types (gitignored) |
+| `ui/SortFilter.ps1` | ✅ exists | Sort/filter helpers and interactive pickers |
+| `ui/menus/UiConfigMenu.ps1` | ✅ exists | Runtime UI settings (page size, display backend) |
+| `diagnostics/Diagnostics.ps1` | ✅ exists | 29-check self-test suite (Setup > 10) |
+| `data/WinGetRepository.ps1` | phase 3 | WinGet package search and version listing |
+| `data/AnsibleRepository.ps1` | phase 5 | Ansible availability and collection checks |
+| `execution/WinGetExecutor.ps1` | phase 3 | SSH batch executor using winget |
+| `execution/AnsibleExecutor.ps1` | phase 5 | Inventory/playbook builder and Ansible runner |
+| `execution/ContainerExecutor.ps1` | phase 7 | Docker exec and lifecycle batch executor |
+| `ui/menus/WinGetMenu.ps1` | phase 4 | WinGet install / upgrade / uninstall / status |
+| `ui/menus/LinuxMenu.ps1` | phase 6 | Linux Admin: packages, users, services, playbooks |
+| `ui/menus/ContainerMenu.ps1` | phase 8 | Container Admin: packages, lifecycle, logs, health |
 
 ## Modified files summary
 
-| File | What changes |
-|------|-------------|
-| `classes/Models.ps1` | `FleetTarget` gets `OS`, `TargetType`, `PackageManager`, `DockerHost`, `ContainerName` |
-| `data/TargetRepository.ps1` | New JSON target store; migration; CSV columns; Add/Edit |
-| `data/CredentialRepository.ps1` | Refactored into adapter + Windows backend |
-| `execution/FleetExecutor.ps1` | Four buckets (tcpkg, WinGet, Ansible, Docker); throttle tuning |
-| `execution/CommandLog.ps1` | `PackageManager` and `TargetType` in batch log |
-| `ui/Dashboard.ps1` | Renamed to `DashboardAnsi.ps1`; wired through adapter |
-| `ui/menus/FleetMenu.ps1` | New items 6-8 (WinGet, Linux Admin, Containers); renumber to 9; feature gating |
-| `ui/menus/TargetMenu.ps1` | Full type/OS/container prompts; prerequisites check |
-| `config/settings.default.json` | `winget`, `ansible`, `docker`, `ui`, `displayBackend` sections |
-| `config/settings.default.jsonc` | Same with comments |
-| `TcFltPkgMgr.ps1` | OS detection; backend init order; Linux config paths |
+| File | Status | What changes |
+|------|--------|-------------|
+| `classes/Models.ps1` | ✅ done | `FleetTarget` extended with OS/Type/PackageManager/Docker fields |
+| `data/TargetRepository.ps1` | ✅ done | JSON store; migration; CSV; Add/Edit/Remove |
+| `data/CredentialRepository.ps1` | ✅ done | Refactored into adapter + Windows/file backends |
+| `execution/FleetExecutor.ps1` | partial | tcpkg + push buckets done; WinGet/Ansible/Docker pending |
+| `execution/CommandLog.ps1` | pending | `PackageManager` and `TargetType` fields (phases 3/7) |
+| `ui/DashboardAnsi.ps1` | partial | Pagination/sort/filter done; OS/Type columns pending (phase 9) |
+| `ui/menus/FleetMenu.ps1` | partial | Current: 1-8; WinGet/Linux/Containers to add (phases 4/6/8) |
+| `ui/menus/TargetMenu.ps1` | partial | Add/Edit/Remove done; OS/Type prompts pending (phase 9.1) |
+| `config/settings.default.json` | partial | docker/ui done; winget/ansible sections pending (phases 3/5) |
+| `config/settings.default.jsonc` | pending | Add when winget/ansible sections added |
+| `TcFltPkgMgr.ps1` | partial | OS detection done; Linux config paths pending (phase 12.1) |
 
 ---
 
