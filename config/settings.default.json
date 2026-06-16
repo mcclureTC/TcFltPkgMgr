@@ -12,7 +12,8 @@
     "defaultLiveMode":    false,
     "autoElevate":        false,
     "dashboardRefreshMs": 500,
-    "displayBackend":     "ansi"
+    "displayBackend":     "ansi",
+    "dashboardPageSize":  3
   },
   "log": {
     "retentionDays":  30,

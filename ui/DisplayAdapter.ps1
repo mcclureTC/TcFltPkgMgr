@@ -33,9 +33,10 @@ function Show-FleetDashboard {
     param(
         [FleetTarget[]] $Targets,
         [string[]]      $ResultLines = @(),
-        [string]        $LastCommand = ''
+        [string]        $LastCommand = '',
+        [int]           $Page        = 0
     )
-    & $Script:FltDisplay_ShowFleetDashboard -Targets $Targets -ResultLines $ResultLines -LastCommand $LastCommand
+    & $Script:FltDisplay_ShowFleetDashboard -Targets $Targets -ResultLines $ResultLines -LastCommand $LastCommand -Page $Page
 }
 
 function Show-SetupDashboard {

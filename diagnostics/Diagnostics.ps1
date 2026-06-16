@@ -263,7 +263,80 @@ function Invoke-FltDiagnostics {
         }
     } catch { _Diag_Fail 'FleetTarget: fields and mutation' $_.Exception.Message }
 
-    # Posh-SSH: required for all SSH operations
+    # _Save-UiCfgValue: updates in-memory config and persists to settings.local.json
+    try {
+        $origVal  = Get-FltCfgValue 'ui' 'dashboardPageSize' 20
+        $testVal  = 99
+        $saved    = _Save-UiCfgValue -Key 'dashboardPageSize' -Value $testVal
+        $readBack = Get-FltCfgValue 'ui' 'dashboardPageSize' 20
+
+        # Verify in-memory update
+        if (-not $saved) {
+            _Diag_Fail '_Save-UiCfgValue persists setting' 'Function returned false'
+        } elseif ($readBack -ne $testVal) {
+            _Diag_Fail '_Save-UiCfgValue updates in-memory config' "Got $readBack, expected $testVal"
+        } else {
+            _Diag_Pass "_Save-UiCfgValue round-trip OK (set=$testVal read=$readBack)"
+        }
+
+        # Verify settings.local.json was written
+        $localPath = Join-Path $Script:FltConfigDir 'settings.local.json'
+        if (Test-Path $localPath) {
+            $localJson = Get-Content $localPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($localJson.ui.dashboardPageSize -eq $testVal) {
+                _Diag_Pass '_Save-UiCfgValue wrote to settings.local.json'
+            } else {
+                _Diag_Fail '_Save-UiCfgValue wrote to settings.local.json' `
+                    "File has $($localJson.ui.dashboardPageSize), expected $testVal"
+            }
+        } else {
+            _Diag_Fail '_Save-UiCfgValue wrote to settings.local.json' 'File not created'
+        }
+
+        # Restore original value
+        _Save-UiCfgValue -Key 'dashboardPageSize' -Value $origVal | Out-Null
+    } catch {
+        _Save-UiCfgValue -Key 'dashboardPageSize' -Value 20 -ErrorAction SilentlyContinue | Out-Null
+        _Diag_Fail '_Save-UiCfgValue round-trip' $_.Exception.Message
+    }
+
+    # Pagination math: verify page slicing with known inputs
+    try {
+        # Simulate 7 targets, page size 3
+        $fakeTargets = 1..7 | ForEach-Object { [FleetTarget]::new("PC-$_","10.0.0.$_",22,'admin',$true) }
+        $pageSize    = 3
+        $errors      = @()
+
+        # Page 0: items 0-2 (targets 11-13)
+        $p0 = @($fakeTargets | Select-Object -Skip 0 -First $pageSize)
+        if ($p0.Count -ne 3 -or $p0[0].Name -ne 'PC-1' -or $p0[2].Name -ne 'PC-3') {
+            $errors += "Page 0 wrong: got $($p0.Name -join ',')"
+        }
+
+        # Page 1: items 3-5 (targets 14-16)
+        $p1 = @($fakeTargets | Select-Object -Skip 3 -First $pageSize)
+        if ($p1.Count -ne 3 -or $p1[0].Name -ne 'PC-4' -or $p1[2].Name -ne 'PC-6') {
+            $errors += "Page 1 wrong: got $($p1.Name -join ',')"
+        }
+
+        # Page 2: item 6 only (target 17)
+        $p2 = @($fakeTargets | Select-Object -Skip 6 -First $pageSize)
+        if ($p2.Count -ne 1 -or $p2[0].Name -ne 'PC-7') {
+            $errors += "Page 2 wrong: got $($p2.Name -join ',')"
+        }
+
+        # Total pages
+        $totalPages = [Math]::Ceiling($fakeTargets.Count / $pageSize)
+        if ($totalPages -ne 3) { $errors += "Total pages wrong: got $totalPages" }
+
+        if ($errors.Count -eq 0) {
+            _Diag_Pass 'Pagination math correct (7 targets / page size 3 = 3 pages)'
+        } else {
+            _Diag_Fail 'Pagination math correct' ($errors -join '; ')
+        }
+    } catch {
+        _Diag_Fail 'Pagination math' $_.Exception.Message
+    }
     try {
         if (Ensure-FltPoshSsh) {
             _Diag_Pass 'Posh-SSH module available'
@@ -282,7 +355,8 @@ function Invoke-FltDiagnostics {
         'Show-FleetBatchDashboard','Update-FltBatchRow','Show-FltTable',
         'Get-FltStoredPassword','Set-FltStoredPassword','Remove-FltStoredPassword',
         'Resolve-FltPassword','Write-FltBatchEntry','Invoke-FltWithStdin',
-        'Test-FltFeatureAvailable','Get-FltTcpkgExe'
+        'Test-FltFeatureAvailable','Get-FltTcpkgExe',
+        'Invoke-UiConfigMenu','_Save-UiCfgValue'
     )
     $missingFns = @($requiredFunctions | Where-Object { -not (Get-Command $_ -ErrorAction SilentlyContinue) })
     if ($missingFns.Count -eq 0) {

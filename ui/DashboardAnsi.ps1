@@ -47,12 +47,22 @@ function _Ansi_ShowFleetDashboard {
     param(
         [FleetTarget[]] $Targets,
         [string[]]      $ResultLines = @(),
-        [string]        $LastCommand = ''
+        [string]        $LastCommand = '',
+        [int]           $Page        = 0   # 0-based current page
     )
-    $sw = _Ansi_GetSafeWidth
-    $n  = $Targets.Count
+    $sw       = _Ansi_GetSafeWidth
+    $total    = $Targets.Count
+    $pageSize = [Math]::Max(1, [int](Get-FltCfgValue 'ui' 'dashboardPageSize' 20))
+
+    # Slice targets for current page
+    $totalPages = [Math]::Max(1, [Math]::Ceiling($total / $pageSize))
+    $page       = [Math]::Max(0, [Math]::Min($page, $totalPages - 1))
+    $offset     = $page * $pageSize
+    $pageTargets = @($Targets | Select-Object -Skip $offset -First $pageSize)
+    $n          = $pageTargets.Count
+
     $maxResult = 4
-    $Script:FltDashHeight = 1 + 1 + $n + 1 + 1 + 1 + 1 + $maxResult + 1
+    $Script:FltDashHeight = 1 + 1 + $n + 1 + 1 + $(if ($totalPages -gt 1) { 2 } else { 1 }) + 1 + $maxResult + 1
 
     Clear-Host
 
@@ -65,8 +75,8 @@ function _Ansi_ShowFleetDashboard {
     _Ansi_PaintRow 2 $hdrLine 'Dark'
 
     for ($i = 0; $i -lt $n; $i++) {
-        $t      = $Targets[$i]
-        $num    = 11 + $i
+        $t      = $pageTargets[$i]
+        $num    = 11 + $offset + $i   # global target number
         $ia     = if ($t.InternetAccess) { 'Yes' } else { 'No' }
         $icon   = $t.ReachableIcon()
         $status = "$icon $($t.Reachable)"
@@ -80,11 +90,24 @@ function _Ansi_ShowFleetDashboard {
 
     $sepRow1   = 3 + $n
     $footerRow = $sepRow1 + 1
-    $sepRow2   = $footerRow + 1
+    $navRow    = $footerRow + 1
+    $sepRow2   = $navRow + $(if ($totalPages -gt 1) { 1 } else { 0 })
     $cmdRow    = $sepRow2 + 1
 
     _Ansi_PaintRow $sepRow1   ('-' * $sw) 'Dark'
-    _Ansi_PaintRow $footerRow '  1. Install   2. Upgrade   3. Uninstall   4. Package status   5. Outdated check   6. Profiles   7. Setup   0. Exit' 'Dark'
+    _Ansi_PaintRow $footerRow '  1. Install   2. Upgrade   3. Uninstall   4. Status   5. Outdated   6. Profiles   7. UI Config   8. Setup   0. Exit' 'Dark'
+
+    if ($totalPages -gt 1) {
+        $pageInfo = "  Page $($page + 1) of $totalPages"
+        if ($page -gt 0)              { $pageInfo += "   [-] Prev" }
+        if ($page -lt $totalPages-1)  { $pageInfo += "   [+] Next" }
+        $firstNum = $offset + 11
+        $lastNum  = $offset + $n + 10
+        $totalNum = $total + 10
+        $pageInfo += "   (showing $firstNum-$lastNum of $totalNum)"
+        _Ansi_PaintRow $navRow $pageInfo 'Dark'
+    }
+
     _Ansi_PaintRow $sepRow2   ('-' * $sw) 'Dark'
 
     $cmdText = if ($LastCommand) { "  > $LastCommand" } else { '' }

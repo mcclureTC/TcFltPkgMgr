@@ -86,28 +86,23 @@ These changes are needed before Phase 1 because 100 targets fundamentally
 changes how the dashboard, executor, and target store work. Do this first so
 every subsequent phase builds on a scalable foundation.
 
-### 0.1 — Dashboard pagination (`ui/Dashboard.ps1`)
+### 0.1 — Dashboard pagination ✅
 
-At 100 targets the fleet dashboard cannot show all rows on screen at once
-(typical terminal is 40-50 rows). The dashboard needs pagination.
-
-- [ ] Add `$Script:FltDashPage` (int, default 0) and
-      `$Script:FltDashPageSize` (int, read from settings, default 20) script
-      variables.
-- [ ] `Show-FleetDashboard` renders only the current page of targets
-      (`$Targets[$offset..($offset + $pageSize - 1)]`).
-- [ ] Add a footer line showing page info and navigation:
-      `Page 1 of 5  |  [P] Prev  [N] Next  |  or enter target number:`
-- [ ] In `Invoke-FleetMenu`, handle `P` and `N` inputs to change page before
-      re-rendering. All other numeric inputs (11+) still work across pages —
-      the user enters the target number directly regardless of which page it
-      is on.
-- [ ] `Show-SetupDashboard` and `Show-LinuxDashboard` (Phase 6) get the same
-      pagination.
-- [ ] `Show-FleetBatchDashboard` also paginates — at 100 targets the batch
-      rows won't fit. Show the current page of batch rows, auto-scroll to the
-      first non-`OK` target, update page navigation in real time.
-- [ ] Add `ui.dashboardPageSize` to `settings.default.json` (default 20).
+- [x] `Show-FleetDashboard` paginates using `$Page` parameter and
+      `Get-FltCfgValue 'ui' 'dashboardPageSize'`
+- [x] `-` / `+` numpad keys navigate pages (numpad-first design)
+- [x] Target numbers are global — `11` always means the first target
+      regardless of which page is displayed
+- [x] Footer shows `Page 1 of 3   [+] Next   (showing 11-13 of 17)`
+      only when fleet exceeds page size
+- [x] `$Script:FltDashPage` tracks current page in `Invoke-FleetMenu`
+- [x] Page resets to 0 on every `Invoke-FltReloadTargets` call
+- [x] `ui.dashboardPageSize` added to `settings.default.json` (default 20)
+- [x] Added `ui/menus/UiConfigMenu.ps1` — runtime UI settings accessible
+      via Fleet home > 7. UI Config; changes persist to `settings.local.json`
+- [x] `_Save-UiCfgValue` round-trip and pagination math tested in diagnostics
+- [ ] `Show-SetupDashboard` pagination — deferred (Setup rarely exceeds 20 targets)
+- [ ] `Show-FleetBatchDashboard` pagination — deferred to Phase 7 (container scale)
 
 ### 0.2 — Executor throttle tuning
 

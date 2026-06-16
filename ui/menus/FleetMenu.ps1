@@ -57,11 +57,12 @@ function Invoke-FleetMenu {
     $Script:FleetTargets       = @(Get-FleetTargets -Silent)
     $Script:FltMenuLastCmd     = ''
     $Script:FltMenuResultLines = @()
+    $Script:FltDashPage        = 0
     $reachJob                  = Start-FltReachJob $Script:FleetTargets
 
     # Mark all targets as 'checking' while the background job runs
     foreach ($t in $Script:FleetTargets) { $t.Reachable = 'checking' }
-    Show-FleetDashboard -Targets $Script:FleetTargets `
+    Show-FleetDashboard -Targets $Script:FleetTargets -Page $Script:FltDashPage `
         -LastCommand $Script:FltMenuLastCmd -ResultLines $Script:FltMenuResultLines
     Write-Host -NoNewline '  Choice: '
 
@@ -78,7 +79,7 @@ function Invoke-FleetMenu {
                         if ($tgt) { $tgt.Reachable = if ($r.Reachable) { 'online' } else { 'offline' } }
                     }
                     # Repaint dashboard then restore prompt and any typed chars
-                    Show-FleetDashboard -Targets $Script:FleetTargets `
+                    Show-FleetDashboard -Targets $Script:FleetTargets -Page $Script:FltDashPage `
                         -LastCommand $Script:FltMenuLastCmd -ResultLines $Script:FltMenuResultLines
                     Write-Host -NoNewline "  Choice: $inputBuffer"
                 }
@@ -107,11 +108,31 @@ function Invoke-FleetMenu {
         Write-Host ''   # newline after Enter
         $choice = $inputBuffer.Trim()
 
-        $n = $Script:FleetTargets.Count
+        $n        = $Script:FleetTargets.Count
+        $pageSize = [Math]::Max(1, [int](Get-FltCfgValue 'ui' 'dashboardPageSize' 20))
+        $maxPage  = [Math]::Max(0, [Math]::Ceiling($n / $pageSize) - 1)
 
-        if ($choice -notmatch '^\d+$') {
-            $Script:FltMenuResultLines = @('Please enter a number.')
-            Show-FleetDashboard -Targets $Script:FleetTargets `
+        # Page navigation — numpad - (prev) and + (next)
+        if ($choice -eq '-') {
+            $Script:FltDashPage = [Math]::Max(0, $Script:FltDashPage - 1)
+            $Script:FltMenuResultLines = @()
+            Show-FleetDashboard -Targets $Script:FleetTargets -Page $Script:FltDashPage `
+                -LastCommand $Script:FltMenuLastCmd -ResultLines $Script:FltMenuResultLines
+            Write-Host -NoNewline '  Choice: '
+            continue
+        }
+        if ($choice -eq '+') {
+            $Script:FltDashPage = [Math]::Min($maxPage, $Script:FltDashPage + 1)
+            $Script:FltMenuResultLines = @()
+            Show-FleetDashboard -Targets $Script:FleetTargets -Page $Script:FltDashPage `
+                -LastCommand $Script:FltMenuLastCmd -ResultLines $Script:FltMenuResultLines
+            Write-Host -NoNewline '  Choice: '
+            continue
+        }
+
+        if ($choice -notmatch '^\d+$' -and $choice -notin @('-','+')) {
+            $Script:FltMenuResultLines = @('Please enter a number, - (prev page), or + (next page).')
+            Show-FleetDashboard -Targets $Script:FleetTargets -Page $Script:FltDashPage `
                 -LastCommand $Script:FltMenuLastCmd -ResultLines $Script:FltMenuResultLines
             Write-Host -NoNewline '  Choice: '
             continue
@@ -125,14 +146,14 @@ function Invoke-FleetMenu {
             return
         }
 
-        # 11..10+n — target selected: show per-target actions
+        # 11..10+n — target selected: global numbering, works across all pages
         if ($num -ge 11 -and $num -le (10 + $n)) {
             $tgt = $Script:FleetTargets[$num - 11]
             $Script:FltMenuResultLines = @(
                 "$($tgt.Name)  ($($tgt.Address))  Internet: $(if ($tgt.InternetAccess) {'Yes'} else {'No'})",
                 '1. Verify   2. Edit   3. Remove   0. Cancel'
             )
-            Show-FleetDashboard -Targets $Script:FleetTargets `
+            Show-FleetDashboard -Targets $Script:FleetTargets -Page $Script:FltDashPage `
                 -LastCommand $Script:FltMenuLastCmd -ResultLines $Script:FltMenuResultLines
             $verb = (Read-Host '  Action').Trim()
 
@@ -149,7 +170,7 @@ function Invoke-FleetMenu {
 
             } elseif ($verb -eq '3') {
                 $Script:FltMenuResultLines = @("Remove '$($tgt.Name)'?  1. Yes  0. No")
-                Show-FleetDashboard -Targets $Script:FleetTargets `
+                Show-FleetDashboard -Targets $Script:FleetTargets -Page $Script:FltDashPage `
                     -LastCommand $Script:FltMenuLastCmd -ResultLines $Script:FltMenuResultLines
                 Write-Host -NoNewline '  Choice: '
                 $confirm = $null
@@ -170,7 +191,7 @@ function Invoke-FleetMenu {
                 $Script:FltMenuResultLines = @()
             }
 
-            Show-FleetDashboard -Targets $Script:FleetTargets `
+            Show-FleetDashboard -Targets $Script:FleetTargets -Page $Script:FltDashPage `
                 -LastCommand $Script:FltMenuLastCmd -ResultLines $Script:FltMenuResultLines
             Write-Host -NoNewline '  Choice: '
             continue
@@ -183,12 +204,13 @@ function Invoke-FleetMenu {
         elseif ($num -eq 4) { Invoke-PackageStatusMenu }
         elseif ($num -eq 5) { Invoke-OutdatedCheckMenu }
         elseif ($num -eq 6) { Invoke-ProfileMenu }
-        elseif ($num -eq 7) { Invoke-SetupMenu; $reachJob = Invoke-FltReloadTargets $reachJob }
+        elseif ($num -eq 7) { Invoke-UiConfigMenu }
+        elseif ($num -eq 8) { Invoke-SetupMenu; $reachJob = Invoke-FltReloadTargets $reachJob }
         else {
-            $Script:FltMenuResultLines = @("Enter 11-$(10+$n) for a target, 1-7 for operations, 0 to exit.")
+            $Script:FltMenuResultLines = @("Enter 11-$(10+$n) for a target, 1-8 for operations, 0 to exit.")
         }
 
-        Show-FleetDashboard -Targets $Script:FleetTargets `
+        Show-FleetDashboard -Targets $Script:FleetTargets -Page $Script:FltDashPage `
             -LastCommand $Script:FltMenuLastCmd -ResultLines $Script:FltMenuResultLines
         Write-Host -NoNewline '  Choice: '
     }

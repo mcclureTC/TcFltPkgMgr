@@ -112,6 +112,8 @@ From the main menu, select **1. Fleet Install**.
 
 Targets with Internet Access = Yes install via parallel SSH. Targets missing the required feed automatically switch to push-from-local and are restored after the operation.
 
+Use `-` and `+` on the numeric keypad to page through the target list when the fleet exceeds the page size (default 20, configurable via **7. UI Config**).
+
 ---
 
 ## Other Operations
@@ -122,7 +124,8 @@ Targets with Internet Access = Yes install via parallel SSH. Targets missing the
 | **3. Fleet Uninstall** | Uninstall a package across selected targets |
 | **4. Package Status** | Check installed version of a package across all targets at once |
 | **5. Outdated Check** | List all packages with newer versions available across the fleet |
-| **7. Setup** | Add/remove targets, manage feeds, import/export config, view command log |
+| **7. UI Config** | Page size, display backend, and other display preferences |
+| **8. Setup** | Add/remove targets, manage feeds, import/export config, view command log |
 
 ---
 
