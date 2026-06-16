@@ -127,6 +127,24 @@ Set-FltDisplayBackend `
 # Read-only mode - true = no changes are made; commands are shown but not run.
 $Script:FltReadOnly = -not $Live
 
+# OS detection — used for feature gating and backend selection.
+# $IsWindows / $IsLinux / $IsMacOS are PS7 automatic variables.
+$Script:FltOS = if ($IsWindows) { 'windows' } elseif ($IsLinux) { 'linux' } else { 'macos' }
+
+# Feature availability map — gates OS-specific operations cleanly.
+# Menus check Test-FltFeatureAvailable before offering platform-specific options.
+$Script:FltFeatures = @{
+    'tcpkg-local'        = $IsWindows   # local tcpkg (feed management, push-from-local)
+    'winget-local'       = $IsWindows   # local winget
+    'push-from-local'    = $IsWindows   # tcpkg -r push requires local tcpkg
+    'credential-manager' = $IsWindows   # Windows DPAPI credential store
+    'ansible'            = $true        # available on all platforms
+    'docker'             = $true        # available on all platforms
+    'posh-ssh'           = $true        # available on all platforms
+}
+
+
+
 # Last exit code from a tcpkg call.
 $Script:FltLastExit = 0
 

@@ -279,3 +279,25 @@ function Import-FltConfig {
         Remove-Item $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
+
+# ── Platform feature gating ───────────────────────────────────────────────────
+
+# Returns $true if the named feature is available on the current OS.
+# Used by menus to show/hide or grey-out platform-specific options.
+#
+# Features:
+#   tcpkg-local        — local tcpkg executable (Windows only)
+#   winget-local       — local winget (Windows only)
+#   push-from-local    — tcpkg -r push from local machine (Windows only)
+#   credential-manager — Windows DPAPI credential store (Windows only)
+#   ansible            — Ansible playbook execution (all platforms)
+#   docker             — Docker CLI operations (all platforms)
+#   posh-ssh           — Posh-SSH module (all platforms)
+function Test-FltFeatureAvailable {
+    param([string]$Feature)
+    if ($Script:FltFeatures -and $Script:FltFeatures.ContainsKey($Feature)) {
+        return $Script:FltFeatures[$Feature]
+    }
+    # Unknown feature — assume available to avoid false negatives
+    return $true
+}

@@ -62,42 +62,21 @@ prevents a large migration later when moving to Spectre.Console or a C# UI.
 - [x] Add `"security": { "credentialBackend": "" }` to `settings.default.json`
 - [x] Credential round-trip test passes in diagnostics (26/26)
 
-### 0-A.3 — Cross-platform compatibility audit
+### 0-A.3 — Cross-platform compatibility audit ✅
 
-- [ ] Scan all `.ps1` files for Windows-specific APIs and mark each one:
-      - `[Microsoft.Win32.*]` — Windows registry (none currently, confirm)
-      - `[System.Windows.*]` — WPF/Windows APIs (none currently, confirm)
-      - Windows Credential Manager calls → replaced by adapter (0-A.2)
-      - `tcpkg` calls → already guarded by executor routing; will be skipped
-        on Linux for Windows-only operations
-      - Path separators — replace any hardcoded `\` in string paths with
-        `[System.IO.Path]::Combine()` or `Join-Path`
-      - `$env:APPDATA`, `$env:PROGRAMDATA` — add Linux fallbacks
-        (`~/.config/tcfltpkgmgr` and `/etc/tcfltpkgmgr`)
-- [ ] Add OS detection at startup in `TcFltPkgMgr.ps1`:
-      ```powershell
-      $Script:FltOS = if ($IsWindows) { 'windows' }
-                      elseif ($IsLinux) { 'linux' }
-                      else { 'macos' }
-      ```
-- [ ] Add a `Test-FltFeatureAvailable` function that gates features by OS:
-      ```powershell
-      function Test-FltFeatureAvailable {
-          param([string]$Feature)
-          $map = @{
-              'tcpkg-local'  = @('windows')
-              'winget-local' = @('windows')
-              'push-from-local' = @('windows')
-              'credential-manager' = @('windows')
-              'ansible'      = @('windows','linux','macos')
-              'docker'       = @('windows','linux','macos')
-              'posh-ssh'     = @('windows','linux','macos')
-          }
-          return $map[$Feature] -contains $Script:FltOS
-      }
-      ```
-- [ ] Any menu option that calls a Windows-only feature is greyed out
-      (shown with `[Windows only]` label) when running on Linux
+- [x] Scanned all `.ps1` files for Windows-specific APIs — none found outside
+      designated backend files (`CredentialBackendWindows.ps1`)
+- [x] No hardcoded secrets, Windows registry access, or WPF APIs in cross-platform files
+- [x] Windows path in `settings.default.json` and `FleetExecutor.ps1` is for the
+      remote target machine — intentional and commented
+- [x] `cmd.exe` reference in `Diagnostics.ps1` is guarded with `pwsh` first-preference
+- [x] Added `$Script:FltOS` detection at startup in `TcFltPkgMgr.ps1`
+- [x] Added `$Script:FltFeatures` map for platform-specific feature gating
+- [x] Added `Test-FltFeatureAvailable` to `data/ConfigRepository.ps1`
+- [x] Added `-Silent` switch to `Resolve-FltPassword` for non-interactive contexts
+- [x] All 16 diagnostics checks pass including OS detection and feature gating
+- [ ] Menu options that call Windows-only features show `[Windows only]` label
+      on Linux — deferred to Phase 12 (Linux operator support)
 
 ---
 

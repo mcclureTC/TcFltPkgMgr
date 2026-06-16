@@ -14,11 +14,14 @@ function Resolve-FltPassword {
     param(
         [string] $CredentialName,
         [string] $PromptLabel,
-        [switch] $OfferToSave
+        [switch] $OfferToSave,
+        [switch] $Silent        # suppress informational console output (for diagnostics/scripts)
     )
     $stored = Get-FltStoredPassword -CredentialName $CredentialName
     if ($stored) {
-        Write-Host "  (Using stored credential for '$CredentialName')" -ForegroundColor DarkGray
+        if (-not $Silent) {
+            Write-Host "  (Using stored credential for '$CredentialName')" -ForegroundColor DarkGray
+        }
         return $stored
     }
 

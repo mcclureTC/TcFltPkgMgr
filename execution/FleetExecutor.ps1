@@ -18,6 +18,8 @@ function Get-FltRemoteFeedStatus {
 
     $result  = @{}
     $useKey  = -not [string]::IsNullOrWhiteSpace($KeyFile)
+    # remoteTcpkgPath is the path to tcpkg on the REMOTE Windows target machine —
+    # not the local operator machine. Safe to use even when operator runs on Linux.
     $remoteTcpkg = (Get-FltCfgValue 'tcpkg' 'remoteTcpkgPath' 'C:\ProgramData\Beckhoff\TcPkg\TcPkg.exe')
 
     $findings = $Targets | ForEach-Object -Parallel {

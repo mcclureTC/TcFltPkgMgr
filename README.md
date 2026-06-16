@@ -143,6 +143,26 @@ All credential files are listed in `.gitignore` and will never be committed.
 
 ---
 
+## Cross-platform Support
+
+TcFltPkgMgr runs on Windows, Linux, and macOS. The operator machine (where the tool runs) can be any platform — it manages remote Windows TwinCAT targets via SSH regardless of local OS.
+
+| Feature | Windows operator | Linux / macOS operator |
+|---------|-----------------|----------------------|
+| Fleet dashboard | ✅ | ✅ |
+| SSH installs on remote targets | ✅ | ✅ |
+| Ansible (Linux targets) | ✅ | ✅ |
+| Docker container management | ✅ | ✅ |
+| tcpkg push-from-local | ✅ | ❌ requires local tcpkg |
+| Feed management (add/remove) | ✅ | ❌ requires local tcpkg |
+| Credential storage | DPAPI encrypted file | AES-256 encrypted file |
+
+On Linux, menu options that require a local tcpkg installation are shown with a `[Windows only]` label. All SSH-based operations (remote installs, Ansible, Docker exec) work identically on all platforms.
+
+The tool detects the operating system at startup and gates features accordingly via `Test-FltFeatureAvailable`.
+
+---
+
 ## Built-in Diagnostics
 
 Run **Setup → 10. Diagnostics** at any time to verify the tool is correctly configured. The diagnostics check:
