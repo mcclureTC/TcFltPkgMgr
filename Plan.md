@@ -9,6 +9,24 @@ that can be completed and tested independently before moving to the next.
 
 ---
 
+## Seven-step development process
+
+Every phase follows these steps in order before being marked complete:
+
+| Step | Action |
+|------|--------|
+| 1 | **Code** — implement the feature or change |
+| 2 | **Write or update tests** — add diagnostics and/or integration tests; explicitly decide whether new tests are needed (the answer may be "none required") |
+| 3 | **Run all tests** — confirm all diagnostics and integration tests pass |
+| 4 | **Security and license check** — scan changed files for Windows-only APIs, hardcoded secrets, and new dependencies |
+| 5 | **Update `.gitignore`** — add any new files that must not be committed |
+| 6 | **Update `README.md`** — document new behaviour, commands, or configuration |
+| 7 | **Update `Plan.md`** — mark completed items, record deferred items with their target phase |
+
+Step 2 is an explicit gate — it forces the question "what should be tested here?" before running anything. The answer may legitimately be "nothing new" (e.g. pure rendering changes already covered by existing tests), but it must be a conscious decision, not an omission.
+
+---
+
 ## Conventions carried forward from existing code
 
 - All numbered list items use base-11 when coexisting with single-digit menu
@@ -199,20 +217,14 @@ every subsequent phase builds on a scalable foundation.
 
 ## Phase 2 — Fleet dashboard updates
 
-### 2.1 — `Show-FleetDashboard` (`ui/DashboardAnsi.ps1`)
+### 2.1 — `Show-FleetDashboard` (`ui/DashboardAnsi.ps1`) ✅
 
-> Pagination, sort/filter, `-`/`+` nav, and `EffectiveAddress()` are already
-> implemented (Phases 0.1, 0.3). Remaining items are cosmetic column additions
-> that are low value until Linux/container targets actually exist in the fleet.
-> **Defer all of 2.1 to Phase 9** — do alongside the full type/OS Add Target flow
-> so columns are visible with real data immediately.
-
-- [ ] Add `OS` column (`Win`/`Lnx`) and `Type` column (`Phys`/`VM`/`Cntr`) —
-      defer to Phase 9 (after Add Target supports OS/Type selection)
-- [ ] Color rows by type: Linux = Cyan, Container = Magenta — defer to Phase 9
-- [ ] Show `---` in Internet column for Linux/container targets — defer to Phase 9
-- [ ] Container address column shows `<DockerHost>/<ContainerName>` — already
-      implemented via `EffectiveAddress()` in `FleetTarget` class ✅
+- [x] `OS` column (`Win`/`Lnx`/`Mac`) and `Type` column (`Phys`/`VM`/`Cntr`) added
+- [x] Row colours: Linux/macOS = Cyan, Container = Magenta, Windows = reachability-based
+- [x] `Internet` column shows `---` for Linux, macOS, and container targets
+- [x] Container address column uses `EffectiveAddress()` → `<DockerHost>/<ContainerName>`
+- [x] OS and Type added as sortable/filterable columns in sort picker
+- [x] All 29 diagnostics and 44 integration tests pass
 
 ### 2.2 — `Show-SetupDashboard` (`ui/DashboardAnsi.ps1`)
 

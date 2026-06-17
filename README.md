@@ -114,6 +114,8 @@ Targets with Internet Access = Yes install via parallel SSH. Targets missing the
 
 Use `-` and `+` on the numeric keypad to page through the target list when the fleet exceeds the page size (default 20, configurable via **7. UI Config**).
 
+The dashboard shows `OS` (`Win`/`Lnx`/`Mac`) and `Type` (`Phys`/`VM`/`Cntr`) columns for every target. Row colours indicate target type: Linux/macOS rows appear in cyan, container rows in magenta, and Windows rows use green/red/grey for online/offline/checking. The `Internet` column shows `---` for Linux and container targets — they manage their own internet access and do not use the push-from-local path.
+
 Press `*` to sort by any column — Name, Address, Port, Internet Access, or Status. The sort order is saved to `targets.local.json` immediately so it persists across restarts. Press `*` again on the same column to toggle ascending/descending.
 
 Press `/` to filter the target list by any column value. Active filters show in the dashboard: `[Filter: Reachable = 'online']  7 → 4 targets`. Press `/` then `0` to clear. Sort and filter state is shared between Fleet and Setup — both screens always show targets in the same order.

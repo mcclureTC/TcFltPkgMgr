@@ -83,26 +83,42 @@ function _Ansi_ShowFleetDashboard {
 
     # Column headers with sort indicators
     $hName   = Get-FltSortHeader 'Target'   'Name'           $SortState
+    $hOS     = Get-FltSortHeader 'OS'       'OS'             $SortState
+    $hType   = Get-FltSortHeader 'Type'     'TargetType'     $SortState
     $hHost   = Get-FltSortHeader 'Address'  'Address'        $SortState
     $hPort   = Get-FltSortHeader 'Port'     'Port'           $SortState
     $hIA     = Get-FltSortHeader 'Internet' 'InternetAccess' $SortState
     $hStatus = Get-FltSortHeader 'Status'   'Reachable'      $SortState
-    _Ansi_PaintRow 2 ('  {0,3}  {1} {2,-18} {3,-6} {4,-8} {5}' -f `
-        '#', $hName.PadRight($nameColW), $hHost, $hPort, $hIA, $hStatus) 'Dark'
+    _Ansi_PaintRow 2 ('  {0,3}  {1} {2,-4} {3,-5} {4,-18} {5,-6} {6,-8} {7}' -f `
+        '#', $hName.PadRight($nameColW), $hOS, $hType, $hHost, $hPort, $hIA, $hStatus) 'Dark'
 
     for ($i = 0; $i -lt $n; $i++) {
         $t      = $pageTargets[$i]
         # Global number = position in filtered+sorted display, not raw $Targets
         $num    = 11 + $offset + $i
-        $ia     = if ($t.InternetAccess) { 'Yes' } else { 'No' }
+        $os     = $t.OsDisplay()
+        $type   = $t.TypeDisplay()
+        $addr   = $t.EffectiveAddress()
+
+        # Internet Access: show '---' for Linux and container targets —
+        # they manage their own internet access and don't use push-from-local
+        $ia = if ($t.OS -eq 'linux' -or $t.OS -eq 'macos' -or $t.TargetType -eq 'container') {
+            '---'
+        } elseif ($t.InternetAccess) { 'Yes' } else { 'No' }
+
         $icon   = $t.ReachableIcon()
         $status = "$icon $($t.Reachable)"
-        if     ($t.Reachable -eq 'online')  { $stClr = 'Green' }
-        elseif ($t.Reachable -eq 'offline') { $stClr = 'Red'   }
-        else                                 { $stClr = 'Dark'  }
-        $line = '  {0,3}. {1} {2,-18} {3,-6} {4,-8} {5}' -f `
-                $num, $t.Name.PadRight($nameColW), $t.Address, $t.Port, $ia, $status
-        _Ansi_PaintRow (3 + $i) $line $stClr
+
+        # Row colour: Linux = Cyan, Container = Magenta, Windows = by reachability
+        $rowClr = if ($t.TargetType -eq 'container') { 'Magenta' }
+                  elseif ($t.OS -eq 'linux' -or $t.OS -eq 'macos') { 'Cyan' }
+                  elseif ($t.Reachable -eq 'online')  { 'Green' }
+                  elseif ($t.Reachable -eq 'offline') { 'Red'   }
+                  else                                 { 'Dark'  }
+
+        $line = '  {0,3}. {1} {2,-4} {3,-5} {4,-18} {5,-6} {6,-8} {7}' -f `
+                $num, $t.Name.PadRight($nameColW), $os, $type, $addr, $t.Port, $ia, $status
+        _Ansi_PaintRow (3 + $i) $line $rowClr
     }
 
     $sepRow1   = 3 + $n

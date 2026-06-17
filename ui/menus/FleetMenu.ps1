@@ -126,8 +126,8 @@ function Invoke-FleetMenu {
     } else { $null }
 
     # Column definitions for sort/filter pickers
-    $sortCols  = @('Name','Address','Port','Internet Access','Status')
-    $sortProps = @('Name','Address','Port','InternetAccess','Reachable')
+    $sortCols  = @('Name','OS','Type','Address','Port','Internet Access','Status')
+    $sortProps = @('Name','OS','TargetType','Address','Port','InternetAccess','Reachable')
 
     # Helper: repaint with current sort/filter/page state
     # Also updates $Script:FltDisplayTargets — the sorted+filtered view used for selection
