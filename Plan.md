@@ -226,11 +226,13 @@ every subsequent phase builds on a scalable foundation.
 - [x] OS and Type added as sortable/filterable columns in sort picker
 - [x] All 29 diagnostics and 44 integration tests pass
 
-### 2.2 — `Show-SetupDashboard` (`ui/DashboardAnsi.ps1`)
+### 2.2 — `Show-SetupDashboard` (`ui/DashboardAnsi.ps1`) ✅
 
-> Defer to Phase 9 alongside 2.1. Setup pagination deferred to Phase 12 (low priority).
-
-- [ ] Add `OS` and `Type` columns to targets view — defer to Phase 9
+- [x] `OS` and `Type` columns added to targets view — same pattern as Fleet dashboard (2.1)
+- [x] Row colours: Linux/macOS = Cyan, Container = Magenta, Windows = default
+- [x] `Internet` column shows `---` for Linux, macOS, and container targets
+- [x] `EffectiveAddress()` used for container address column
+- [x] OS and Type added to Setup sort picker columns
 - [ ] Pagination — low priority; Setup rarely exceeds 20 targets (revisit Phase 12)
 
 ### 2.3 — `Show-FleetBatchDashboard` (`ui/DashboardAnsi.ps1`)

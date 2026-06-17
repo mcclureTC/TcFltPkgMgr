@@ -364,8 +364,8 @@ function Invoke-SetupMenu {
     $mode        = 'targets'
 
     # Column definitions vary by mode
-    $targetCols  = @('Name','Address','Port','Internet Access')
-    $targetProps = @('Name','Address','Port','InternetAccess')
+    $targetCols  = @('Name','OS','Type','Address','Port','Internet Access')
+    $targetProps = @('Name','OS','TargetType','Address','Port','InternetAccess')
     $sourceCols  = @('Priority','Name','State')
     $sourceProps = @('Pri','Name','State')
 

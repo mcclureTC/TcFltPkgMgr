@@ -208,16 +208,27 @@ function _Ansi_ShowSetupDashboard {
         }
         if ($n -eq 0) { _Ansi_PaintRow 3 '  (no sources configured)' 'Dark' }
     } else {
-        $hName = Get-FltSortHeader 'Name'     'Name'          $SortState
-        $hAddr = Get-FltSortHeader 'Address'  'Address'       $SortState
-        $hPort = Get-FltSortHeader 'Port'     'Port'          $SortState
+        $hName = Get-FltSortHeader 'Name'     'Name'           $SortState
+        $hOS   = Get-FltSortHeader 'OS'       'OS'             $SortState
+        $hType = Get-FltSortHeader 'Type'     'TargetType'     $SortState
+        $hAddr = Get-FltSortHeader 'Address'  'Address'        $SortState
+        $hPort = Get-FltSortHeader 'Port'     'Port'           $SortState
         $hIA   = Get-FltSortHeader 'Internet' 'InternetAccess' $SortState
-        _Ansi_PaintRow 2 ('  {0,3}  {1,-22} {2,-18} {3,-6} {4,-8} {5}' -f '#',$hName,$hAddr,$hPort,$hIA,'Status') 'Dark'
+        _Ansi_PaintRow 2 ('  {0,3}  {1,-22} {2,-4} {3,-5} {4,-18} {5,-6} {6}' -f `
+            '#', $hName, $hOS, $hType, $hAddr, $hPort, $hIA) 'Dark'
         for ($i = 0; $i -lt $n; $i++) {
-            $t  = $display[$i]
-            $ia = if ($t.InternetAccess) { 'Yes' } else { 'No' }
-            _Ansi_PaintRow (3 + $i) ('  {0,3}. {1,-22} {2,-18} {3,-6} {4,-8}' -f `
-                ($i + 11), $t.Name, $t.Address, $t.Port, $ia) ''
+            $t    = $display[$i]
+            $os   = $t.OsDisplay()
+            $type = $t.TypeDisplay()
+            $addr = $t.EffectiveAddress()
+            $ia   = if ($t.OS -eq 'linux' -or $t.OS -eq 'macos' -or $t.TargetType -eq 'container') {
+                '---'
+            } elseif ($t.InternetAccess) { 'Yes' } else { 'No' }
+            $rowClr = if ($t.TargetType -eq 'container')                          { 'Magenta' }
+                      elseif ($t.OS -eq 'linux' -or $t.OS -eq 'macos')            { 'Cyan'    }
+                      else                                                         { ''        }
+            _Ansi_PaintRow (3 + $i) ('  {0,3}. {1,-22} {2,-4} {3,-5} {4,-18} {5,-6} {6}' -f `
+                ($i + 11), $t.Name, $os, $type, $addr, $t.Port, $ia) $rowClr
         }
         if ($n -eq 0) { _Ansi_PaintRow 3 '  (no remote targets configured)' 'Dark' }
     }
