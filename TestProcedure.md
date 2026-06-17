@@ -239,8 +239,9 @@ Tests WinGet availability, executor routing logic, local package search, and ver
 | 9e | Routing: both target | `Get-FltEffectivePackageManager` returns `'both'` for a target with `PackageManager='both'` | Creates synthetic target, checks result |
 | 9f | `_Get-WinGetCommand` command format | `winget install/upgrade/uninstall` commands include correct verb, package id, and `--silent --disable-interactivity` flags | Calls `_Get-WinGetCommand` for each verb with a known package id, checks all three output strings |
 | 9g | `Search-FltWinGetPackage` returns results _(requires winget)_ | Searching for `'notepad'` returns at least one result with correct shape | Calls `Search-FltWinGetPackage -SearchTerm 'notepad'`, checks count and that result has `Name`, `Version`, `Source` properties. WARN if no results. |
-| 9h | `Get-FltWinGetVersions` returns versions _(requires winget)_ | `winget show --id Microsoft.Notepad --versions` returns a list | Calls `Get-FltWinGetVersions -PackageId 'Microsoft.Notepad'`, checks count. WARN if package not in configured sources. |
-| 9i | `Get-FltWinGetInstalledIndex` returns hashtable _(requires winget)_ | `winget list` is parsed into a name→version hashtable | Calls `Get-FltWinGetInstalledIndex`, checks return is a hashtable |
+| 9h | `Get-FltWinGetVersions` returns versions _(requires winget)_ | `winget show --id 7zip.7zip --versions` returns a list | Calls `Get-FltWinGetVersions -PackageId '7zip.7zip'`, checks count and shape. WARN if package not in configured sources. |
+| 9i | `Get-FltWinGetInstalledIndex` returns hashtable _(requires winget)_ | `winget list` is parsed into a name→version hashtable with lowercase keys | Calls `Get-FltWinGetInstalledIndex`, checks return is a hashtable and all keys are lowercase (consistent with `Get-FltInstalledIndex` contract). WARN if winget not on machine. |
+| 9j | WinGet target with `IA=False` routes to push bucket | `FleetExecutor` sends `InternetAccess=False` targets to the push bucket regardless of `PackageManager` | Creates synthetic `FleetTarget` with `PackageManager='winget'` and `InternetAccess=$false`, simulates `FleetExecutor` bucket logic, checks `goesPush=true` and `goesWinGet=false` |
 
 ---
 

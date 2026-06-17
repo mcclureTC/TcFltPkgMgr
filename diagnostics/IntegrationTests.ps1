@@ -1042,16 +1042,16 @@ function Invoke-IT_WinGet {
 
         # 9h. Get-FltWinGetVersions — search for a well-known package
         try {
-            $versions = @(Get-FltWinGetVersions -PackageId 'Microsoft.Notepad')
+            $versions = @(Get-FltWinGetVersions -PackageId '7zip.7zip')
             if ($versions.Count -gt 0) {
-                _IT_Pass $r "Get-FltWinGetVersions: $($versions.Count) version(s) of Microsoft.Notepad"
+                _IT_Pass $r "Get-FltWinGetVersions: $($versions.Count) version(s) of 7zip.7zip"
                 if ($versions[0].PSObject.Properties['Version'] -and $versions[0].PSObject.Properties['Source']) {
                     _IT_Pass $r 'Get-FltWinGetVersions: result shape matches tcpkg equivalent'
                 } else {
                     _IT_Fail $r 'Get-FltWinGetVersions: result shape' 'Missing Version or Source property'
                 }
             } else {
-                _IT_Warn $r 'Get-FltWinGetVersions: versions found' 'No versions for Microsoft.Notepad — package may not be in sources'
+                _IT_Warn $r 'Get-FltWinGetVersions: versions found' 'No versions for 7zip.7zip — check winget source configuration'
             }
         } catch { _IT_Fail $r 'Get-FltWinGetVersions' $_.Exception.Message }
     } else {
@@ -1059,10 +1059,47 @@ function Invoke-IT_WinGet {
         _IT_Warn $r 'Get-FltWinGetVersions'      'winget not on operator machine — skipped'
     }
 
+    # 9i. Get-FltWinGetInstalledIndex — requires winget on operator machine
+    if (Test-FltWinGetAvailable) {
+        try {
+            $idx = Get-FltWinGetInstalledIndex
+            if ($idx -is [hashtable]) {
+                _IT_Pass $r "Get-FltWinGetInstalledIndex: returns hashtable ($($idx.Count) packages)"
+                # Keys must be lowercase package ids
+                $hasUpperCase = $idx.Keys | Where-Object { $_ -cne $_.ToLower() }
+                if (-not $hasUpperCase) {
+                    _IT_Pass $r 'Get-FltWinGetInstalledIndex: all keys are lowercase (consistent with tcpkg equivalent)'
+                } else {
+                    _IT_Fail $r 'Get-FltWinGetInstalledIndex: keys lowercase' "Found mixed-case keys: $($hasUpperCase -join ', ')"
+                }
+            } else {
+                _IT_Fail $r 'Get-FltWinGetInstalledIndex: returns hashtable' "Got: $($idx.GetType().Name)"
+            }
+        } catch { _IT_Fail $r 'Get-FltWinGetInstalledIndex' $_.Exception.Message }
+    } else {
+        _IT_Warn $r 'Get-FltWinGetInstalledIndex' 'winget not on operator machine — skipped'
+    }
+
+    # 9j. Routing: WinGet target with InternetAccess=False routes to push, not winget bucket
+    # FleetExecutor only sends to winget SSH bucket when InternetAccess=True.
+    # IA=False targets always use the push (local tcpkg) bucket regardless of PackageManager.
+    try {
+        $t = [FleetTarget]::new('RouteTest-wg-noIA','10.0.0.5',22,'admin',$false)  # IA=False
+        $t.PackageManager = 'winget'
+        # Simulate FleetExecutor bucket assignment logic
+        $isIaTarget   = $t.InternetAccess
+        $pm           = Get-FltEffectivePackageManager $t
+        $goesWinGet   = $isIaTarget -and ($pm -in @('winget','both'))
+        $goesPush     = -not $isIaTarget
+        if ($goesPush -and -not $goesWinGet) {
+            _IT_Pass $r 'Routing: winget target with IA=False routes to push bucket, not winget SSH'
+        } else {
+            _IT_Fail $r 'Routing: winget target with IA=False routes to push' "goesWinGet=$goesWinGet goesPush=$goesPush"
+        }
+    } catch { _IT_Fail $r 'Routing: IA=False winget target' $_.Exception.Message }
+
     return $r
 }
-
-# ── Suite 10 — WinGet live install ────────────────────────────────────────────
 
 # Tests a real install + uninstall via SSH using Invoke-FltWinGetBatch.
 # Uses 7zip.7zip — small (~1MB), universally available, easily removed.

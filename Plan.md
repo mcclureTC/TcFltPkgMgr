@@ -334,8 +334,9 @@ every subsequent phase builds on a scalable foundation.
 
 ### 3.5.5 — Test results
 
-- Suite 19 (WinGet executor): 8/9 — 1 WARN (`Get-FltWinGetVersions` for `Microsoft.Notepad`
-  not in sources — environment-specific, not a code defect)
+- Suite 19 (WinGet executor): 11/12 — 1 WARN (`Get-FltWinGetVersions` for `Microsoft.Notepad`
+  not in sources — environment-specific, not a code defect). Added 9i (`Get-FltWinGetInstalledIndex`)
+  and 9j (IA=False routing) after Phase 3 review.
 - Suite 20 (WinGet live install): 8/8 ✅ — tested on DCC-4, fully automated including
   logon-triggered framework activation
 
