@@ -438,7 +438,7 @@ function Invoke-SetupMenu {
                 $result = "$($tgt.Name)  ($($tgt.Address))  — enter action for Config:"
                 Show-SetupDashboard -Mode 'targets' -Items $items -Result $result `
                     -SortState $activeSortState -FilterState $activeFilterState
-                Write-Host '  1. Verify   2. Edit   3. Remove   0. Cancel' -ForegroundColor Cyan
+                Write-Host '  1. Verify   2. Edit   3. Remove   4. Prepare target (install WinGet)   0. Cancel' -ForegroundColor Cyan
                 $verb = (Read-Host '  Action').Trim()
 
                 if ($verb -eq '1') {
@@ -459,6 +459,77 @@ function Invoke-SetupMenu {
                         $result = if ($ok) { "Removed: $($tgt.Name)" } else { "Remove failed: $($tgt.Name)" }
                     } else {
                         $result = 'Remove cancelled.'
+                    }
+                } elseif ($verb -eq '4') {
+                    # Prepare target — install WinGet via SSH
+                    $cred = $null
+                    $pwd  = Resolve-FltPassword -CredentialName $tgt.Name -PromptLabel '' -Silent
+                    if ($pwd) {
+                        $sec  = ConvertTo-SecureString $pwd -AsPlainText -Force
+                        $cred = [System.Management.Automation.PSCredential]::new($tgt.User, $sec)
+                    } else {
+                        Clear-Host
+                        Write-Host "  Prepare target: $($tgt.Name)" -ForegroundColor Cyan
+                        Write-Host '  No stored credential found.' -ForegroundColor Yellow
+                        $pwdIn = (Read-Host "  Password for $($tgt.User)").Trim()
+                        if ($pwdIn) {
+                            $sec  = ConvertTo-SecureString $pwdIn -AsPlainText -Force
+                            $cred = [System.Management.Automation.PSCredential]::new($tgt.User, $sec)
+                        }
+                    }
+                    if ($cred) {
+                        Clear-Host
+                        Write-Host "  Installing WinGet on $($tgt.Name)..." -ForegroundColor Cyan
+                        Write-Host ''
+                        $prep = Install-FltWinGetOnTarget -Target $tgt -Credential $cred `
+                                    -OnProgress { param($msg) Write-Host "  $msg" -ForegroundColor DarkGray }
+                        Write-Host ''
+                        if ($prep.Ok) {
+                            Write-Host "  $($prep.Message)" -ForegroundColor Green
+                            $result = "WinGet installed on $($tgt.Name)"
+                        } else {
+                            $isHardWall = $prep.Message -match 'WindowsAppRuntime|headlessly'
+
+                            if ($isHardWall) {
+                                # Hard-wall: Microsoft.WindowsAppRuntime.1.8 cannot be installed headlessly
+                                Write-Host '  FAILED — Windows App Runtime dependency cannot be installed headlessly' -ForegroundColor Red
+                                Write-Host ''
+                                Write-Host '  Microsoft.WindowsAppRuntime.1.8 is a framework package delivered by' -ForegroundColor Yellow
+                                Write-Host '  Windows Update or Microsoft Store. On this machine (Windows Update' -ForegroundColor Yellow
+                                Write-Host '  disabled), it cannot be installed via SSH. Choose one option:' -ForegroundColor Yellow
+                                Write-Host ''
+                                Write-Host '  ── Option 1 — Enable Windows Update temporarily (recommended) ──────' -ForegroundColor Cyan
+                                Write-Host "     On $($tgt.Name): Settings > Windows Update > Check for updates" -ForegroundColor White
+                                Write-Host '     WindowsAppRuntime.1.8 installs automatically.' -ForegroundColor DarkGray
+                                Write-Host '     Then run Prepare target again — it will succeed.' -ForegroundColor DarkGray
+                                Write-Host ''
+                                Write-Host '  ── Option 2 — One interactive login (fastest) ──────────────────────' -ForegroundColor Cyan
+                                Write-Host "     RDP or physically log in to $($tgt.Name)." -ForegroundColor White
+                                Write-Host '     The Start menu loading activates the provisioned package.' -ForegroundColor DarkGray
+                                Write-Host '     Then run Prepare target again to verify.' -ForegroundColor DarkGray
+                                Write-Host ''
+                                Write-Host '  ── Option 3 — Use tcpkg instead (no action needed) ─────────────────' -ForegroundColor Cyan
+                                Write-Host "     $($tgt.Name) already works with tcpkg." -ForegroundColor White
+                                Write-Host '     Edit target > set PackageManager = tcpkg to skip WinGet.' -ForegroundColor DarkGray
+                                Write-Host ''
+                                Write-Host '  Note: winget has been provisioned on the target. Option 2 is the' -ForegroundColor DarkGray
+                                Write-Host '  fastest path — one login is all that is needed.' -ForegroundColor DarkGray
+                            } else {
+                                # Other failure — show raw message
+                                Write-Host '  FAILED' -ForegroundColor Red
+                                Write-Host ''
+                                foreach ($line in ($prep.Message -split "`n")) {
+                                    if ($line.Trim()) {
+                                        Write-Host "  $line" -ForegroundColor Yellow
+                                    }
+                                }
+                            }
+                            Write-Host ''
+                            $result = "WinGet install failed on $($tgt.Name) — see instructions above"
+                        }
+                        Read-Host '  Press Enter'
+                    } else {
+                        $result = 'Prepare cancelled — no credentials'
                     }
                 } else {
                     $result = ''

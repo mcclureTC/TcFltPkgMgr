@@ -96,9 +96,11 @@ function _Ansi_ShowFleetDashboard {
         $t      = $pageTargets[$i]
         # Global number = position in filtered+sorted display, not raw $Targets
         $num    = 11 + $offset + $i
-        $os     = $t.OsDisplay()
-        $type   = $t.TypeDisplay()
-        $addr   = $t.EffectiveAddress()
+        $os   = if ($t.OS -eq 'linux') { 'Lnx' } elseif ($t.OS -eq 'macos') { 'Mac' } else { 'Win' }
+        $type = if ($t.TargetType -eq 'container') { 'Cntr' } elseif ($t.TargetType -eq 'vm') { 'VM' } else { 'Phys' }
+        $addr = if ($t.TargetType -eq 'container' -and $t.DockerHost -and $t.ContainerName) {
+            "$($t.DockerHost)/$($t.ContainerName)"
+        } else { $t.Address }
 
         # Internet Access: show '---' for Linux and container targets —
         # they manage their own internet access and don't use push-from-local
@@ -218,9 +220,11 @@ function _Ansi_ShowSetupDashboard {
             '#', $hName, $hOS, $hType, $hAddr, $hPort, $hIA) 'Dark'
         for ($i = 0; $i -lt $n; $i++) {
             $t    = $display[$i]
-            $os   = $t.OsDisplay()
-            $type = $t.TypeDisplay()
-            $addr = $t.EffectiveAddress()
+            $os   = if ($t.OS -eq 'linux') { 'Lnx' } elseif ($t.OS -eq 'macos') { 'Mac' } else { 'Win' }
+            $type = if ($t.TargetType -eq 'container') { 'Cntr' } elseif ($t.TargetType -eq 'vm') { 'VM' } else { 'Phys' }
+            $addr = if ($t.TargetType -eq 'container' -and $t.DockerHost -and $t.ContainerName) {
+                "$($t.DockerHost)/$($t.ContainerName)"
+            } else { $t.Address }
             $ia   = if ($t.OS -eq 'linux' -or $t.OS -eq 'macos' -or $t.TargetType -eq 'container') {
                 '---'
             } elseif ($t.InternetAccess) { 'Yes' } else { 'No' }

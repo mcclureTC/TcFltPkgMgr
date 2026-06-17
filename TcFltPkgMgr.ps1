@@ -86,6 +86,8 @@ $modules = @(
     'data\TargetRepository.ps1',
     'data\PackageRepository.ps1',
     'data\FleetQuery.ps1',
+    'data\WinGetRepository.ps1',          # WinGet package search and version listing
+    'execution\WinGetExecutor.ps1',       # WinGet parallel SSH batch executor
     'execution\SshExecutor.ps1',
     'execution\FleetExecutor.ps1',
     'ui\Prompts.ps1',

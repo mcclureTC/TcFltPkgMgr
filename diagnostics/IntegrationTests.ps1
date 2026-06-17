@@ -904,6 +904,370 @@ function Get-IT_Suites {
             NeedsSSH    = $false
             PerTarget   = $true    # remote status query runs per target
             Function    = 'Invoke-IT_PackageQueries'
+        },
+        [pscustomobject]@{
+            Id          = 9
+            Name        = 'WinGet executor'
+            Description = 'WinGet available, executor routing logic, package search (if winget installed)'
+            NeedsTarget = $false
+            NeedsSSH    = $false
+            PerTarget   = $false   # routing logic is local; search runs once
+            Function    = 'Invoke-IT_WinGet'
+        },
+        [pscustomobject]@{
+            Id          = 10
+            Name        = 'WinGet live install'
+            Description = 'Real install/uninstall via SSH using Invoke-FltWinGetBatch [needs target]'
+            NeedsTarget = $true
+            NeedsSSH    = $true
+            PerTarget   = $true    # runs against each selected target
+            Function    = 'Invoke-IT_WinGetLive'
         }
     )
+}
+
+# ── Suite 9 — WinGet executor ─────────────────────────────────────────────────
+
+# Tests WinGet availability, executor routing logic, and local package search.
+# Routing tests run without WinGet installed — they test FleetExecutor bucket
+# assignments using synthetic FleetTarget objects.
+# Search tests WARN and skip if winget is not installed on the operator machine.
+function Invoke-IT_WinGet {
+    $r = _IT_NewResult
+    _IT_Section 'WinGet executor'
+
+    # 9a. Test-FltWinGetAvailable reports correctly
+    try {
+        $avail = Test-FltWinGetAvailable
+        $found = $null -ne (Get-Command 'winget' -ErrorAction SilentlyContinue)
+        if ($avail -eq $found) {
+            if ($avail) {
+                _IT_Pass $r 'Test-FltWinGetAvailable: winget found on operator machine'
+            } else {
+                _IT_Warn $r 'Test-FltWinGetAvailable: winget not found' 'Search/version tests will be skipped — install winget to enable'
+            }
+        } else {
+            _IT_Fail $r 'Test-FltWinGetAvailable: result matches Get-Command' "avail=$avail found=$found"
+        }
+    } catch { _IT_Fail $r 'Test-FltWinGetAvailable' $_.Exception.Message }
+
+    # 9b-9e. Executor routing — EffectivePackageManager() is a PS7 class method
+    # that cannot be assigned to a variable. Use -in operator directly on the method
+    # call in expression context instead.
+    try {
+        $t = [FleetTarget]::new('RouteTest-tcpkg','10.0.0.1',22,'admin',$true)
+        $t.PackageManager = 'tcpkg'
+        if ((Get-FltEffectivePackageManager $t) -eq 'tcpkg') {
+            _IT_Pass $r "Routing: PackageManager='tcpkg' → Get-FltEffectivePackageManager correct"
+        } else {
+            _IT_Fail $r "Routing: tcpkg target Get-FltEffectivePackageManager" "Expected 'tcpkg', got '$(Get-FltEffectivePackageManager $t)'"
+        }
+    } catch { _IT_Fail $r 'Routing: tcpkg target' $_.Exception.Message }
+
+    try {
+        $t = [FleetTarget]::new('RouteTest-winget','10.0.0.2',22,'admin',$true)
+        $t.PackageManager = 'winget'
+        if ((Get-FltEffectivePackageManager $t) -eq 'winget') {
+            _IT_Pass $r "Routing: PackageManager='winget' → Get-FltEffectivePackageManager correct"
+        } else {
+            _IT_Fail $r "Routing: winget target Get-FltEffectivePackageManager" "Expected 'winget'"
+        }
+    } catch { _IT_Fail $r 'Routing: winget target' $_.Exception.Message }
+
+    try {
+        $t = [FleetTarget]::new('RouteTest-default','10.0.0.3',22,'admin',$true)
+        $t.PackageManager = ''
+        $t.OS = 'windows'
+        if ((Get-FltEffectivePackageManager $t) -eq 'tcpkg') {
+            _IT_Pass $r "Routing: PackageManager='' on Windows → Get-FltEffectivePackageManager defaults to 'tcpkg'"
+        } else {
+            _IT_Fail $r "Routing: default Windows target Get-FltEffectivePackageManager" "Expected 'tcpkg'"
+        }
+    } catch { _IT_Fail $r 'Routing: default Windows target' $_.Exception.Message }
+
+    try {
+        $t = [FleetTarget]::new('RouteTest-both','10.0.0.4',22,'admin',$true)
+        $t.PackageManager = 'both'
+        if ((Get-FltEffectivePackageManager $t) -eq 'both') {
+            _IT_Pass $r "Routing: PackageManager='both' → Get-FltEffectivePackageManager correct"
+        } else {
+            _IT_Fail $r "Routing: 'both' target Get-FltEffectivePackageManager" "Expected 'both'"
+        }
+    } catch { _IT_Fail $r "Routing: 'both' target" $_.Exception.Message }
+
+    # 9f. WinGet command format is correct for each verb
+    try {
+        $install   = _Get-WinGetCommand -Action 'install'   -PackageSpec 'Microsoft.VisualStudioCode'
+        $upgrade   = _Get-WinGetCommand -Action 'upgrade'   -PackageSpec 'Microsoft.VisualStudioCode'
+        $uninstall = _Get-WinGetCommand -Action 'uninstall' -PackageSpec 'Microsoft.VisualStudioCode'
+        $errors = @()
+        if ($install   -notmatch '^winget install')   { $errors += "install='$install'" }
+        if ($upgrade   -notmatch '^winget upgrade')   { $errors += "upgrade='$upgrade'" }
+        if ($uninstall -notmatch '^winget uninstall') { $errors += "uninstall='$uninstall'" }
+        if ($install   -notmatch '--silent')          { $errors += 'install missing --silent' }
+        if ($install   -notmatch 'Microsoft\.VisualStudioCode') { $errors += 'install missing package id' }
+        if ($errors.Count -eq 0) {
+            _IT_Pass $r '_Get-WinGetCommand: correct format for install/upgrade/uninstall'
+        } else {
+            _IT_Fail $r '_Get-WinGetCommand: command format' ($errors -join '; ')
+        }
+    } catch { _IT_Fail $r '_Get-WinGetCommand' $_.Exception.Message }
+
+    # 9g. Search-FltWinGetPackage — requires winget on operator machine
+    if (Test-FltWinGetAvailable) {
+        try {
+            $res = Search-FltWinGetPackage -SearchTerm 'notepad'
+            if ($res.Ok -and $res.Items.Count -gt 0) {
+                _IT_Pass $r "Search-FltWinGetPackage: found $($res.Items.Count) result(s) for 'notepad'"
+                # Verify shape matches tcpkg equivalent
+                $first = $res.Items[0]
+                $hasName    = $null -ne $first.Name
+                $hasVersion = $null -ne $first.PSObject.Properties['Version']
+                $hasSource  = $null -ne $first.PSObject.Properties['Source']
+                if ($hasName -and $hasVersion -and $hasSource) {
+                    _IT_Pass $r 'Search-FltWinGetPackage: result shape matches tcpkg equivalent'
+                } else {
+                    _IT_Fail $r 'Search-FltWinGetPackage: result shape' "Name=$hasName Version=$hasVersion Source=$hasSource"
+                }
+            } elseif ($res.Ok) {
+                _IT_Warn $r "Search-FltWinGetPackage: no results for 'notepad'" 'Check winget source configuration'
+            } else {
+                # Capture raw winget output for diagnosis
+                $rawDiag = & winget search notepad --accept-source-agreements 2>&1
+                $exitDiag = $LASTEXITCODE
+                $preview  = ($rawDiag | Select-Object -First 3 | ForEach-Object { [string]$_ }) -join ' | '
+                _IT_Fail $r "Search-FltWinGetPackage: search succeeded" "exit=$exitDiag raw='$preview'"
+            }
+        } catch { _IT_Fail $r 'Search-FltWinGetPackage' $_.Exception.Message }
+
+        # 9h. Get-FltWinGetVersions — search for a well-known package
+        try {
+            $versions = @(Get-FltWinGetVersions -PackageId 'Microsoft.Notepad')
+            if ($versions.Count -gt 0) {
+                _IT_Pass $r "Get-FltWinGetVersions: $($versions.Count) version(s) of Microsoft.Notepad"
+                if ($versions[0].PSObject.Properties['Version'] -and $versions[0].PSObject.Properties['Source']) {
+                    _IT_Pass $r 'Get-FltWinGetVersions: result shape matches tcpkg equivalent'
+                } else {
+                    _IT_Fail $r 'Get-FltWinGetVersions: result shape' 'Missing Version or Source property'
+                }
+            } else {
+                _IT_Warn $r 'Get-FltWinGetVersions: versions found' 'No versions for Microsoft.Notepad — package may not be in sources'
+            }
+        } catch { _IT_Fail $r 'Get-FltWinGetVersions' $_.Exception.Message }
+    } else {
+        _IT_Warn $r 'Search-FltWinGetPackage'    'winget not on operator machine — skipped'
+        _IT_Warn $r 'Get-FltWinGetVersions'      'winget not on operator machine — skipped'
+    }
+
+    return $r
+}
+
+# ── Suite 10 — WinGet live install ────────────────────────────────────────────
+
+# Tests a real install + uninstall via SSH using Invoke-FltWinGetBatch.
+# Uses 7zip.7zip — small (~1MB), universally available, easily removed.
+#
+# Flow:
+#   If already installed  → attempt install → expect Skipped (Already installed)
+#   If not installed      → install → verify present → uninstall → verify gone
+#
+# This suite always leaves the target in the same state it started.
+function Invoke-IT_WinGetLive {
+    param(
+        [FleetTarget] $Target,
+        [System.Management.Automation.PSCredential] $Credential = $null,
+        [string] $KeyFile = ''
+    )
+    $r = _IT_NewResult
+    _IT_Section "WinGet live install — $($Target.Name) ($($Target.Address))"
+
+    $testPkg = '7zip.7zip'
+
+    if (-not (Ensure-FltPoshSsh)) {
+        _IT_Fail $r 'Posh-SSH available' 'Run: Install-Module Posh-SSH -Scope CurrentUser'
+        return $r
+    }
+    if (-not $Credential -and [string]::IsNullOrWhiteSpace($KeyFile)) {
+        _IT_Fail $r 'Credentials provided' 'Select credentials before running this suite'
+        return $r
+    }
+
+    # 10a. Check current install status via winget list on remote
+    $alreadyInstalled = $false
+    try {
+        $useKey = -not [string]::IsNullOrWhiteSpace($KeyFile)
+        $sessionParams = @{
+            ComputerName = $Target.Address
+            Port         = [int]$Target.Port
+            AcceptKey    = $true
+            ErrorAction  = 'Stop'
+        }
+        if ($useKey) { $sessionParams['Username'] = $Target.User; $sessionParams['KeyFile'] = $KeyFile }
+        else          { $sessionParams['Credential'] = $Credential }
+
+        $session = New-SSHSession @sessionParams
+        if (-not $session) {
+            _IT_Fail $r 'SSH session for pre-check' 'New-SSHSession returned null'
+            return $r
+        }
+
+        # Pre-check A: winget installed and callable
+        $verResult = Invoke-SSHCommand -SessionId $session.SessionId `
+                         -Command 'winget --version' -TimeOut 30
+        $verOut    = ($verResult.Output -join '').Trim()
+        if ($verResult.ExitStatus -eq 0 -and $verOut -match 'v\d') {
+            _IT_Pass $r "winget installed on target: $verOut"
+        } else {
+            _IT_Fail $r 'winget installed on target' `
+                "exit=$($verResult.ExitStatus) output='$verOut' — use Setup > select target > 4. Prepare target to install WinGet"
+            Remove-SSHSession -SessionId $session.SessionId | Out-Null
+            return $r
+        }
+
+        # Pre-check B: winget sources configured
+        $srcResult = Invoke-SSHCommand -SessionId $session.SessionId `
+                         -Command 'winget source list' -TimeOut 30
+        $srcOut    = ($srcResult.Output -join ' ')
+        if ($srcResult.ExitStatus -eq 0 -and $srcOut -match 'https://') {
+            $srcCount = @($srcResult.Output | Where-Object { $_ -match 'https://' }).Count
+            _IT_Pass $r "winget sources configured on target ($srcCount source(s))"
+        } else {
+            _IT_Fail $r 'winget sources configured on target' `
+                "exit=$($srcResult.ExitStatus) — run 'winget source reset --force' on target"
+            Remove-SSHSession -SessionId $session.SessionId | Out-Null
+            return $r
+        }
+
+        # Pre-check C: refresh sources so install doesn't use stale cache
+        $updateResult = Invoke-SSHCommand -SessionId $session.SessionId `
+                            -Command 'winget source update --disable-interactivity' -TimeOut 60
+        if ($updateResult.ExitStatus -eq 0) {
+            _IT_Pass $r 'winget sources refreshed'
+        } else {
+            _IT_Warn $r 'winget sources refreshed' `
+                "exit=$($updateResult.ExitStatus) — install may use cached source data"
+        }
+
+        # Pre-check D: check if test package already installed
+        $checkCmd = "winget list --id $testPkg --accept-source-agreements --disable-interactivity 2>&1"
+        $check    = Invoke-SSHCommand -SessionId $session.SessionId -Command $checkCmd -TimeOut 60
+        $checkOut = ($check.Output -join ' ')
+        $alreadyInstalled = $checkOut -match [regex]::Escape($testPkg)
+        Remove-SSHSession -SessionId $session.SessionId | Out-Null
+
+        if ($alreadyInstalled) {
+            _IT_Pass $r "$testPkg pre-check: already installed on target"
+        } else {
+            _IT_Pass $r "$testPkg pre-check: not installed on target — will install and remove"
+        }
+    } catch {
+        _IT_Fail $r "Pre-check SSH: $($Target.Name)" $_.Exception.Message
+        return $r
+    }
+
+    if ($alreadyInstalled) {
+        # 10b-alt. Already installed — attempt install, expect Skipped
+        try {
+            $results = @(Invoke-FltWinGetBatch `
+                -Targets      @($Target) `
+                -Action       'install' `
+                -PackageSpec  $testPkg `
+                -Credential   $Credential `
+                -KeyFile      $KeyFile `
+                -TimeoutSecs  120)
+
+            $res = $results | Where-Object { $_.TargetName -eq $Target.Name } | Select-Object -First 1
+            if ($res -and $res.Status -eq 'Skipped' -and $res.Note -match 'Already installed') {
+                _IT_Pass $r "Install when already installed → Skipped (Already installed)"
+            } elseif ($res) {
+                _IT_Fail $r "Install when already installed → Skipped" "Got Status='$($res.Status)' Note='$($res.Note)'"
+            } else {
+                _IT_Fail $r "Install result returned" "No result for $($Target.Name)"
+            }
+        } catch {
+            _IT_Fail $r 'Invoke-FltWinGetBatch (already installed)' $_.Exception.Message
+        }
+    } else {
+        # 10b. Install
+        try {
+            $installResults = @(Invoke-FltWinGetBatch `
+                -Targets      @($Target) `
+                -Action       'install' `
+                -PackageSpec  $testPkg `
+                -Credential   $Credential `
+                -KeyFile      $KeyFile `
+                -TimeoutSecs  300)
+
+            $instRes = $installResults | Where-Object { $_.TargetName -eq $Target.Name } | Select-Object -First 1
+            if ($instRes -and $instRes.Status -eq 'OK') {
+                _IT_Pass $r "Install ${testPkg}: OK ($([Math]::Round($instRes.DurationSec,1))s)"
+            } else {
+                $status = if ($instRes) { $instRes.Status } else { 'no result' }
+                _IT_Fail $r "Install $testPkg" "Status='$status'"
+                return $r   # skip uninstall if install failed
+            }
+        } catch {
+            _IT_Fail $r "Invoke-FltWinGetBatch install" $_.Exception.Message
+            return $r
+        }
+
+        # 10c. Verify installed via remote winget list
+        try {
+            $session2 = New-SSHSession @sessionParams
+            $verify   = Invoke-SSHCommand -SessionId $session2.SessionId `
+                            -Command "winget list --id $testPkg --accept-source-agreements 2>&1" `
+                            -TimeOut 60
+            $verOut   = ($verify.Output -join ' ')
+            Remove-SSHSession -SessionId $session2.SessionId | Out-Null
+
+            if ($verOut -match [regex]::Escape($testPkg)) {
+                _IT_Pass $r "Verify installed: $testPkg found in remote winget list"
+            } else {
+                _IT_Fail $r "Verify installed: $testPkg in winget list" "Not found — output: $($verOut[0..120] -join '')"
+            }
+        } catch {
+            _IT_Fail $r 'Verify install via SSH' $_.Exception.Message
+        }
+
+        # 10d. Uninstall
+        try {
+            $uninstallResults = @(Invoke-FltWinGetBatch `
+                -Targets      @($Target) `
+                -Action       'uninstall' `
+                -PackageSpec  $testPkg `
+                -Credential   $Credential `
+                -KeyFile      $KeyFile `
+                -TimeoutSecs  120)
+
+            $uninstRes = $uninstallResults | Where-Object { $_.TargetName -eq $Target.Name } | Select-Object -First 1
+            if ($uninstRes -and $uninstRes.Status -eq 'OK') {
+                _IT_Pass $r "Uninstall ${testPkg}: OK ($([Math]::Round($uninstRes.DurationSec,1))s)"
+            } else {
+                $status = if ($uninstRes) { $uninstRes.Status } else { 'no result' }
+                _IT_Fail $r "Uninstall $testPkg" "Status='$status' — manual cleanup may be needed"
+            }
+        } catch {
+            _IT_Fail $r "Invoke-FltWinGetBatch uninstall" $_.Exception.Message
+        }
+
+        # 10e. Verify removed
+        try {
+            $session3 = New-SSHSession @sessionParams
+            $verify2  = Invoke-SSHCommand -SessionId $session3.SessionId `
+                            -Command "winget list --id $testPkg --accept-source-agreements 2>&1" `
+                            -TimeOut 60
+            $ver2Out  = ($verify2.Output -join ' ')
+            Remove-SSHSession -SessionId $session3.SessionId | Out-Null
+
+            if ($ver2Out -notmatch [regex]::Escape($testPkg)) {
+                _IT_Pass $r "Verify removed: $testPkg no longer in remote winget list"
+            } else {
+                _IT_Fail $r "Verify removed: $testPkg still in winget list" 'Manual uninstall may be needed'
+            }
+        } catch {
+            _IT_Fail $r 'Verify removal via SSH' $_.Exception.Message
+        }
+    }
+
+    return $r
 }

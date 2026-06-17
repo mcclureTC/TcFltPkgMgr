@@ -45,6 +45,9 @@ Step 2 is an explicit gate — it forces the question "what should be tested her
 - `$Matches` is not thread-safe in `-Parallel` — use `-split` instead of
   `-match` inside parallel blocks.
 - PS class methods cannot declare return types.
+- PS class methods without declared return types output to the pipeline — do NOT
+  assign them to variables (`$x = $t.Method()` returns `$null`). Either use the
+  output directly in a pipeline/expression, or inline the logic in the caller.
 - `Set-StrictMode -Off` is set globally.
 
 ---
@@ -247,33 +250,94 @@ every subsequent phase builds on a scalable foundation.
 
 ---
 
-## Phase 3 — WinGet executor (Windows targets, general packages)
+## Phase 3 — WinGet executor (Windows targets, general packages) ✅
 
-### 3.1 — WinGet executor (`execution/WinGetExecutor.ps1`) — new file
+### 3.1 — WinGet executor (`execution/WinGetExecutor.ps1`) ✅
 
-- [ ] Create `Invoke-FltWinGetBatch` mirroring `Invoke-FltSshBatch`
-- [ ] Command format:
-      `winget install --id <package> --silent --accept-package-agreements --accept-source-agreements`
-- [ ] Map verbs: `install` → `winget install`, `upgrade` → `winget upgrade`,
-      `uninstall` → `winget uninstall`
-- [ ] WinGet exit codes: `0` = OK, `-1978335212` = not found,
-      `-1978335189` = already installed — map to human-readable notes
-- [ ] No feed check phase for WinGet
-- [ ] `Write-FltBatchEntry` with `PackageManager = 'winget'`
+- [x] `Invoke-FltWinGetBatch` — mirrors `Invoke-FltSshBatch`; same parallel pattern,
+      ConcurrentDictionary status tracking, OnProgress callback, jitter, hosts.json retry
+- [x] Command format: `winget install/upgrade/uninstall --id <package> --silent
+      --accept-package-agreements --accept-source-agreements`
+- [x] Exit codes: `0`=OK, `-1978335212`=not found, `-1978335189`=already installed,
+      `-1978335188`=no upgrade available — all mapped to human-readable status/note
+- [x] No feed check phase — WinGet fetches from its own configured sources
+- [x] `PackageManager = 'winget'` set on all batch results
 
-### 3.2 — WinGet package search (`data/WinGetRepository.ps1`) — new file
+### 3.2 — WinGet package search (`data/WinGetRepository.ps1`) ✅
 
-- [ ] `Search-FltWinGetPackage` — runs `winget search <term>` locally,
-      parses tabular output into `[pscustomobject]` rows
-- [ ] `Get-FltWinGetVersions` — runs `winget show --id <id> --versions`
-- [ ] Both return the same shape as tcpkg equivalents
+- [x] `Test-FltWinGetAvailable` — checks for winget on operator PATH
+- [x] `Search-FltWinGetPackage` — parses winget tabular output (column-position based);
+      returns same `@{ Ok; Items; Columns }` shape as `Get-FltPackageList`
+- [x] `Get-FltWinGetVersions` — `winget show --id <id> --versions`; same shape as
+      `Get-FltPackageVersions`
+- [x] `Get-FltWinGetInstalledIndex` — `winget list`; same shape as `Get-FltInstalledIndex`
 
-### 3.3 — Route WinGet targets in `Invoke-FleetAction` (`execution/FleetExecutor.ps1`)
+### 3.3 — Route WinGet targets in `Invoke-FleetAction` (`execution/FleetExecutor.ps1`) ✅
 
-- [ ] Split SSH bucket by `EffectivePackageManager()`:
-      `tcpkg` → `Invoke-FltSshBatch`, `winget` → `Invoke-FltWinGetBatch`
-- [ ] Results merge into `$allResults`
-- [ ] No change to push bucket
+- [x] SSH bucket split into `$tcpkgSshTargets` and `$wingetSshTargets` by
+      `EffectivePackageManager()` — `'tcpkg'`/`'both'` → tcpkg, `'winget'`/`'both'` → WinGet
+- [x] `'both'` targets appear in both SSH buckets
+- [x] Push bucket unchanged — always tcpkg
+- [x] Read-only mode produces `[read-only] would SSH (tcpkg/winget)` per bucket
+
+### 3.4 — Lessons learned
+
+- PS7 class methods without declared return types must not be assigned to variables
+  (`$x = $t.Method()` returns `$null`). Inline the logic in the caller instead.
+  Added to conventions in this plan.
+
+---
+
+## Phase 3.5 — Install WinGet on target via SSH ✅
+
+> Inserted before Phase 4 (WinGet UI) because the menu is only useful once
+> targets actually have winget. SSH runs as the authenticating user on these
+> targets, so `Add-AppxPackage` works directly without WinRM or DISM.
+
+### 3.5.1 — `Install-FltWinGetOnTarget` (`data/WinGetRepository.ps1`)
+
+- [x] Check winget already installed — skip with success if present
+- [x] Resolve latest `Microsoft.DesktopAppInstaller` msixbundle URL from
+      GitHub releases API (`api.github.com/repos/microsoft/winget-cli/releases/latest`)
+- [x] Download msixbundle + required dependencies to remote temp dir via SSH:
+      - `Microsoft.UI.Xaml` (vclibs dependency)
+      - `Microsoft.VCLibs.x64.14.00.Desktop.appx`
+      - `Microsoft.DesktopAppInstaller_*.msixbundle`
+- [x] `Add-AppxPackage` each dependency then the bundle via SSH PowerShell
+- [x] Verify `winget --version` exits 0 after install
+- [ ] Clean up temp files on success or failure
+
+### 3.5.2 — Setup menu item (`ui/menus/TargetMenu.ps1`)
+
+- [x] Added as sub-option 4 within target action menu (11+ select → 4. Prepare target) to Setup menu (above Diagnostics)
+      Renumber: Diagnostics → 12, Log → 13
+- [x] Prepare target flow in `TargetMenu.ps1` — runs pre-checks then install sequence
+      per selected target; shows progress inline
+- [ ] On success: update `targets.local.json` — deferred (not needed for basic operation) to record winget is available
+
+### 3.5.3 — Suite 20 pre-check recovery (`diagnostics/IntegrationTests.ps1`) ✅
+
+- [x] Pre-check A failure message references Setup > select target > 4. Prepare target
+
+### 3.5.4 — Lessons learned
+
+- `Add-AppxPackage` for framework packages requires an interactive desktop session token.
+  SSH sessions cannot provide this even as Administrator — access denied (0x80070005).
+- Solution: schedule a logon-triggered task (`/sc onlogon /ru Administrator`) that
+  runs during autologin, which has the full interactive desktop token.
+- `-ErrorAction SilentlyContinue` on `Add-AppxPackage` is dangerous — it silently
+  masks failures and reports false success. Always use `-ErrorAction Stop` + try/catch.
+- `0x80073D06` (higher version already installed) is a success condition, not a failure.
+- `certutil -decode` is the reliable way to write large scripts to a remote target —
+  avoids the 8191-char Windows command line limit that breaks long `EncodedCommand` strings.
+- `EncodedCommand` strings must stay under ~4000 chars (8191 limit / 2 for UTF-16 encoding).
+
+### 3.5.5 — Test results
+
+- Suite 19 (WinGet executor): 8/9 — 1 WARN (`Get-FltWinGetVersions` for `Microsoft.Notepad`
+  not in sources — environment-specific, not a code defect)
+- Suite 20 (WinGet live install): 8/8 ✅ — tested on DCC-4, fully automated including
+  logon-triggered framework activation
 
 ---
 

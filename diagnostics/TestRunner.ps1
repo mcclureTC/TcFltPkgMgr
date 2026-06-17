@@ -127,7 +127,7 @@ function _Show-TestRunnerDashboard {
 
     Paint-FltRow $sepRow    ('-' * $sw) 'Dark'
     Paint-FltRow $footerRow '  1. All diagnostics   9. All integration   00. Clear results   0. Back' 'Dark'
-    Paint-FltRow $sep2Row   '  11-18. Integration suite   21+. Toggle target (21,23 or 21-24 or 21..24)' 'Dark'
+    Paint-FltRow $sep2Row   '  11-20. Integration suite   21+. Toggle target (21,23 or 21-24 or 21..24)' 'Dark'
 
     if ($Result) {
         $clr = if ($ResultColor) { $ResultColor }
@@ -178,12 +178,15 @@ function _TR_RunIntSuite {
     if (-not $Suite.PerTarget -or $Targets.Count -eq 0) {
         # Run once regardless of target count
         $r = switch ($Suite.Function) {
-            'Invoke-IT_FileIO'      { Invoke-IT_FileIO }
-            'Invoke-IT_Pagination'  { Invoke-IT_Pagination }
-            'Invoke-IT_ReadOnly'    { Invoke-IT_ReadOnly }
-            'Invoke-IT_Log'         { Invoke-IT_Log }
-            'Invoke-IT_SSH'         { Invoke-IT_SSH -Target ($Targets | Select-Object -First 1) -Credential $Credential }
-            'Invoke-IT_ReachCache'  { Invoke-IT_ReachCache -Target ($Targets | Select-Object -First 1) }
+            'Invoke-IT_FileIO'          { Invoke-IT_FileIO }
+            'Invoke-IT_Pagination'      { Invoke-IT_Pagination }
+            'Invoke-IT_ReadOnly'        { Invoke-IT_ReadOnly }
+            'Invoke-IT_Log'             { Invoke-IT_Log }
+            'Invoke-IT_WinGet'          { Invoke-IT_WinGet }
+            'Invoke-IT_SSH'             { Invoke-IT_SSH -Target ($Targets | Select-Object -First 1) -Credential $Credential }
+            'Invoke-IT_ReachCache'      { Invoke-IT_ReachCache -Target ($Targets | Select-Object -First 1) }
+            'Invoke-IT_TcpkgLocal'      { Invoke-IT_TcpkgLocal -Target ($Targets | Select-Object -First 1) }
+            'Invoke-IT_PackageQueries'  { Invoke-IT_PackageQueries -Target ($Targets | Select-Object -First 1) }
             default {
                 Write-Host "  Unknown suite: $($Suite.Function)" -ForegroundColor Red
                 _IT_NewResult
@@ -198,6 +201,8 @@ function _TR_RunIntSuite {
                 'Invoke-IT_ReachCache'      { Invoke-IT_ReachCache -Target $target }
                 'Invoke-IT_TcpkgLocal'      { Invoke-IT_TcpkgLocal -Target $target }
                 'Invoke-IT_PackageQueries'  { Invoke-IT_PackageQueries -Target $target }
+                'Invoke-IT_WinGet'           { Invoke-IT_WinGet }
+                'Invoke-IT_WinGetLive'       { Invoke-IT_WinGetLive -Target $target -Credential $Credential }
                 default {
                     Write-Host "  Unknown suite: $($Suite.Function)" -ForegroundColor Red
                     _IT_NewResult
@@ -335,7 +340,7 @@ function Invoke-FltTestRunner {
         }
 
         # 11-16 — run specific integration suite
-        if ($num -ge 11 -and $num -le 18) {
+        if ($num -ge 11 -and $num -le 20) {
             $id    = $num - 10
             $suite = $itSuites | Where-Object { $_.Id -eq $id }
             if (-not $suite) { $result = "No suite $num"; continue }

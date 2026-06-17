@@ -1,7 +1,7 @@
 # TcFltPkgMgr — Test Procedure
 
 **Location:** Setup → 10 → Test Runner  
-**Input scheme:** `1` all diagnostics · `9` all integration · `11`–`18` specific suite · `21+` toggle targets · `00` clear results · `0` back  
+**Input scheme:** `1` all diagnostics · `9` all integration · `11`–`20` specific suite · `21+` toggle targets · `00` clear results · `0` back  
 **Result history:** saved to `config/test-results.json` between sessions
 
 ---
@@ -223,6 +223,50 @@ Tests local package search and remote package status queries. All are read-only 
 
 ---
 
+### Suite 19 — WinGet executor
+
+**Infrastructure required:** `winget` installed on operator machine (for search/version tests); online target with `winget` for live tests  
+**Per target:** No (routing logic and search are local; live install is suite 20)
+
+Tests WinGet availability, executor routing logic, local package search, and version listing.
+
+| # | Test name | What is tested | How verified |
+|---|-----------|----------------|--------------|
+| 9a | `Test-FltWinGetAvailable` reports correctly | Returns `$true` when winget is on PATH, `$false` when not | Compares `Test-FltWinGetAvailable` result against `Get-Command winget`. WARN (not FAIL) if not found — search tests are skipped. |
+| 9b | Routing: tcpkg target | `Get-FltEffectivePackageManager` returns `'tcpkg'` for a target with `PackageManager='tcpkg'` | Creates synthetic `FleetTarget`, calls `Get-FltEffectivePackageManager`, checks result |
+| 9c | Routing: winget target | `Get-FltEffectivePackageManager` returns `'winget'` for a target with `PackageManager='winget'` | Creates synthetic `FleetTarget`, calls function, checks result |
+| 9d | Routing: blank defaults to tcpkg on Windows | `Get-FltEffectivePackageManager` defaults to `'tcpkg'` when `PackageManager=''` and `OS='windows'` | Creates synthetic target with empty PackageManager, checks result |
+| 9e | Routing: both target | `Get-FltEffectivePackageManager` returns `'both'` for a target with `PackageManager='both'` | Creates synthetic target, checks result |
+| 9f | `_Get-WinGetCommand` command format | `winget install/upgrade/uninstall` commands include correct verb, package id, and `--silent --disable-interactivity` flags | Calls `_Get-WinGetCommand` for each verb with a known package id, checks all three output strings |
+| 9g | `Search-FltWinGetPackage` returns results _(requires winget)_ | Searching for `'notepad'` returns at least one result with correct shape | Calls `Search-FltWinGetPackage -SearchTerm 'notepad'`, checks count and that result has `Name`, `Version`, `Source` properties. WARN if no results. |
+| 9h | `Get-FltWinGetVersions` returns versions _(requires winget)_ | `winget show --id Microsoft.Notepad --versions` returns a list | Calls `Get-FltWinGetVersions -PackageId 'Microsoft.Notepad'`, checks count. WARN if package not in configured sources. |
+| 9i | `Get-FltWinGetInstalledIndex` returns hashtable _(requires winget)_ | `winget list` is parsed into a name→version hashtable | Calls `Get-FltWinGetInstalledIndex`, checks return is a hashtable |
+
+---
+
+### Suite 20 — WinGet live install `[needs target]`
+
+**Infrastructure required:** Online Windows target with SSH, stored or entered credentials, internet access on target  
+**Per target:** Yes (runs against each selected target)
+
+Tests a real install, verify, and uninstall cycle using `7zip.7zip` via `Invoke-FltWinGetBatch`. All checks are fully reversible — the target is left in the same state it started.
+
+| # | Test name | What is tested | How verified |
+|---|-----------|----------------|--------------|
+| Pre-A | winget installed on target | `winget --version` exits 0 and returns a version string | SSH → `winget --version`. FAIL with `Setup > Prepare target` instruction if not found. |
+| Pre-B | winget sources configured | `winget source list` returns at least one HTTPS source | SSH → `winget source list`, checks for `https://`. FAIL with reset instruction if empty. |
+| Pre-C | winget sources refreshed | `winget source update` exits 0 | SSH → `winget source update --disable-interactivity`. WARN (not FAIL) if fails — stale cache is recoverable. |
+| Pre-D | 7zip.7zip pre-check | Determines whether test package is already installed | SSH → `winget list --id 7zip.7zip`. Sets `$alreadyInstalled` flag. |
+| If already installed: | | | |
+| Alt-B | Install when already installed → Skipped | `Invoke-FltWinGetBatch` returns `Status='Skipped'` and `Note` contains `'Already installed'` when package is already present | Calls `Invoke-FltWinGetBatch -Action install -PackageSpec 7zip.7zip`, checks status and note |
+| If not installed: | | | |
+| 10b | Install `7zip.7zip` | `Invoke-FltWinGetBatch` returns `Status='OK'` | Calls batch executor, checks status and duration |
+| 10c | Verify installed | `winget list --id 7zip.7zip` finds the package after install | SSH → `winget list --id 7zip.7zip`, checks output contains package id |
+| 10d | Uninstall `7zip.7zip` | `Invoke-FltWinGetBatch -Action uninstall` returns `Status='OK'` | Calls batch executor, checks status |
+| 10e | Verify removed | `winget list --id 7zip.7zip` does not find the package after uninstall | SSH → `winget list --id 7zip.7zip`, checks output does NOT contain package id |
+
+---
+
 ## Adding New Tests
 
 When implementing a new phase, add tests in the appropriate location:
@@ -240,6 +284,5 @@ Update `Get-IT_Suites` in `IntegrationTests.ps1` and the dispatch switch in `Tes
 
 | Suite | When | What it will test |
 |-------|------|-------------------|
-| 19 — WinGet executor | Phase 3 | `winget` command found, SSH batch with winget command, exit code mapping |
-| 20 — Ansible executor | Phase 5 | `ansible-playbook` found, inventory generation, playbook execution, exit code mapping |
-| 21 — Docker exec batch | Phase 7 | Docker CLI found, `docker exec` command executes inside container, container reachability check |
+| 21 — Ansible executor | Phase 5 | `ansible-playbook` found, inventory generation, playbook execution, exit code mapping |
+| 22 — Docker exec batch | Phase 7 | Docker CLI found, `docker exec` command executes inside container, container reachability check |

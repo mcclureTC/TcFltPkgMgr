@@ -53,7 +53,6 @@ class FleetTarget {
             'apt'
         }
     }
-
     # Returns a short OS display string for dashboard columns
     OsDisplay() {
         if ($this.OS -eq 'linux')  { 'Lnx' }
@@ -208,4 +207,22 @@ class CommandEntry {
     [string]   $Output       # null unless captureOutput = true
 
     CommandEntry() {}
+}
+
+# ── Standalone helper functions ────────────────────────────────────────────────
+# PS7 class methods without declared return types cannot be reliably assigned to
+# variables. These functions wrap class method logic for use outside expression
+# context (e.g. in FleetExecutor bucket routing and test assertions).
+
+# Returns the effective package manager for a FleetTarget.
+# Resolves '' to 'tcpkg' (Windows) or 'apt' (Linux/macOS).
+function Get-FltEffectivePackageManager {
+    param([FleetTarget]$Target)
+    if ($Target.PackageManager -and $Target.PackageManager -ne '') {
+        return $Target.PackageManager
+    } elseif ($Target.OS -eq 'windows' -or $Target.OS -eq '') {
+        return 'tcpkg'
+    } else {
+        return 'apt'
+    }
 }

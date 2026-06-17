@@ -210,6 +210,52 @@ To view recent log entries from inside the tool: **Setup > 8. View command log**
 
 ---
 
+## WinGet integration
+
+Targets with `PackageManager = winget` (set via **Setup > Add/Edit target**) use `winget` instead of `tcpkg` for install, upgrade, and uninstall operations. The operator machine does not need winget installed — winget runs on the remote target via SSH.
+
+**Routing:** `FleetExecutor` splits targets into three buckets per operation:
+
+| Bucket | Condition | Executor |
+|--------|-----------|----------|
+| tcpkg SSH | Internet Access = Yes, PackageManager = tcpkg or both | `Invoke-FltSshBatch` |
+| WinGet SSH | Internet Access = Yes, PackageManager = winget or both | `Invoke-FltWinGetBatch` |
+| Push | Internet Access = No | tcpkg local push |
+
+Setting `PackageManager = both` routes a target into both SSH buckets — useful for targets that have both TwinCAT and general Windows packages.
+
+**Operator machine winget** (optional): install winget locally to enable package search and version browsing via `Search-FltWinGetPackage`. Without it, install by id still works by typing the package id directly.
+
+**Exit codes:** WinGet's numeric exit codes are mapped to readable status: `0` = OK, `-1978335212` = not found, `-1978335189` = already installed, `-1978335188` = no upgrade available.
+
+**Package manager routing function:** `Get-FltEffectivePackageManager` resolves a target's package manager, defaulting to `tcpkg` for Windows targets with no explicit setting.
+
+---
+
+## Preparing targets for WinGet
+
+Use **Setup → select target → 4. Prepare target** to install WinGet on a remote Windows machine via SSH. The installer:
+
+1. Checks if WinGet is already installed — skips if present
+2. Downloads the latest WinGet bundle and Windows App Runtime redistributable from GitHub (~230MB total)
+3. Provisions WinGet system-wide via a SYSTEM-context scheduled task
+4. Attempts to install the Windows App Runtime framework as the authenticating user
+5. If the framework install is blocked (Windows Update disabled machines), schedules a one-time logon task to complete activation at next autologin
+6. Reboots the target — autologin fires, the logon task runs, WinGet activates
+7. Verifies `winget --version` in a fresh SSH session after reboot
+
+**Requirements:** Internet access on the target, SSH running as the authenticating user (not SYSTEM).
+
+**Windows Update disabled (TwinCAT engineering PCs):** The Windows App Runtime framework package cannot be installed via SSH — it requires an interactive desktop token. The installer handles this automatically by scheduling a logon task that runs during autologin, which provides the required token. The reboot that follows activates WinGet fully without any manual intervention.
+
+**If the automated install fails** and the hard-wall error is shown, three options are available:
+
+1. Enable Windows Update temporarily, run it once, disable it — the runtime installs via WU
+2. RDP to the target and run the displayed PowerShell commands once interactively
+3. Keep using `tcpkg` for this target (edit target, set `PackageManager = tcpkg`)
+
+---
+
 ## Configuration Reference
 
 `config/settings.local.json` overrides (create with **Setup > 5**):

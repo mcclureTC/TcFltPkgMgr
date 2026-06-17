@@ -166,20 +166,28 @@ function Invoke-FleetAction {
         }
     }
 
-    # Split targets:
-    #   SSH bucket   — Internet Access = True (remote has its own feeds)
-    #   Push bucket  — Internet Access = False (local machine pushes)
+    # Split targets into three buckets by package manager:
+    #   tcpkg SSH  — InternetAccess = True AND EffectivePackageManager = 'tcpkg'/'both'
+    #   WinGet SSH — InternetAccess = True AND EffectivePackageManager = 'winget'/'both'
+    #   Push       — InternetAccess = False (local tcpkg push, Windows/tcpkg only)
     if ($ForceSequential) {
-        $sshTargets  = @()
-        $pushTargets = @($Targets)
+        $tcpkgSshTargets  = @()
+        $wingetSshTargets = @()
+        $pushTargets      = @($Targets)
     } elseif ($Action -in @('install','upgrade')) {
-        $sshTargets  = @($Targets | Where-Object { $_.InternetAccess })
-        $pushTargets = @($Targets | Where-Object { -not $_.InternetAccess })
+        $iaTargets        = @($Targets | Where-Object { $_.InternetAccess })
+        $tcpkgSshTargets  = @($iaTargets | Where-Object { (Get-FltEffectivePackageManager $_) -in @('tcpkg','both') })
+        $wingetSshTargets = @($iaTargets | Where-Object { (Get-FltEffectivePackageManager $_) -in @('winget','both') })
+        $pushTargets      = @($Targets   | Where-Object { -not $_.InternetAccess })
     } else {
-        # uninstall/repair: no feed fetch needed — all targets can use SSH
-        $sshTargets  = @($Targets)
-        $pushTargets = @()
+        # uninstall/repair: no feed fetch needed — route by package manager
+        $tcpkgSshTargets  = @($Targets | Where-Object { (Get-FltEffectivePackageManager $_) -in @('tcpkg','both') })
+        $wingetSshTargets = @($Targets | Where-Object { (Get-FltEffectivePackageManager $_) -in @('winget','both') })
+        $pushTargets      = @()
     }
+
+    # Keep $sshTargets as union for backward-compat references below
+    $sshTargets = @($tcpkgSshTargets) + @($wingetSshTargets)
 
     # Ensure push targets have a note if the feed check didn't already set one
     foreach ($t in $pushTargets) {
@@ -191,24 +199,21 @@ function Invoke-FleetAction {
 
     $allResults = [System.Collections.Generic.List[object]]::new()
 
-    # ── Parallel SSH bucket ───────────────────────────────────────────────────
-    if ($sshTargets.Count -gt 0 -and -not $Script:FltReadOnly) {
+    # ── tcpkg SSH bucket ──────────────────────────────────────────────────────
+    if ($tcpkgSshTargets.Count -gt 0 -and -not $Script:FltReadOnly) {
         if (Ensure-FltPoshSsh) {
-            # Collect current notes BEFORE marking Running (marking wipes the note)
             $initialNotes = @{}
-            foreach ($t in $sshTargets) {
+            foreach ($t in $tcpkgSshTargets) {
                 $st = $Script:FltBatchStatus[$t.Name]
                 if ($st -and $st.Note) { $initialNotes[$t.Name] = $st.Note }
             }
-
-            # Mark all SSH targets as Running before the parallel jobs start
-            foreach ($t in $sshTargets) {
+            foreach ($t in $tcpkgSshTargets) {
                 $note = if ($initialNotes.ContainsKey($t.Name)) { $initialNotes[$t.Name] } else { '' }
                 Update-FltBatchRow $t.Name 'Running (SSH)' 0 $note
             }
 
             $sshResults = Invoke-FltSshBatch `
-                -Targets       $sshTargets `
+                -Targets       $tcpkgSshTargets `
                 -RemoteCommand $remoteCmd `
                 -Action        $Action `
                 -PackageSpec   $PackageSpec `
@@ -221,15 +226,56 @@ function Invoke-FleetAction {
 
             foreach ($r in $sshResults) { $allResults.Add($r) }
         } else {
-            # Posh-SSH not available — fall all SSH targets to push
-            $pushTargets = @($pushTargets) + @($sshTargets)
-            $sshTargets  = @()
+            # Posh-SSH not available — fall tcpkg SSH targets to push
+            $pushTargets = @($pushTargets) + @($tcpkgSshTargets)
         }
-    } elseif ($sshTargets.Count -gt 0 -and $Script:FltReadOnly) {
-        foreach ($t in $sshTargets) {
+    } elseif ($tcpkgSshTargets.Count -gt 0 -and $Script:FltReadOnly) {
+        foreach ($t in $tcpkgSshTargets) {
             $r = [BatchResult]::new()
             $r.TargetName = $t.Name; $r.Action = $Action; $r.PackageSpec = $PackageSpec
-            $r.Status = '[read-only] would SSH'; $r.DurationSec = 0
+            $r.Status = '[read-only] would SSH (tcpkg)'; $r.DurationSec = 0
+            $allResults.Add($r)
+        }
+    }
+
+    # ── WinGet SSH bucket ─────────────────────────────────────────────────────
+    if ($wingetSshTargets.Count -gt 0 -and -not $Script:FltReadOnly) {
+        if (Ensure-FltPoshSsh) {
+            $wgNotes = @{}
+            foreach ($t in $wingetSshTargets) {
+                $st = $Script:FltBatchStatus[$t.Name]
+                if ($st -and $st.Note) { $wgNotes[$t.Name] = $st.Note }
+            }
+            foreach ($t in $wingetSshTargets) {
+                $note = if ($wgNotes.ContainsKey($t.Name)) { $wgNotes[$t.Name] } else { '' }
+                Update-FltBatchRow $t.Name 'Running (WinGet)' 0 $note
+            }
+
+            $wgResults = Invoke-FltWinGetBatch `
+                -Targets       $wingetSshTargets `
+                -Action        $Action `
+                -PackageSpec   $PackageSpec `
+                -Credential    $Credential `
+                -KeyFile       $KeyFile `
+                -TimeoutSecs   $TimeoutSecs `
+                -ThrottleLimit $throttle `
+                -InitialNotes  $wgNotes `
+                -OnProgress    $OnProgress
+
+            foreach ($r in $wgResults) { $allResults.Add($r) }
+        } else {
+            foreach ($t in $wingetSshTargets) {
+                $r = [BatchResult]::new()
+                $r.TargetName = $t.Name; $r.Action = $Action; $r.PackageSpec = $PackageSpec
+                $r.Status = 'Skipped'; $r.Note = 'Posh-SSH not available'
+                $allResults.Add($r)
+            }
+        }
+    } elseif ($wingetSshTargets.Count -gt 0 -and $Script:FltReadOnly) {
+        foreach ($t in $wingetSshTargets) {
+            $r = [BatchResult]::new()
+            $r.TargetName = $t.Name; $r.Action = $Action; $r.PackageSpec = $PackageSpec
+            $r.Status = '[read-only] would SSH (winget)'; $r.DurationSec = 0
             $allResults.Add($r)
         }
     }
