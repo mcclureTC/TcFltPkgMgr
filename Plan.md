@@ -668,6 +668,44 @@ Containers are reached via a two-hop model: SSH to the Docker host, then
 
 ---
 
+## Phase 10.5 — Test runner and integration tests ✅
+
+> Implemented ahead of Phase 11 to enable ongoing integration testing
+> as each phase is completed. Replaces the single-button `Setup > 10. Diagnostics`
+> launcher with a full test dashboard.
+
+### 10.5.1 — Test infrastructure ✅
+
+- [x] `diagnostics/IntegrationTests.ps1` — 6 integration test suites
+- [x] `diagnostics/TestRunner.ps1` — unified test dashboard, numpad-only input
+- [x] `Setup > 10` launches `Invoke-FltTestRunner`
+- [x] `config/test-results.json` stores last-run history per suite (gitignored)
+- [x] Multi-target selection via `21+` with range syntax (`21,23` / `21-24` / `21..24`)
+- [x] Per-target suites (SSH, Reachability) loop over all selected targets
+- [x] Singleton suites (File I/O, Pagination, Read-only, Log) run once regardless
+- [x] `Get-FltTestResultsPath`, `Get-FltTestResults`, `Save-FltTestResult` helpers
+- [x] All 28 reachability cache checks passed across 7 targets
+
+### 10.5.2 — Integration test suites
+
+| Suite | Id | Needs target | Tests |
+|-------|----|--------------|-------|
+| File I/O | I1 | No | CSV round-trip, sort persistence, filter correctness, UI Config persistence |
+| Pagination | I2 | No | Page slicing, target numbering, sort-aware selection |
+| SSH connectivity | I3 | Yes (SSH) | TCP check, session open, remote command, tcpkg path |
+| Read-only mode | I4 | No | tcpkg blocked, batch status prefix, credentials exempt |
+| Log system | I5 | No | Entry written, retrieved, retention preserves current log |
+| Reachability cache | I6 | Optional | Cache skip, expiry, live population |
+
+### 10.5.3 — Future integration suites (add as phases complete)
+
+- [ ] Phase 3: WinGet install via SSH (I7)
+- [ ] Phase 5: Ansible playbook execution (I8)
+- [ ] Phase 7: Docker exec batch (I9)
+- [ ] Phase 7: Docker container reachability check (I10)
+
+---
+
 ## Phase 11 — Testing checklist
 
 ### Scale

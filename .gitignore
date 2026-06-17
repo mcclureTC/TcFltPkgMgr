@@ -26,3 +26,6 @@ logs/
 
 # Debug logs — never commit
 debug.log
+
+# Test run history — machine-specific
+config/test-results.json

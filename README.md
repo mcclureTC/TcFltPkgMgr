@@ -172,18 +172,31 @@ The tool detects the operating system at startup and gates features accordingly 
 
 ---
 
-## Built-in Diagnostics
+## Built-in Tests
 
-Run **Setup → 10. Diagnostics** at any time to verify the tool is correctly configured. The diagnostics check:
+Run **Setup → 10** to open the test runner dashboard, which shows all diagnostic and integration test suites with last-run results and timestamps.
 
-- Display adapter wiring (all 10 backend functions)
-- Credential adapter wiring and round-trip (Set → Get → Remove)
-- All required functions and script variables are loaded
-- Config sections and directories exist
-- Key subsystem functions work correctly (JSON parsing, config reads, process spawning)
-- Posh-SSH is installed and available
+```
+  #     Suite                                 Tests  Last run          Result
+  ── Diagnostics ───────────────────────────────────────────────────────
+  1     All diagnostic tests                  29     2026-06-16        29/29 ✓
+  ── Integration ───────────────────────────────────────────────────────
+  11    File I/O                              ?      never             —
+  12    Pagination and target selection       ?      never             —
+  13    SSH connectivity  [needs target]      ?      never             —
+  14    Read-only mode                        ?      never             —
+  15    Log system                            ?      never             —
+  16    Reachability cache                    ?      never             —
+  ── Targets for integration tests (21+ to toggle) ─────────────────────
+  21  ● PC-1   192.168.8.101
+  22    PC-2   192.168.8.102
+```
 
-All checks run offline — no network, SSH, or tcpkg calls.
+**Input (numpad-only):** `1` all diagnostics · `9` all integration · `11`–`16` specific suite · `21+` toggle targets (supports `21,23` or `21-24` or `21..24`) · `0` back.
+
+**Diagnostics** (29 checks) run offline — no network, SSH, or tcpkg calls. They verify adapter wiring, credential round-trips, config loading, sort/filter logic, and target store serialization.
+
+**Integration suites** test real infrastructure: file I/O, pagination, SSH connectivity, read-only mode, log system, and reachability cache. Suite 13 (SSH) requires at least one target toggled on with `21+`. Results are saved to `config/test-results.json` and shown as last-run history on the dashboard.
 
 ---
 

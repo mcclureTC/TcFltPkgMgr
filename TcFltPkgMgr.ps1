@@ -93,7 +93,9 @@ $modules = @(
     'ui\DashboardAnsi.ps1',               # ANSI backend — dot-sourced at script scope
     'ui\DisplayBackends.ps1',             # display backend loader
     'ui\SortFilter.ps1',                  # sort/filter helpers
-    'diagnostics\Diagnostics.ps1',         # built-in diagnostics (Setup > 10)
+    'diagnostics\Diagnostics.ps1',
+    'diagnostics\IntegrationTests.ps1',
+    'diagnostics\TestRunner.ps1',         # built-in diagnostics (Setup > 10)
     'ui\menus\TargetMenu.ps1',
     'ui\menus\PackageMenu.ps1',
     'ui\menus\UiConfigMenu.ps1',
@@ -135,6 +137,7 @@ $Script:FltSourcesSort    = New-FltSortFilterState
 $Script:FltSourcesFilter  = New-FltSortFilterState
 $Script:FltDisplayTargets = @()
 $Script:FltReachCache     = @{}   # TargetName → DateTime of last confirmed online
+$Script:FltTestTarget     = $null  # FleetTarget selected for integration tests
 
 
 $Script:FltReadOnly = -not $Live

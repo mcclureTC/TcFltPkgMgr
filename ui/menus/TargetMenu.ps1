@@ -571,9 +571,7 @@ function Invoke-SetupMenu {
         }
 
         if ($choice -eq '10') {
-            Clear-Host
-            Invoke-FltDiagnostics
-            Read-Host '  Press Enter'
+            Invoke-FltTestRunner
             continue
         }
     }
