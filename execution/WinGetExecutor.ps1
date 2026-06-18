@@ -203,13 +203,14 @@ function Invoke-FltWinGetBatch {
     # Build typed BatchResult[]
     return @($rawResults | ForEach-Object {
         $r = [BatchResult]::new()
-        $r.TargetName  = $_.TargetName
-        $r.Action      = $_.Action
-        $r.PackageSpec = $_.PackageSpec
-        $r.Status      = $_.Status
-        $r.DurationSec = $_.DurationSec
-        $r.TimedOut    = $_.TimedOut
-        $r.Note        = $_.Note
+        $r.TargetName      = $_.TargetName
+        $r.Action          = $_.Action
+        $r.PackageSpec     = $_.PackageSpec
+        $r.PackageManager  = $_.PackageManager
+        $r.Status          = $_.Status
+        $r.DurationSec     = $_.DurationSec
+        $r.TimedOut        = $_.TimedOut
+        $r.Note            = $_.Note
         $r
     })
 }

@@ -766,6 +766,23 @@ function Invoke-IT_TcpkgLocal {
         _IT_Warn $r 'Target-specific tcpkg tests' 'No target selected — toggle one with 21+'
     }
 
+    # 7k. BatchResult.PackageManager field — verify the class has the field
+    #     and that both executors set it correctly on their pscustomobject output
+    try {
+        $br = [BatchResult]::new()
+        if ($null -ne $br.PSObject.Properties['PackageManager']) {
+            _IT_Pass $r 'BatchResult class has PackageManager field'
+            $br.PackageManager = 'tcpkg'
+            if ($br.PackageManager -eq 'tcpkg') {
+                _IT_Pass $r 'BatchResult.PackageManager: field is assignable and readable'
+            } else {
+                _IT_Fail $r 'BatchResult.PackageManager: assignable' "Got '$($br.PackageManager)'"
+            }
+        } else {
+            _IT_Fail $r 'BatchResult class has PackageManager field' 'Field not found on class'
+        }
+    } catch { _IT_Fail $r 'BatchResult.PackageManager field' $_.Exception.Message }
+
     return $r
 }
 

@@ -240,6 +240,7 @@ Setting `PackageManager = both` routes a target into both SSH buckets — useful
 |---------|-------------|
 | `ssh` | `timeoutSeconds` (1800), `throttleLimit` (25), `jitterMaxMs`, `retryCount` |
 | `winget` | `remoteWinGetPath` ("winget"), `timeoutSeconds` (300) |
+| `ansible` | `executablePath` ("ansible-playbook"), `useWsl` (false), `wslDistro`, `tempDir`, `forks` (10) |
 | `tcpkg` | `executablePath`, `remoteTcpkgPath` |
 | `docker` | `throttleLimit` (20), `logTailLines` (50) |
 | `ui` | `dashboardPageSize` (20), `reachCacheSecs` (60), `displayBackend` |

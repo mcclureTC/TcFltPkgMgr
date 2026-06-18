@@ -30,6 +30,13 @@
     "remoteWinGetPath": "winget",
     "timeoutSeconds":   300
   },
+  "ansible": {
+    "executablePath": "ansible-playbook",
+    "useWsl":         false,
+    "wslDistro":      "",
+    "tempDir":        "",
+    "forks":          10
+  },
   "docker": {
     "throttleLimit": 20,
     "logTailLines":  50

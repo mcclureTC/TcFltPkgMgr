@@ -205,6 +205,8 @@ Tests local tcpkg integration: executable discovery, config export, and target m
 | 7c | `Test-FleetTargetVerify` _(per target)_ | `tcpkg remote verify` exits 0 for a registered target | Calls `Test-FleetTargetVerify -Name $target.Name`, checks exit code. WARN (not FAIL) if target is not registered. |
 | 7d | `Set-FleetTargetInternetAccess` toggle _(per target)_ | Toggling Internet Access updates both tcpkg config and `targets.local.json` | Reads current `InternetAccess`, sets it to opposite value, reloads target from JSON, checks new value matches, restores original. |
 
+| 7k | `BatchResult.PackageManager` field | `BatchResult` class has `PackageManager` field and it is assignable | Creates `[BatchResult]::new()`, checks `PSObject.Properties['PackageManager']` exists, assigns `'tcpkg'`, reads back and verifies |
+
 ---
 
 ### Suite 18 — Package queries

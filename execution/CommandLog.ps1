@@ -91,9 +91,9 @@ function Write-FltBatchEntry {
     )
     if (-not (Get-FltCfgValue 'log' 'captureFleet' $true)) { return }
 
-    # Derive PackageManager from first result that has it set; default to 'tcpkg'
-    $pm = ($Results | Where-Object { $_.PackageManager } | Select-Object -First 1).PackageManager
-    if (-not $pm) { $pm = 'tcpkg' }
+    # PackageManager is now a first-class field on BatchResult — read from first result
+    $pm = ($Results | Select-Object -First 1).PackageManager
+    if (-not $pm) { $pm = 'tcpkg' }   # safe default for legacy callers
 
     $record = [ordered]@{
         ts             = (Get-Date).ToString('o')

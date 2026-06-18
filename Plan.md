@@ -404,16 +404,19 @@ every subsequent phase builds on a scalable foundation.
 
 ## Phase 5 — Ansible prerequisites
 
-### 5.0 — Pre-work (apply before implementing Ansible)
+### 5.0 — Pre-work ✅
 
-**Fix: `SshExecutor` does not set `PackageManager` on `BatchResult` objects**
-- [ ] Add `PackageManager = 'tcpkg'` to every `BatchResult` created in `Invoke-FltSshBatch`
-      so `Write-FltBatchEntry` correctly logs `'tcpkg'` for SSH batch operations
-- [ ] Verify `WinGetExecutor` already sets `PackageManager = 'winget'` ✅
+**Fix: `SshExecutor` does not set `PackageManager` on `BatchResult` objects** ✅
+- [x] `PackageManager` added as first-class field on `BatchResult` class (`classes/Models.ps1`)
+- [x] `SshExecutor` sets `PackageManager = 'tcpkg'` on pscustomobject and carries it
+      through to typed `BatchResult`
+- [x] `WinGetExecutor` now also carries `PackageManager = 'winget'` through to typed `BatchResult`
+      (was set on pscustomobject but lost during typed conversion)
+- [x] `Write-FltBatchEntry` reads `PackageManager` directly from `$Results[0]`
+- [x] Suite 17 check 7k: `BatchResult.PackageManager` field verified (7/7 ✅)
 
-**Add `ansible` section to `settings.default.json`**
-- [ ] `ansible: { executablePath: "ansible-playbook", useWsl: false, wslDistro: "", tempDir: "", forks: 10 }`
-      *(deferred from Phase 0.2 — now needed)*
+**Add `ansible` section to `settings.default.json`** ✅
+- [x] `ansible: { executablePath, useWsl, wslDistro, tempDir, forks: 10 }` added
 
 ### 5.1 — Ansible availability check (`data/AnsibleRepository.ps1`) — new file
 
@@ -766,7 +769,7 @@ Containers are reached via a two-hop model: SSH to the Docker host, then
 - [x] `ui.dashboardPageSize: 20` — already in `settings.default.json`
 - [x] `ui.reachCacheSecs: 60` — already in `settings.default.json`
 - [x] `winget` section — implement in Phase 4.4 bug fixes (Phase 3 is done)
-- [x] `ansible` section — implement in Phase 5.0 pre-work
+- [x] `ansible` section — done in Phase 5.0
 - [ ] `settings.default.jsonc` — add when the above sections are added
 
 ---

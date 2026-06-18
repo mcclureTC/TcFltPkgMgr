@@ -188,7 +188,8 @@ class BatchResult {
     [string] $TargetName
     [string] $Action
     [string] $PackageSpec
-    [string] $Status      # 'OK' | 'OK (push)' | 'Failed (N)' | 'Timed out' | 'Skipped' | 'Running'
+    [string] $PackageManager  # 'tcpkg' | 'winget' | 'ansible' | 'docker-exec' | 'docker-lifecycle'
+    [string] $Status          # 'OK' | 'OK (push)' | 'Failed (N)' | 'Timed out' | 'Skipped' | 'Running'
     [double] $DurationSec
     [bool]   $TimedOut
     [string] $Note

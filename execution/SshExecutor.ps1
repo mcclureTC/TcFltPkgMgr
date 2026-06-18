@@ -156,14 +156,15 @@ function Invoke-FltSshBatch {
         [void]$dict.TryUpdate($target.Name, "$status|$duration|$note", $dict[$target.Name])
 
         [pscustomobject]@{
-            TargetName  = $target.Name
-            Action      = $using:Action
-            PackageSpec = $using:PackageSpec
-            Status      = $status
-            DurationSec = $duration
-            TimedOut    = $timedOut
-            Output      = $output
-            Note        = $note
+            TargetName     = $target.Name
+            Action         = $using:Action
+            PackageSpec    = $using:PackageSpec
+            PackageManager = 'tcpkg'
+            Status         = $status
+            DurationSec    = $duration
+            TimedOut       = $timedOut
+            Output         = $output
+            Note           = $note
         }
     } -ThrottleLimit $ThrottleLimit -AsJob
 
@@ -180,13 +181,14 @@ function Invoke-FltSshBatch {
     # Build typed BatchResult[]
     return @($rawResults | ForEach-Object {
         $r = [BatchResult]::new()
-        $r.TargetName  = $_.TargetName
-        $r.Action      = $_.Action
-        $r.PackageSpec = $_.PackageSpec
-        $r.Status      = $_.Status
-        $r.DurationSec = $_.DurationSec
-        $r.TimedOut    = $_.TimedOut
-        $r.Note        = $_.Note
+        $r.TargetName      = $_.TargetName
+        $r.Action          = $_.Action
+        $r.PackageSpec     = $_.PackageSpec
+        $r.PackageManager  = $_.PackageManager
+        $r.Status          = $_.Status
+        $r.DurationSec     = $_.DurationSec
+        $r.TimedOut        = $_.TimedOut
+        $r.Note            = $_.Note
         $r
     })
 }
