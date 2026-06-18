@@ -334,11 +334,8 @@ every subsequent phase builds on a scalable foundation.
 
 ### 3.5.5 — Test results
 
-- Suite 19 (WinGet executor): 11/12 — 1 WARN (`Get-FltWinGetVersions` for `Microsoft.Notepad`
-  not in sources — environment-specific, not a code defect). Added 9i (`Get-FltWinGetInstalledIndex`)
-  and 9j (IA=False routing) after Phase 3 review.
-- Suite 20 (WinGet live install): 8/8 ✅ — tested on DCC-4, fully automated including
-  logon-triggered framework activation
+- Suite 19 (WinGet executor): 15/15 ✅ — added 9i, 9j (Phase 3 review), 9k (Phase 4 parser fixtures)
+- Suite 20 (WinGet live install): 8/8 ✅ — tested on DCC-4, fully automated
 
 ---
 
@@ -375,6 +372,30 @@ every subsequent phase builds on a scalable foundation.
 
 - [ ] OS and PackageManager prompts — implement in Phase 9.1 (full flow)
 - [ ] Show `OS`, `Type`, `PackageManager` in Setup dashboard — implement in Phase 9
+
+---
+
+### 4.4 — Phase 4 bug fixes and improvements (apply before Phase 5)
+
+**Bug: `Invoke-WinGetStatusMenu` SSH credentials not passed**
+- [ ] Replace `$using:sshCreds` (undefined in thread job) with `Get-FleetSshCredential`
+      called before launching jobs, then passed via `-ArgumentList`
+- [ ] Use stored credential or prompt once; pass to each thread job as argument
+- [ ] Fix `Remove-SSHSession -SessionId $session.Session` → `$session.SessionId`
+
+**Missing: `winget` section in `settings.default.json`**
+- [ ] Add `winget` section: `{ "remoteWinGetPath": "winget", "timeoutSeconds": 300 }`
+      *(was deferred from Phase 3 but needed before Phase 9.3)*
+
+**Missing: `PackageManager` field in `Write-FltBatchEntry`**
+- [ ] Add `PackageManager` to the log entry — already emitted by WinGet/tcpkg executors
+      *(Phase 10.1 depends on Phases 3/7 being done; Phase 3 is done — implement now)*
+
+**Lesson applied: `pwsh -NonInteractive | Out-String` pattern**
+- When running winget or other interactive tools via `Invoke-SSHCommand` (Posh-SSH),
+  always wrap in `pwsh -NoProfile -NonInteractive -Command "... | Out-String -Width N"`
+  to suppress PTY-triggered progress animation and get clean parseable output.
+- Apply this pattern to any future SSH command that uses a tool detecting TTY mode.
 
 ---
 
@@ -475,11 +496,11 @@ The operator enters the vault password once; the tool manages it from there.
 
 ### 6.1 — Fleet menu (`ui/menus/FleetMenu.ps1`)
 
-> Depends on Phase 4.1 already having added WinGet at 6.
-> After this phase: WinGet=6, Linux Admin=7, Profiles=8, UI Config=9, Setup=10.
+> Current menu (after Phase 4): `1. tcpkg  2. WinGet  3. Profiles  4. UI Config  5. Setup`
+> After Phase 6: `1. tcpkg  2. WinGet  3. Linux Admin  4. Profiles  5. UI Config  6. Setup`
 
-- [ ] Add `7. Linux Admin`; Profiles→8, UI Config→9, Setup→10
-- [ ] Update dashboard footer hint
+- [ ] Add `3. Linux Admin`; Profiles→4, UI Config→5, Setup→6
+- [ ] Update dashboard footer — stays single line at 119 cols
 
 ### 6.2 — Linux Admin menu (`ui/menus/LinuxMenu.ps1`) — new file
 
@@ -603,18 +624,16 @@ Containers are reached via a two-hop model: SSH to the Docker host, then
 
 ### 8.1 — Fleet menu (`ui/menus/FleetMenu.ps1`)
 
-> Depends on Phase 6.1. After this phase:
-> WinGet=6, Linux Admin=7, Containers=8, Profiles=9, UI Config=10, Setup=11.
+> Current menu (after Phase 6): `1. tcpkg  2. WinGet  3. Linux Admin  4. Profiles  5. UI Config  6. Setup`
+> After Phase 8: `1. tcpkg  2. WinGet  3. Linux Admin  4. Containers  5. Profiles  6. UI Config  7. Setup`
 
-- [ ] Add `8. Containers`; Profiles→9, UI Config→10, Setup→11
+- [ ] Add `4. Containers`; Profiles→5, UI Config→6, Setup→7
 - [ ] Final menu layout:
       ```
-       1. Install (tcpkg)    5. Outdated Check    9. Profiles
-       2. Upgrade            6. WinGet           10. UI Config
-       3. Uninstall          7. Linux Admin      11. Setup
-       4. Package Status     8. Containers        0. Exit
+       1. tcpkg        3. Linux Admin   5. Profiles
+       2. WinGet       4. Containers    6. UI Config    7. Setup    0. Exit
       ```
-- [ ] Footer will need two lines at 119 col width — already supported
+- [ ] Footer fits single line at 119 cols
 
 ### 8.2 — Container Admin menu (`ui/menus/ContainerMenu.ps1`) — new file
 
@@ -721,8 +740,7 @@ Containers are reached via a two-hop model: SSH to the Docker host, then
 - [x] `docker.logTailLines: 50` — already in `settings.default.json`
 - [x] `ui.dashboardPageSize: 20` — already in `settings.default.json`
 - [x] `ui.reachCacheSecs: 60` — already in `settings.default.json`
-- [ ] Add `winget` section (add when Phase 3 executor is implemented):
-      `executablePath`, `remoteWinGetPath`
+- [x] `winget` section — implement in Phase 4.4 bug fixes (Phase 3 is done)
 - [ ] Add `ansible` section (add when Phase 5 executor is implemented):
       `executablePath`, `useWsl`, `wslDistro`, `tempDir`, `forks: 10`
 - [ ] `settings.default.jsonc` — add when the above sections are added
@@ -738,7 +756,7 @@ Containers are reached via a two-hop model: SSH to the Docker host, then
 > Implement incrementally: add `PackageManager` when Phase 3 lands,
 > add `TargetType` when Phase 7 lands.
 
-- [ ] Add `PackageManager` field — implement when Phase 3 (WinGet) is done
+- [x] `PackageManager` field — implement in Phase 4.4 bug fixes (Phase 3 is done)
 - [ ] Add `TargetType` field per result row — implement when Phase 7 (Docker) is done
 
 ### 10.2 — Log viewer
@@ -839,12 +857,12 @@ Containers are reached via a two-hop model: SSH to the Docker host, then
 | `ui/SortFilter.ps1` | ✅ exists | Sort/filter helpers and interactive pickers |
 | `ui/menus/UiConfigMenu.ps1` | ✅ exists | Runtime UI settings (page size, display backend) |
 | `diagnostics/Diagnostics.ps1` | ✅ exists | 29-check self-test suite (Setup > 10) |
-| `data/WinGetRepository.ps1` | phase 3 | WinGet package search and version listing |
+| `data/WinGetRepository.ps1` | ✅ done | WinGet package search, version listing, remote install |
 | `data/AnsibleRepository.ps1` | phase 5 | Ansible availability and collection checks |
-| `execution/WinGetExecutor.ps1` | phase 3 | SSH batch executor using winget |
+| `execution/WinGetExecutor.ps1` | ✅ done | SSH batch executor using winget |
 | `execution/AnsibleExecutor.ps1` | phase 5 | Inventory/playbook builder and Ansible runner |
 | `execution/ContainerExecutor.ps1` | phase 7 | Docker exec and lifecycle batch executor |
-| `ui/menus/WinGetMenu.ps1` | phase 4 | WinGet install / upgrade / uninstall / status |
+| `ui/menus/WinGetMenu.ps1` | ✅ done | WinGet install / upgrade / uninstall / status |
 | `ui/menus/LinuxMenu.ps1` | phase 6 | Linux Admin: packages, users, services, playbooks |
 | `ui/menus/ContainerMenu.ps1` | phase 8 | Container Admin: packages, lifecycle, logs, health |
 
@@ -855,10 +873,10 @@ Containers are reached via a two-hop model: SSH to the Docker host, then
 | `classes/Models.ps1` | ✅ done | `FleetTarget` extended with OS/Type/PackageManager/Docker fields |
 | `data/TargetRepository.ps1` | ✅ done | JSON store; migration; CSV; Add/Edit/Remove |
 | `data/CredentialRepository.ps1` | ✅ done | Refactored into adapter + Windows/file backends |
-| `execution/FleetExecutor.ps1` | partial | tcpkg + push buckets done; WinGet/Ansible/Docker pending |
-| `execution/CommandLog.ps1` | pending | `PackageManager` and `TargetType` fields (phases 3/7) |
+| `execution/FleetExecutor.ps1` | partial | tcpkg + WinGet + push buckets done; Ansible/Docker pending |
+| `execution/CommandLog.ps1` | partial | `PackageManager` field — Phase 4.4; `TargetType` — Phase 7 |
 | `ui/DashboardAnsi.ps1` | partial | Pagination/sort/filter done; OS/Type columns pending (phase 9) |
-| `ui/menus/FleetMenu.ps1` | partial | Current: 1-8; WinGet/Linux/Containers to add (phases 4/6/8) |
+| `ui/menus/FleetMenu.ps1` | partial | Current: 1-5 (tcpkg, WinGet, Profiles, UIConfig, Setup); Linux→Phase 6, Containers→Phase 8 |
 | `ui/menus/TargetMenu.ps1` | partial | Add/Edit/Remove done; OS/Type prompts pending (phase 9.1) |
 | `config/settings.default.json` | partial | docker/ui done; winget/ansible sections pending (phases 3/5) |
 | `config/settings.default.jsonc` | pending | Add when winget/ansible sections added |
