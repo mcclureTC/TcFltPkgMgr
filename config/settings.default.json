@@ -26,6 +26,10 @@
     "executablePath":  "tcpkg",
     "remoteTcpkgPath": "C:\\ProgramData\\Beckhoff\\TcPkg\\TcPkg.exe"
   },
+  "winget": {
+    "remoteWinGetPath": "winget",
+    "timeoutSeconds":   300
+  },
   "docker": {
     "throttleLimit": 20,
     "logTailLines":  50

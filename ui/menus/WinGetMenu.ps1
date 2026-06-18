@@ -348,30 +348,44 @@ function Invoke-WinGetStatusMenu {
     $pkgId = Read-FltPackageSearch -Prompt 'Package id (exact winget id, blank to cancel):'
     if (-not $pkgId) { return }
 
+    # Get credentials before launching parallel jobs
+    $sshCreds = Get-FleetSshCredential -Targets $wingetTargets
+    if (-not $sshCreds) { return }
+
     Write-Host '  Querying targets...' -ForegroundColor DarkGray
     Write-Host ''
 
     # Query each target in parallel using SSH
-    $results = @()
     $jobs = foreach ($tgt in $wingetTargets) {
-        $t = $tgt
+        $t    = $tgt
+        $cred = $sshCreds.Credential
+        $kf   = $sshCreds.KeyFile
         Start-ThreadJob -ScriptBlock {
-            param($target, $id)
+            param($target, $id, $credential, $keyFile)
             $ErrorActionPreference = 'SilentlyContinue'
             try {
                 Import-Module Posh-SSH -ErrorAction Stop
-                $cred    = $using:sshCreds   # not available here — use per-target approach
-                # Direct winget list query via SSH
-                $session = New-SSHSession -ComputerName $target.Address -Port $target.Port `
-                               -AcceptKey -ErrorAction Stop
-                $r = Invoke-SSHCommand -SessionId $session.SessionId `
-                         -Command "winget list --id `"$id`" --accept-source-agreements --disable-interactivity 2>&1" `
-                         -TimeOut 30
-                $out = $r.Output -join ' '
+                $useKey = -not [string]::IsNullOrWhiteSpace($keyFile)
+                $sParams = @{
+                    ComputerName = $target.Address
+                    Port         = [int]$target.Port
+                    AcceptKey    = $true
+                    ErrorAction  = 'Stop'
+                }
+                if ($useKey) { $sParams['Username'] = $target.User; $sParams['KeyFile'] = $keyFile }
+                else          { $sParams['Credential'] = $credential }
+
+                $session = New-SSHSession @sParams
+                # Wrap in pwsh to suppress PTY-triggered progress animation
+                $cmd = "pwsh -NoProfile -NonInteractive -Command `"winget list --id '$id' --accept-source-agreements --disable-interactivity | Out-String -Width 200`""
+                $r   = Invoke-SSHCommand -SessionId $session.SessionId -Command $cmd -TimeOut 30
+                $out = ($r.Output -join ' ')
                 Remove-SSHSession -SessionId $session.SessionId | Out-Null
+
                 if ($out -match [regex]::Escape($id)) {
-                    # Extract version from output
-                    $ver = if ($out -match '\d+\.\d+[\.\d]*') { $Matches[0] } else { '?' }
+                    # Extract version — use -split for thread safety (avoid $Matches)
+                    $parts = $out -split '\s+' | Where-Object { $_ -match '^\d+\.\d+[\.\d]*$' }
+                    $ver   = if ($parts) { $parts[0] } else { '?' }
                     [pscustomobject]@{ Name = $target.Name; Status = 'Installed'; Version = $ver }
                 } else {
                     [pscustomobject]@{ Name = $target.Name; Status = 'Not installed'; Version = '' }
@@ -379,7 +393,7 @@ function Invoke-WinGetStatusMenu {
             } catch {
                 [pscustomobject]@{ Name = $target.Name; Status = 'SSH error'; Version = $_.Exception.Message.Split("`n")[0] }
             }
-        } -ArgumentList $t, $pkgId
+        } -ArgumentList $t, $pkgId, $cred, $kf
     }
 
     $results = @($jobs | Wait-Job | Receive-Job)

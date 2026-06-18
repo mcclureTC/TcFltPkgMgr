@@ -232,6 +232,23 @@ Setting `PackageManager = both` routes a target into both SSH buckets — useful
 
 ---
 
+## Configuration
+
+### `settings.default.json` sections
+
+| Section | Key settings |
+|---------|-------------|
+| `ssh` | `timeoutSeconds` (1800), `throttleLimit` (25), `jitterMaxMs`, `retryCount` |
+| `winget` | `remoteWinGetPath` ("winget"), `timeoutSeconds` (300) |
+| `tcpkg` | `executablePath`, `remoteTcpkgPath` |
+| `docker` | `throttleLimit` (20), `logTailLines` (50) |
+| `ui` | `dashboardPageSize` (20), `reachCacheSecs` (60), `displayBackend` |
+| `log` | `retentionDays` (30), `captureFleet` |
+
+Override any setting in `config/settings.local.json` (gitignored).
+
+---
+
 ## WinGet package management
 
 From the Fleet home screen press **2. WinGet** to access the WinGet sub-menu:

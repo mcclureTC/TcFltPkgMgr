@@ -45,7 +45,13 @@ Step 2 is an explicit gate — it forces the question "what should be tested her
 - `$Matches` is not thread-safe in `-Parallel` — use `-split` instead of
   `-match` inside parallel blocks.
 - PS class methods cannot declare return types.
-- PS class methods without declared return types output to the pipeline — do NOT
+- PS class methods without declared return types output to the pipeline
+- **`pwsh -NonInteractive | Out-String` pattern:** When `Invoke-SSHCommand` runs any
+  tool that detects TTY mode (winget, ansible, docker, pip, etc.), always wrap:
+  `pwsh -NoProfile -NonInteractive -Command "tool args | Out-String -Width 300"`
+  This suppresses progress animation and CLIXML serialization, giving clean plain text.
+- **`$Matches` is not thread-safe** — in parallel/thread-job blocks always use
+  `-split` or named capture groups stored in local variables instead of `$Matches` — do NOT
   assign them to variables (`$x = $t.Method()` returns `$null`). Either use the
   output directly in a pipeline/expression, or inline the logic in the caller.
 - `Set-StrictMode -Off` is set globally.
@@ -375,31 +381,39 @@ every subsequent phase builds on a scalable foundation.
 
 ---
 
-### 4.4 — Phase 4 bug fixes and improvements (apply before Phase 5)
+### 4.4 — Phase 4 bug fixes and improvements ✅
 
-**Bug: `Invoke-WinGetStatusMenu` SSH credentials not passed**
-- [ ] Replace `$using:sshCreds` (undefined in thread job) with `Get-FleetSshCredential`
-      called before launching jobs, then passed via `-ArgumentList`
-- [ ] Use stored credential or prompt once; pass to each thread job as argument
-- [ ] Fix `Remove-SSHSession -SessionId $session.Session` → `$session.SessionId`
+**Bug: `Invoke-WinGetStatusMenu` SSH credentials not passed** ✅
+- [x] `Get-FleetSshCredential` called before launching thread jobs
+- [x] Credential passed via `-ArgumentList` to each job
+- [x] `$Matches[0]` replaced with `-split` for thread safety (convention reminder)
+- [x] Uses `pwsh -NonInteractive | Out-String` pattern (suppresses PTY animation)
 
-**Missing: `winget` section in `settings.default.json`**
-- [ ] Add `winget` section: `{ "remoteWinGetPath": "winget", "timeoutSeconds": 300 }`
-      *(was deferred from Phase 3 but needed before Phase 9.3)*
+**Missing: `winget` section in `settings.default.json`** ✅
+- [x] Added `winget: { remoteWinGetPath: "winget", timeoutSeconds: 300 }`
 
-**Missing: `PackageManager` field in `Write-FltBatchEntry`**
-- [ ] Add `PackageManager` to the log entry — already emitted by WinGet/tcpkg executors
-      *(Phase 10.1 depends on Phases 3/7 being done; Phase 3 is done — implement now)*
+**Missing: `PackageManager` field in `Write-FltBatchEntry`** ✅
+- [x] `packageManager` field added — derived from first result with it set, defaults to `'tcpkg'`
+- [x] All existing batch log entries now include `packageManager`
 
-**Lesson applied: `pwsh -NonInteractive | Out-String` pattern**
-- When running winget or other interactive tools via `Invoke-SSHCommand` (Posh-SSH),
-  always wrap in `pwsh -NoProfile -NonInteractive -Command "... | Out-String -Width N"`
-  to suppress PTY-triggered progress animation and get clean parseable output.
-- Apply this pattern to any future SSH command that uses a tool detecting TTY mode.
+**Lesson applied: `pwsh -NonInteractive | Out-String` pattern** ✅
+- Documented and applied to Status menu SSH queries
+- Added to conventions for all future phases using SSH + interactive tools
 
 ---
 
 ## Phase 5 — Ansible prerequisites
+
+### 5.0 — Pre-work (apply before implementing Ansible)
+
+**Fix: `SshExecutor` does not set `PackageManager` on `BatchResult` objects**
+- [ ] Add `PackageManager = 'tcpkg'` to every `BatchResult` created in `Invoke-FltSshBatch`
+      so `Write-FltBatchEntry` correctly logs `'tcpkg'` for SSH batch operations
+- [ ] Verify `WinGetExecutor` already sets `PackageManager = 'winget'` ✅
+
+**Add `ansible` section to `settings.default.json`**
+- [ ] `ansible: { executablePath: "ansible-playbook", useWsl: false, wslDistro: "", tempDir: "", forks: 10 }`
+      *(deferred from Phase 0.2 — now needed)*
 
 ### 5.1 — Ansible availability check (`data/AnsibleRepository.ps1`) — new file
 
@@ -563,6 +577,10 @@ The operator enters the vault password once; the tool manages it from there.
 
 ## Phase 7 — Docker container support
 
+> **Note:** Phase 7 (Docker) is independent of Phases 5 and 6 (Ansible/Linux).
+> It can be implemented in parallel or before Phases 5/6 if Docker support is
+> higher priority. The only ordering constraint is Phase 8 must follow Phase 7.
+
 ### 7.0 — Batch dashboard pagination
 > *(Deferred from Phase 0.1 — needed at container scale with 100+ targets)*
 
@@ -699,6 +717,13 @@ Containers are reached via a two-hop model: SSH to the Docker host, then
 
 ### 9.1 — Add target: full type/OS flow (`ui/menus/TargetMenu.ps1`)
 
+> **Current state:** `Invoke-TargetMenu` has no OS/TargetType/PackageManager/Docker
+> prompts — all fields default silently. This is the #1 usability gap before
+> Phase 7 container targets can be added via the UI.
+> Consider pulling Phase 9.1 forward to implement alongside Phase 7.4.
+
+### 9.1 — Add target: full type/OS flow (`ui/menus/TargetMenu.ps1`) _(continued)_
+
 > Also satisfies Phase 4.3 (Windows OS/PackageManager prompts) and
 > Phase 7.4 (container target Add flow). Implement all together here.
 > Currently `Invoke-TargetMenu` only asks Name/Host/Port/User/Password/
@@ -741,8 +766,7 @@ Containers are reached via a two-hop model: SSH to the Docker host, then
 - [x] `ui.dashboardPageSize: 20` — already in `settings.default.json`
 - [x] `ui.reachCacheSecs: 60` — already in `settings.default.json`
 - [x] `winget` section — implement in Phase 4.4 bug fixes (Phase 3 is done)
-- [ ] Add `ansible` section (add when Phase 5 executor is implemented):
-      `executablePath`, `useWsl`, `wslDistro`, `tempDir`, `forks: 10`
+- [x] `ansible` section — implement in Phase 5.0 pre-work
 - [ ] `settings.default.jsonc` — add when the above sections are added
 
 ---

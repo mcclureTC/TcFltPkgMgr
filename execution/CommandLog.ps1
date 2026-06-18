@@ -90,13 +90,19 @@ function Write-FltBatchEntry {
         [object[]] $Results
     )
     if (-not (Get-FltCfgValue 'log' 'captureFleet' $true)) { return }
+
+    # Derive PackageManager from first result that has it set; default to 'tcpkg'
+    $pm = ($Results | Where-Object { $_.PackageManager } | Select-Object -First 1).PackageManager
+    if (-not $pm) { $pm = 'tcpkg' }
+
     $record = [ordered]@{
-        ts      = (Get-Date).ToString('o')
-        session = $Script:FltSessionId
-        event   = 'batch'
-        action  = $Action
-        package = $PackageSpec
-        results = @($Results | ForEach-Object {
+        ts             = (Get-Date).ToString('o')
+        session        = $Script:FltSessionId
+        event          = 'batch'
+        action         = $Action
+        package        = $PackageSpec
+        packageManager = $pm
+        results        = @($Results | ForEach-Object {
             [ordered]@{
                 target   = $_.TargetName
                 status   = $_.Status
