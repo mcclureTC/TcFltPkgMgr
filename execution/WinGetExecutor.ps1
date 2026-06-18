@@ -15,16 +15,23 @@
 # =============================================================================
 
 # Map WinGet verb to the full remote command string.
-# WinGet flags: --silent suppresses UI, --accept-* avoids interactive prompts.
+# PackageSpec may be just an id (e.g. 'Notepad++.Notepad++') or an id with
+# a version flag (e.g. 'Notepad++.Notepad++ --version 8.9.6.4').
+# --disable-interactivity prevents winget from blocking on prompts over SSH.
 function _Get-WinGetCommand {
     param([string]$Action, [string]$PackageSpec)
-    # --disable-interactivity prevents winget from blocking on prompts over SSH
+
+    # Split id from any embedded flags (e.g. --version X)
+    $parts   = $PackageSpec -split '\s+--', 2
+    $id      = $parts[0].Trim()
+    $extra   = if ($parts.Count -gt 1) { " --$($parts[1].Trim())" } else { '' }
+
     $flags = '--silent --accept-package-agreements --accept-source-agreements --disable-interactivity'
     switch ($Action) {
-        'install'   { "winget install --id $PackageSpec $flags" }
-        'upgrade'   { "winget upgrade  --id $PackageSpec $flags" }
-        'uninstall' { "winget uninstall --id $PackageSpec --silent --disable-interactivity" }
-        default     { "winget install --id $PackageSpec $flags" }
+        'install'   { "winget install --id $id$extra $flags" }
+        'upgrade'   { "winget upgrade  --id $id$extra $flags" }
+        'uninstall' { "winget uninstall --id $id --silent --disable-interactivity" }
+        default     { "winget install --id $id$extra $flags" }
     }
 }
 

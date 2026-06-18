@@ -342,27 +342,28 @@ every subsequent phase builds on a scalable foundation.
 
 ---
 
-## Phase 4 — WinGet UI
+## Phase 4 — WinGet UI ✅
 
-### 4.1 — Fleet menu (`ui/menus/FleetMenu.ps1`)
+### 4.1 — Fleet menu (`ui/menus/FleetMenu.ps1`) ✅
 
-> Current layout (1-8): Install, Upgrade, Uninstall, Status, Outdated,
-> Profiles, UI Config, Setup. Each new executor phase shifts Setup by 1.
-> Final layout after Phases 4+6+8: Install, Upgrade, Uninstall, Status,
-> Outdated, WinGet, Linux Admin, Containers, Profiles, UI Config, Setup.
-> UI Config stays adjacent to Setup (operator muscle memory).
+> Redesigned as two-level hierarchy: top level selects package manager,
+> sub-menus provide identical install/upgrade/uninstall/status flows.
+> Both sub-menus follow the same UX: search → pick → version → targets → batch.
 
-- [ ] Add `6. WinGet`; Profiles→7, UI Config→8, Setup→9
-- [ ] Update dashboard footer hint (may need second footer line at 119 cols)
+- [x] Top level: `1. tcpkg  2. WinGet  3. Profiles  4. UI Config  5. Setup`
+- [x] `Invoke-TcpkgMenu` sub-menu wraps existing install/upgrade/uninstall/status/outdated flows
+- [x] `Invoke-WinGetMenu` sub-menu with same structure, routes to WinGet flows
+- [x] Dashboard footer updated (72 chars, fits comfortably at 119 cols)
 
-### 4.2 — WinGet menu (`ui/menus/WinGetMenu.ps1`) — new file
+### 4.2 — WinGet menu (`ui/menus/WinGetMenu.ps1`) ✅
 
-- [ ] `Invoke-WinGetInstallMenu` — search → pick (base-1) → version (base-1)
-      → target selection (base-11 on dashboard, Windows only) → batch
-- [ ] `Invoke-WinGetUpgradeMenu`
-- [ ] `Invoke-WinGetUninstallMenu`
-- [ ] `Invoke-WinGetStatusMenu`
-- [ ] Filter target list to `OS -eq 'windows'` throughout
+- [x] `Invoke-WinGetInstallMenu` — search → filter msstore → pick → version → targets → batch
+- [x] `Invoke-WinGetUpgradeMenu` — search → filter msstore → pick → targets → batch
+- [x] `Invoke-WinGetUninstallMenu` — select target → SSH `winget list` via `pwsh -NonInteractive | Out-String` → filter unmanageable entries → pick → all targets → batch
+- [x] `Invoke-WinGetStatusMenu` — parallel SSH query per target
+- [x] Target filter: all Windows targets by default; winget/both targets preferred
+- [x] `_Parse-WinGetTable`: dual-mode (adjacent header+sep search OR hardcoded fallback), multi-space split for list output
+- [x] Key lesson: Posh-SSH `Invoke-SSHCommand` allocates PTY → winget shows progress animation → wrapping in `pwsh -NonInteractive | Out-String` suppresses it and provides clean parseable output
 
 ### 4.3 — Setup: target OS/PackageManager prompts (`ui/menus/TargetMenu.ps1`)
 

@@ -226,7 +226,8 @@ Tests local package search and remote package status queries. All are read-only 
 ### Suite 19 — WinGet executor
 
 **Infrastructure required:** `winget` installed on operator machine (for search/version tests); online target with `winget` for live tests  
-**Per target:** No (routing logic and search are local; live install is suite 20)
+**Per target:** No (routing logic and search are local; live install is suite 20)  
+**Check count:** 15 (9a–9k; 9g/9h/9i WARN if winget not on operator machine)
 
 Tests WinGet availability, executor routing logic, local package search, and version listing.
 
@@ -242,6 +243,8 @@ Tests WinGet availability, executor routing logic, local package search, and ver
 | 9h | `Get-FltWinGetVersions` returns versions _(requires winget)_ | `winget show --id 7zip.7zip --versions` returns a list | Calls `Get-FltWinGetVersions -PackageId '7zip.7zip'`, checks count and shape. WARN if package not in configured sources. |
 | 9i | `Get-FltWinGetInstalledIndex` returns hashtable _(requires winget)_ | `winget list` is parsed into a name→version hashtable with lowercase keys | Calls `Get-FltWinGetInstalledIndex`, checks return is a hashtable and all keys are lowercase (consistent with `Get-FltInstalledIndex` contract). WARN if winget not on machine. |
 | 9j | WinGet target with `IA=False` routes to push bucket | `FleetExecutor` sends `InternetAccess=False` targets to the push bucket regardless of `PackageManager` | Creates synthetic `FleetTarget` with `PackageManager='winget'` and `InternetAccess=$false`, simulates `FleetExecutor` bucket logic, checks `goesPush=true` and `goesWinGet=false` |
+| 9k | `_Parse-WinGetTable` — search format (multi-group separator) | Position-based parsing correctly extracts Id/Title/Version when separator is `--- --- ---` | Fixture: 3-row `winget search` output. Verifies `Notepad++.Notepad++` in `Name`, `Notepad++` in `Title`, `8.9.6.4` in `Version`. Column positions taken from header word starts (not dash group positions — these are off by 1-2 chars). |
+| 9k | `_Parse-WinGetTable` — list format (solid separator) | Multi-space split correctly extracts Id/Title/Version when separator is `------...` | Fixture: 6-row `winget list` output including ARP, msstore, and runtime entries. Verifies `XmlNotepad` (id=`Microsoft.XMLNotepad`, ver=`2.9.0.22`), `OpenSSH` (ver=`9.5.0.0`), `WindowsAppRuntime.1.8` (ver=`1.8.0`). ARP entries present in fixture but not asserted — filtered by UI layer. |
 
 ---
 

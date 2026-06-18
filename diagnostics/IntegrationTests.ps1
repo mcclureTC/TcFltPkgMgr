@@ -1098,10 +1098,61 @@ function Invoke-IT_WinGet {
         }
     } catch { _IT_Fail $r 'Routing: IA=False winget target' $_.Exception.Message }
 
+    # 9k. _Parse-WinGetTable — unit test for both output formats
+    # Feeds known winget output fixtures and verifies correct Name/Id/Version extraction.
+    # Tests two formats:
+    #   (a) winget search: multi-group separator, position-based parsing
+    #   (b) winget list via Out-String: solid separator, multi-space split
+    try {
+        # Format A: winget search output (multi-group separator)
+        $searchLines = @(
+            'Name                           Id                        Version    Source',
+            '------------------------------- ------------------------- ---------- ------',
+            'Notepad++                      Notepad++.Notepad++       8.9.6.4    winget',
+            '7-Zip                          7zip.7zip                 24.9.0     winget',
+            'AkelPad                        AkelPad.AkelPad           4.9.9      winget'
+        )
+        $searchResult = _Parse-WinGetTable -Lines $searchLines
+        if (-not $searchResult.Ok)                                          { _IT_Fail $r '_Parse-WinGetTable search: parse succeeded' 'Ok=false' }
+        elseif ($searchResult.Items.Count -ne 3)                            { _IT_Fail $r '_Parse-WinGetTable search: item count' "Expected 3 got $($searchResult.Items.Count)" }
+        elseif ($searchResult.Items[0].Name -ne 'Notepad++.Notepad++')     { _IT_Fail $r '_Parse-WinGetTable search: Id extracted as Name' "Got '$($searchResult.Items[0].Name)'" }
+        elseif ($searchResult.Items[0].Title -ne 'Notepad++')              { _IT_Fail $r '_Parse-WinGetTable search: display name in Title' "Got '$($searchResult.Items[0].Title)'" }
+        elseif ($searchResult.Items[0].Version -ne '8.9.6.4')              { _IT_Fail $r '_Parse-WinGetTable search: version' "Got '$($searchResult.Items[0].Version)'" }
+        else { _IT_Pass $r '_Parse-WinGetTable search format: Id/Title/Version correctly extracted' }
+
+        # Format B: winget list via Out-String (solid separator, values may overflow columns)
+        # This is the format produced by: winget list | Out-String -Width 300
+        $listLines = @(
+            'Name                                    Id                                       Version          Available     Source',
+            '-----------------------------------------------------------------------------------------------------------------------',
+            'OpenSSH                                 Microsoft.OpenSSH.Preview                9.5.0.0          10.0.0.0      winget',
+            'XmlNotepad                              Microsoft.XMLNotepad                     2.9.0.22                       winget',
+            'PowerShell 7-x64                        Microsoft.PowerShell                     7.5.0.0          7.6.2.0       winget',
+            'Windows Notepad                         9MSMLRH6LZF3                             11.2604.5.0                    msstore',
+            'EloMultiTouch 9.2.0.8                   ARP\Machine\X64\Elo Touch Solutions      9.2.0.8',
+            'WindowsAppRuntime.1.8                   Microsoft.WindowsAppRuntime.1.8          1.8.0            1.8.8         winget'
+        )
+        $listResult = _Parse-WinGetTable -Lines $listLines
+        if (-not $listResult.Ok)                                             { _IT_Fail $r '_Parse-WinGetTable list: parse succeeded' 'Ok=false' }
+        elseif ($listResult.Items.Count -ne 6)                              { _IT_Fail $r '_Parse-WinGetTable list: item count' "Expected 6 got $($listResult.Items.Count)" }
+        else {
+            $xmlNotepad = $listResult.Items | Where-Object { $_.Name -eq 'Microsoft.XMLNotepad' } | Select-Object -First 1
+            $openSsh    = $listResult.Items | Where-Object { $_.Name -eq 'Microsoft.OpenSSH.Preview' } | Select-Object -First 1
+            $runtime    = $listResult.Items | Where-Object { $_.Name -eq 'Microsoft.WindowsAppRuntime.1.8' } | Select-Object -First 1
+
+            if (-not $xmlNotepad)                           { _IT_Fail $r '_Parse-WinGetTable list: XmlNotepad found'    "Id not found in results: $($listResult.Items.Name -join ', ')" }
+            elseif ($xmlNotepad.Title -ne 'XmlNotepad')    { _IT_Fail $r '_Parse-WinGetTable list: XmlNotepad title'    "Got '$($xmlNotepad.Title)'" }
+            elseif ($xmlNotepad.Version -ne '2.9.0.22')    { _IT_Fail $r '_Parse-WinGetTable list: XmlNotepad version'  "Got '$($xmlNotepad.Version)'" }
+            elseif (-not $openSsh)                          { _IT_Fail $r '_Parse-WinGetTable list: OpenSSH found'       'Id not found' }
+            elseif ($openSsh.Version -ne '9.5.0.0')        { _IT_Fail $r '_Parse-WinGetTable list: OpenSSH version'     "Got '$($openSsh.Version)'" }
+            elseif (-not $runtime)                          { _IT_Fail $r '_Parse-WinGetTable list: WindowsAppRuntime found' 'Id not found' }
+            elseif ($runtime.Version -ne '1.8.0')          { _IT_Fail $r '_Parse-WinGetTable list: WindowsAppRuntime version' "Got '$($runtime.Version)'" }
+            else { _IT_Pass $r '_Parse-WinGetTable list format: all packages correctly parsed (Id/Title/Version)' }
+        }
+    } catch { _IT_Fail $r '_Parse-WinGetTable' $_.Exception.Message }
+
     return $r
 }
-
-# Tests a real install + uninstall via SSH using Invoke-FltWinGetBatch.
 # Uses 7zip.7zip — small (~1MB), universally available, easily removed.
 #
 # Flow:

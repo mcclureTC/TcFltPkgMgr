@@ -232,6 +232,19 @@ Setting `PackageManager = both` routes a target into both SSH buckets — useful
 
 ---
 
+## WinGet package management
+
+From the Fleet home screen press **2. WinGet** to access the WinGet sub-menu:
+
+- **1. Install** — search winget, pick package and version, select targets, install in parallel via SSH
+- **2. Upgrade** — search, pick, select targets, upgrade in parallel
+- **3. Uninstall** — select a reference target, query what's installed via `winget list`, pick a package, select all targets to uninstall from
+- **4. Status** — show installed/not-installed for a given package id across all winget targets
+
+Microsoft Store apps (`msstore` source) are automatically excluded from Install and Upgrade — they require an interactive Microsoft account session and cannot be installed via SSH.
+
+---
+
 ## Preparing targets for WinGet
 
 Use **Setup → select target → 4. Prepare target** to install WinGet on a remote Windows machine via SSH. The installer:

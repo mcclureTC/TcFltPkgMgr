@@ -130,7 +130,7 @@ function _Ansi_ShowFleetDashboard {
     $cmdRow    = $sepRow2 + 1
 
     _Ansi_PaintRow $sepRow1   ('-' * $sw) 'Dark'
-    _Ansi_PaintRow $footerRow '  1. Install   2. Upgrade   3. Uninstall   4. Status   5. Outdated   6. Profiles   7. UI Config   8. Setup   0. Exit' 'Dark'
+    _Ansi_PaintRow $footerRow '  1. tcpkg   2. WinGet   3. Profiles   4. UI Config   5. Setup   0. Exit' 'Dark'
 
     # Nav row: pagination info + sort/filter hints
     $navParts = @()
@@ -412,7 +412,12 @@ function _Ansi_ShowFleetBatchDashboard {
     _Ansi_PaintRow 3 $modeStr 'Dark'
 
     $remoteTcpkg = (Get-FltCfgValue 'tcpkg' 'remoteTcpkgPath' 'TcPkg.exe')
-    _Ansi_PaintRow 4 "  > `"$remoteTcpkg`" $Action $PackageSpec -y" 'Dark'
+    $cmdPreview  = if ($Mode -like 'WinGet*') {
+        "  > winget $Action --id $PackageSpec --silent --accept-package-agreements"
+    } else {
+        "  > `"$remoteTcpkg`" $Action $PackageSpec -y"
+    }
+    _Ansi_PaintRow 4 $cmdPreview 'Dark'
     _Ansi_PaintRow 5 ('-' * $sw) 'Dark'
     _Ansi_PaintRow 6 ('  {0,-22} {1,-14} {2,9}  {3}' -f 'Target','Status','Duration','Note') 'Dark'
     _Ansi_PaintRow 7 ('-' * $sw) 'Dark'

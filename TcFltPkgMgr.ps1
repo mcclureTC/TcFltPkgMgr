@@ -100,6 +100,7 @@ $modules = @(
     'diagnostics\TestRunner.ps1',         # built-in diagnostics (Setup > 10)
     'ui\menus\TargetMenu.ps1',
     'ui\menus\PackageMenu.ps1',
+    'ui\menus\WinGetMenu.ps1',
     'ui\menus\UiConfigMenu.ps1',
     'ui\menus\FleetMenu.ps1'
 )

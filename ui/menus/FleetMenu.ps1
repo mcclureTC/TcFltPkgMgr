@@ -101,6 +101,56 @@ function Invoke-FltReloadTargets {
     return Start-FltReachJob $Script:FleetTargets -IgnoreCache
 }
 
+# tcpkg sub-menu — install/upgrade/uninstall/status/outdated via tcpkg.
+function Invoke-TcpkgMenu {
+    while ($true) {
+        Clear-Host
+        Write-Host '  tcpkg' -ForegroundColor Cyan
+        Write-Host ''
+        Write-Host '  1. Install'
+        Write-Host '  2. Upgrade'
+        Write-Host '  3. Uninstall'
+        Write-Host '  4. Status'
+        Write-Host '  5. Outdated'
+        Write-Host ''
+        Write-Host '  0. Back' -ForegroundColor DarkGray
+        Write-Host ''
+        $choice = (Read-Host '  Choice').Trim()
+        switch ($choice) {
+            '1' { Invoke-FleetInstallMenu }
+            '2' { Invoke-FleetUpgradeMenu }
+            '3' { Invoke-FleetUninstallMenu }
+            '4' { Invoke-PackageStatusMenu }
+            '5' { Invoke-OutdatedCheckMenu }
+            '0' { return }
+        }
+    }
+}
+
+# WinGet sub-menu — install/upgrade/uninstall/status via winget SSH.
+function Invoke-WinGetMenu {
+    while ($true) {
+        Clear-Host
+        Write-Host '  WinGet' -ForegroundColor Cyan
+        Write-Host ''
+        Write-Host '  1. Install'
+        Write-Host '  2. Upgrade'
+        Write-Host '  3. Uninstall'
+        Write-Host '  4. Status'
+        Write-Host ''
+        Write-Host '  0. Back' -ForegroundColor DarkGray
+        Write-Host ''
+        $choice = (Read-Host '  Choice').Trim()
+        switch ($choice) {
+            '1' { Invoke-WinGetInstallMenu }
+            '2' { Invoke-WinGetUpgradeMenu }
+            '3' { Invoke-WinGetUninstallMenu }
+            '4' { Invoke-WinGetStatusMenu }
+            '0' { return }
+        }
+    }
+}
+
 # The Fleet home screen — the application entry point after startup.
 # Shows all targets with reachability status. Handles sort, filter, pagination,
 # target selection (11+), and routes to all sub-menus (Install, Setup, etc.).
@@ -313,16 +363,13 @@ function Invoke-FleetMenu {
         }
 
         # Fixed operations
-        if ($num -eq 1) { Invoke-FleetInstallMenu;   $reachJob = Invoke-FltReloadTargets $reachJob }
-        elseif ($num -eq 2) { Invoke-FleetUpgradeMenu;   $reachJob = Invoke-FltReloadTargets $reachJob }
-        elseif ($num -eq 3) { Invoke-FleetUninstallMenu; $reachJob = Invoke-FltReloadTargets $reachJob }
-        elseif ($num -eq 4) { Invoke-PackageStatusMenu }
-        elseif ($num -eq 5) { Invoke-OutdatedCheckMenu }
-        elseif ($num -eq 6) { Invoke-ProfileMenu }
-        elseif ($num -eq 7) { Invoke-UiConfigMenu }
-        elseif ($num -eq 8) { Invoke-SetupMenu; $reachJob = Invoke-FltReloadTargets $reachJob }
+        if ($num -eq 1) { Invoke-TcpkgMenu;  $reachJob = Invoke-FltReloadTargets $reachJob }
+        elseif ($num -eq 2) { Invoke-WinGetMenu; $reachJob = Invoke-FltReloadTargets $reachJob }
+        elseif ($num -eq 3) { Invoke-ProfileMenu }
+        elseif ($num -eq 4) { Invoke-UiConfigMenu }
+        elseif ($num -eq 5) { Invoke-SetupMenu; $reachJob = Invoke-FltReloadTargets $reachJob }
         else {
-            $Script:FltMenuResultLines = @("Enter 11-$(10+$n) for a target, 1-8 for operations, 0 to exit.")
+            $Script:FltMenuResultLines = @("Enter 11-$(10+$n) for a target, 1-5 for operations, 0 to exit.")
         }
 
         & $repaint

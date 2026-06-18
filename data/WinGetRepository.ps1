@@ -28,53 +28,102 @@ function _Parse-WinGetTable {
 
     $fail = [pscustomobject]@{ Ok = $false; Items = @(); Columns = @() }
 
-    # Find the separator line — a run of dashes/unicode box chars
-    $sepIdx = -1
-    for ($i = 0; $i -lt $Lines.Count; $i++) {
-        if ($Lines[$i].Trim() -match '^[-\u2500]{10,}$') { $sepIdx = $i; break }
-    }
-    if ($sepIdx -lt 1) { return $fail }
-
-    $header = $Lines[$sepIdx - 1]
-
-    # Column positions from header word starts
-    $colMatches = [regex]::Matches($header, '\S+')
-    if ($colMatches.Count -lt 2) { return $fail }
-
-    $colStarts = @($colMatches | ForEach-Object {
-        [pscustomobject]@{ Pos = $_.Index; Name = $_.Value.ToLower() }
+    # Clean lines: strip ANSI codes and carriage returns
+    $cleanedLines = @($Lines | ForEach-Object {
+        [string]$_ -replace '\x1b\[[0-9;]*[mGKHF]', '' -replace '\r', ''
     })
 
-    function _GetCol($line, $idx) {
-        $s = $colStarts[$idx].Pos
-        $e = if ($idx + 1 -lt $colStarts.Count) { $colStarts[$idx + 1].Pos } else { $line.Length }
-        if ($s -ge $line.Length) { return '' }
-        return $line.Substring($s, [Math]::Min($e, $line.Length) - $s).Trim()
+    # Find header+separator as adjacent pair.
+    # When run via pwsh -NonInteractive the header is present; over raw SSH it may be absent.
+    $sepIdx    = -1
+    $headerIdx = -1
+    for ($i = 1; $i -lt $cleanedLines.Count; $i++) {
+        $cur  = $cleanedLines[$i].Trim()
+        $prev = $cleanedLines[$i - 1].Trim()
+        if ($cur -match '^[-\s]{10,}$' -and
+            $prev -match '(?i)\bname\b' -and
+            $prev -match '(?i)\bversion\b') {
+            $headerIdx = $i - 1
+            $sepIdx    = $i
+            break
+        }
+    }
+    # Fallback: find any long separator and use hardcoded winget list column order
+    if ($sepIdx -lt 0) {
+        for ($i = 0; $i -lt $cleanedLines.Count; $i++) {
+            if ($cleanedLines[$i].Trim() -match '^[-\s]{10,}$') {
+                $sepIdx = $i; break
+            }
+        }
+    }
+    if ($sepIdx -lt 0) { return $fail }
+
+    $header = if ($headerIdx -ge 0) {
+        $cleanedLines[$headerIdx].TrimStart()
+    } else {
+        'Name                                    Id                                       Version          Available     Source'
     }
 
-    $idxName = ($colStarts | Where-Object { $_.Name -eq 'name'    } | Select-Object -First 1)
-    $idxId   = ($colStarts | Where-Object { $_.Name -eq 'id'      } | Select-Object -First 1)
-    $idxVer  = ($colStarts | Where-Object { $_.Name -eq 'version' } | Select-Object -First 1)
-    $idxSrc  = ($colStarts | Where-Object { $_.Name -eq 'source'  } | Select-Object -First 1)
+    $sepIndent  = $cleanedLines[$sepIdx].Length - $cleanedLines[$sepIdx].TrimStart().Length
+    $dataIndent = $sepIndent
 
-    $iName = if ($idxName) { [array]::IndexOf($colStarts, $idxName) } else { -1 }
-    $iId   = if ($idxId)   { [array]::IndexOf($colStarts, $idxId)   } else { -1 }
-    $iVer  = if ($idxVer)  { [array]::IndexOf($colStarts, $idxVer)  } else { -1 }
-    $iSrc  = if ($idxSrc)  { [array]::IndexOf($colStarts, $idxSrc)  } else { -1 }
+    # Parsing strategy based on separator type
+    $sepLine    = $cleanedLines[$sepIdx].TrimStart()
+    $dashGroups = @([regex]::Matches($sepLine, '-+'))
+    $useSplit   = $dashGroups.Count -lt 2
 
-    if ($iId -lt 0) { return $fail }
+    $headerWords = @([regex]::Matches($header, '\S+') | ForEach-Object { $_.Value.ToLower() })
+    if ($headerWords.Count -lt 2) { return $fail }
 
-    $items = @($Lines[($sepIdx + 1)..($Lines.Count - 1)] | ForEach-Object {
-        $line = $_
-        if ($line.Trim() -eq '') { return }
-        $id   = if ($iId   -ge 0) { _GetCol $line $iId   } else { '' }
-        $name = if ($iName -ge 0) { _GetCol $line $iName } else { $id }
-        $ver  = if ($iVer  -ge 0) { _GetCol $line $iVer  } else { '' }
-        $src  = if ($iSrc  -ge 0) { _GetCol $line $iSrc  } else { '' }
+    # Index lookups — fall back to fixed positions if header words not found
+    $iName = [array]::IndexOf($headerWords, 'name')
+    $iId   = [array]::IndexOf($headerWords, 'id')
+    $iVer  = [array]::IndexOf($headerWords, 'version')
+    $iSrc  = [array]::IndexOf($headerWords, 'source')
+    if ($iName -lt 0) { $iName = 0 }
+    if ($iId   -lt 0) { $iId   = 1 }
+    if ($iVer  -lt 0) { $iVer  = 2 }
+
+    if (-not $useSplit) {
+        # Position-based: use HEADER WORD positions as column boundaries.
+        # Dash group positions are off by 1-2 chars; header words are authoritative.
+        $colStarts = @([regex]::Matches($header, '\S+') | ForEach-Object {
+            [pscustomobject]@{ Pos = $_.Index; Name = $_.Value.ToLower() }
+        })
+        function _GetColP($line, $idx) {
+            $s = $colStarts[$idx].Pos
+            $e = if ($idx + 1 -lt $colStarts.Count) { $colStarts[$idx + 1].Pos } else { $line.Length }
+            if ($s -ge $line.Length) { return '' }
+            return $line.Substring($s, [Math]::Min($e, $line.Length) - $s).Trim()
+        }
+    }
+
+    $items = @($cleanedLines[($sepIdx + 1)..($cleanedLines.Count - 1)] | ForEach-Object {
+        $raw = $_
+        # Strip data row indent to align with header
+        if ($dataIndent -gt 0) {
+            $raw = if ($raw.Length -gt $dataIndent) { $raw.Substring($dataIndent) } else { $raw.TrimStart() }
+        }
+        if ($raw.Trim() -eq '') { return }
+
+        if ($useSplit) {
+            # Multi-space split — handles winget list where values overflow columns
+            $parts = @([regex]::Split($raw, '  +') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+            $id   = if ($iId   -ge 0 -and $iId   -lt $parts.Count) { $parts[$iId]   } else { '' }
+            $name = if ($iName -ge 0 -and $iName -lt $parts.Count) { $parts[$iName] } else { $id }
+            $ver  = if ($iVer  -ge 0 -and $iVer  -lt $parts.Count) { $parts[$iVer]  } else { '' }
+            $src  = if ($iSrc  -ge 0 -and $iSrc  -lt $parts.Count) { $parts[$iSrc]  } else { '' }
+        } else {
+            $id   = if ($iId   -ge 0) { _GetColP $raw $iId   } else { '' }
+            $name = if ($iName -ge 0) { _GetColP $raw $iName } else { $id }
+            $ver  = if ($iVer  -ge 0) { _GetColP $raw $iVer  } else { '' }
+            $src  = if ($iSrc  -ge 0) { _GetColP $raw $iSrc  } else { '' }
+        }
+
         if (-not $id) { return }
         [pscustomobject]@{
-            Name             = $id      # Use Id as Name — consistent with how packages are specified
-            Title            = $name    # Display name
+            Name             = $id
+            Title            = $name
             Version          = $ver
             InstalledVersion = ''
             Source           = $src
@@ -88,8 +137,8 @@ function _Parse-WinGetTable {
     }
 
     $cols = @(
-        @{ Header = 'Id';      Expr = { $_.Name } },
         @{ Header = 'Name';    Expr = { $_.Title } },
+        @{ Header = 'Id';      Expr = { $_.Name } },
         @{ Header = 'Version'; Expr = { $_.Version } },
         @{ Header = 'Source';  Expr = { $_.Source } }
     )
