@@ -416,18 +416,35 @@ every subsequent phase builds on a scalable foundation.
 - [x] Suite 17 check 7k: `BatchResult.PackageManager` field verified (7/7 ✅)
 
 **Add `ansible` section to `settings.default.json`** ✅
-- [x] `ansible: { executablePath, useWsl, wslDistro, tempDir, forks: 10 }` added
+- [x] `ansible: { executablePath, dockerContainer, useWsl, wslDistro, tempDir, forks: 10 }` added
 
 ### 5.1 — Ansible availability check (`data/AnsibleRepository.ps1`) ✅
 
-- [x] `Get-FltAnsibleMode` — returns `'native'`, `'wsl'`, or `''`
+**Architecture decision:** Ansible runs in a Docker container on the operator Windows machine
+(container name: `tcflt-ansible`, built from `docker/Dockerfile.ansible`).
+This avoids WSL and gives a consistent Linux Ansible environment on Windows.
+Mode priority: `native` → `wsl` → `docker` → `''`
+
+- [x] `Get-FltAnsibleMode` — returns `'native'`, `'wsl'`, `'docker'`, or `''`
 - [x] `Test-FltAnsibleAvailable` — returns `$true` when mode is not `''`
 - [x] `Get-FltAnsibleVersion` — returns version string or `''`
 - [x] `Test-FltAnsibleCollection` — checks `community.docker` via `ansible-galaxy`
-- [x] `Get-FltAnsibleStatus` — convenience wrapper returning `{Available, Mode, Version, HasCommunityDocker}`
-- [x] `_Get-FltWslPrefix` / `_Get-FltAnsibleCmd` / `_Get-FltAnsibleGalaxyCmd` — internal helpers
-- [x] Suite 21 (Ansible availability): 5/5 ✅ — passes gracefully when Ansible not installed
+- [x] `Get-FltAnsibleStatus` — convenience wrapper: `{Available, Mode, Version, HasCommunityDocker}`
+- [x] `Test-FltAnsibleDockerContainer` / `Test-FltAnsibleDockerContainerRunning` — container state
+- [x] `_Get-FltAnsibleCmd` / `_Get-FltAnsibleGalaxyCmd` — mode-aware command builders
+- [x] `ansible.dockerContainer` added to `settings.default.json` (default: `tcflt-ansible`)
+- [x] Suite 21 (Ansible availability): 7/7 ✅ — passes gracefully when Ansible not installed
 - [x] Target numbering moved to 101+ (was 21+) to avoid conflict with suite 21
+
+### 5.1.5 — Ansible operator Dockerfile (`docker/Dockerfile.ansible`) ✅
+
+- [x] `docker/Dockerfile.ansible` — builds `tcflt-ansible` container image
+      Based on `python:3.12-slim`; installs ansible, ansible-runner, paramiko,
+      openssh-client, sshpass; installs `community.docker`, `community.general`,
+      `ansible.posix` collections; mounts `/ansible` volume for inventory/playbooks
+- [x] Build: `docker build -f docker/Dockerfile.ansible -t tcflt-ansible .`
+- [x] Run: `docker run -d --name tcflt-ansible --restart unless-stopped -v \${PWD}/ansible:/ansible tcflt-ansible`
+- [ ] Suite 21 checks 11f/11g WARN until container is built — instructions shown inline
 
 ### 5.2 — Ansible inventory builder (`execution/AnsibleExecutor.ps1`) — new file
 

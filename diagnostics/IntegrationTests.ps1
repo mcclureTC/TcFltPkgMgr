@@ -1398,7 +1398,7 @@ function Invoke-IT_Ansible {
     # 11a. Get-FltAnsibleMode returns a valid value
     try {
         $mode = Get-FltAnsibleMode
-        if ($mode -in @('native', 'wsl', '')) {
+        if ($mode -in @('native', 'wsl', 'docker', '')) {
             _IT_Pass $r "Get-FltAnsibleMode: returned valid mode ('$mode')"
         } else {
             _IT_Fail $r 'Get-FltAnsibleMode: valid return value' "Got unexpected value: '$mode'"
@@ -1468,6 +1468,42 @@ function Invoke-IT_Ansible {
             _IT_Fail $r 'Test-FltAnsibleCollection: returns bool' "Got type: $($result.GetType().Name)"
         }
     } catch { _IT_Fail $r 'Test-FltAnsibleCollection' $_.Exception.Message }
+
+    # 11f. Test-FltAnsibleDockerContainer returns bool
+    try {
+        $exists = Test-FltAnsibleDockerContainer
+        if ($exists -is [bool]) {
+            if ($exists) {
+                _IT_Pass $r 'Test-FltAnsibleDockerContainer: container exists'
+            } else {
+                _IT_Warn $r 'Test-FltAnsibleDockerContainer: container not found' `
+                    "Run: docker build -f docker/Dockerfile.ansible -t tcflt-ansible . && docker run -d --name tcflt-ansible --restart unless-stopped tcflt-ansible"
+            }
+        } else {
+            _IT_Fail $r 'Test-FltAnsibleDockerContainer: returns bool' "Got: $($exists.GetType().Name)"
+        }
+    } catch { _IT_Fail $r 'Test-FltAnsibleDockerContainer' $_.Exception.Message }
+
+    # 11g. Test-FltAnsibleDockerContainerRunning returns bool
+    try {
+        $running = Test-FltAnsibleDockerContainerRunning
+        if ($running -is [bool]) {
+            if ($running) {
+                _IT_Pass $r 'Test-FltAnsibleDockerContainerRunning: container is running'
+            } else {
+                $exists = Test-FltAnsibleDockerContainer
+                if ($exists) {
+                    _IT_Warn $r 'Test-FltAnsibleDockerContainerRunning: container exists but not running' `
+                        "Run: docker start tcflt-ansible"
+                } else {
+                    _IT_Warn $r 'Test-FltAnsibleDockerContainerRunning: container not built yet' `
+                        "Build first: docker build -f docker/Dockerfile.ansible -t tcflt-ansible ."
+                }
+            }
+        } else {
+            _IT_Fail $r 'Test-FltAnsibleDockerContainerRunning: returns bool' "Got: $($running.GetType().Name)"
+        }
+    } catch { _IT_Fail $r 'Test-FltAnsibleDockerContainerRunning' $_.Exception.Message }
 
     return $r
 }

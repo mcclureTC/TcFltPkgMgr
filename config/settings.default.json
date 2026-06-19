@@ -31,11 +31,12 @@
     "timeoutSeconds":   300
   },
   "ansible": {
-    "executablePath": "ansible-playbook",
-    "useWsl":         false,
-    "wslDistro":      "",
-    "tempDir":        "",
-    "forks":          10
+    "executablePath":  "ansible-playbook",
+    "dockerContainer": "tcflt-ansible",
+    "useWsl":          false,
+    "wslDistro":       "",
+    "tempDir":         "",
+    "forks":           10
   },
   "docker": {
     "throttleLimit": 20,

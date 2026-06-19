@@ -1,0 +1,52 @@
+# =============================================================================
+#  TcFltPkgMgr — Ansible Operator Container
+#
+#  Provides a consistent Ansible environment on the operator Windows machine
+#  without requiring WSL or a separate Linux machine.
+#
+#  Build:
+#    docker build -f docker/Dockerfile.ansible -t tcflt-ansible .
+#
+#  Run (persistent, auto-restart):
+#    docker run -d --name tcflt-ansible --restart unless-stopped \
+#      -v ${PWD}/ansible:/ansible \
+#      tcflt-ansible
+#
+#  TcFltPkgMgr invokes Ansible as:
+#    docker exec tcflt-ansible ansible-playbook <args>
+#
+#  The /ansible volume mount gives the container access to generated inventory
+#  and playbook files written by TcFltPkgMgr on the operator machine.
+# =============================================================================
+
+FROM python:3.12-slim
+
+LABEL maintainer="TcFltPkgMgr"
+LABEL description="Ansible operator container for TcFltPkgMgr fleet management"
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    openssh-client \
+    sshpass \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Ansible and required Python packages
+RUN pip install --no-cache-dir \
+    ansible \
+    ansible-runner \
+    paramiko
+
+# Install Ansible collections
+RUN ansible-galaxy collection install \
+    community.docker \
+    community.general \
+    ansible.posix
+
+# Create working directory for generated inventory/playbooks
+RUN mkdir -p /ansible/inventory /ansible/playbooks /ansible/logs
+
+WORKDIR /ansible
+
+# Keep container running (TcFltPkgMgr uses 'docker exec' to invoke ansible)
+CMD ["tail", "-f", "/dev/null"]
