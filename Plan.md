@@ -418,14 +418,16 @@ every subsequent phase builds on a scalable foundation.
 **Add `ansible` section to `settings.default.json`** ✅
 - [x] `ansible: { executablePath, useWsl, wslDistro, tempDir, forks: 10 }` added
 
-### 5.1 — Ansible availability check (`data/AnsibleRepository.ps1`) — new file
+### 5.1 — Ansible availability check (`data/AnsibleRepository.ps1`) ✅
 
-- [ ] `Test-FltAnsibleAvailable` — checks for `ansible-playbook` on PATH or
-      via WSL
-- [ ] `Get-FltAnsibleVersion`
-- [ ] `Get-FltAnsibleMode` — returns `'native'` or `'wsl'`
-- [ ] `Test-FltAnsibleCollection` — checks `community.docker` is installed
-      (`ansible-galaxy collection list community.docker`)
+- [x] `Get-FltAnsibleMode` — returns `'native'`, `'wsl'`, or `''`
+- [x] `Test-FltAnsibleAvailable` — returns `$true` when mode is not `''`
+- [x] `Get-FltAnsibleVersion` — returns version string or `''`
+- [x] `Test-FltAnsibleCollection` — checks `community.docker` via `ansible-galaxy`
+- [x] `Get-FltAnsibleStatus` — convenience wrapper returning `{Available, Mode, Version, HasCommunityDocker}`
+- [x] `_Get-FltWslPrefix` / `_Get-FltAnsibleCmd` / `_Get-FltAnsibleGalaxyCmd` — internal helpers
+- [x] Suite 21 (Ansible availability): 5/5 ✅ — passes gracefully when Ansible not installed
+- [x] Target numbering moved to 101+ (was 21+) to avoid conflict with suite 21
 
 ### 5.2 — Ansible inventory builder (`execution/AnsibleExecutor.ps1`) — new file
 
@@ -805,7 +807,7 @@ Containers are reached via a two-hop model: SSH to the Docker host, then
 - [x] `diagnostics/TestRunner.ps1` — unified test dashboard, numpad-only input
 - [x] `Setup > 10` launches `Invoke-FltTestRunner`
 - [x] `config/test-results.json` stores last-run history per suite (gitignored)
-- [x] Multi-target selection via `21+` with range syntax (`21,23` / `21-24` / `21..24`)
+- [x] Multi-target selection via `101+` with range syntax (`21,23` / `21-24` / `21..24`)
 - [x] Per-target suites (SSH, Reachability) loop over all selected targets
 - [x] Singleton suites (File I/O, Pagination, Read-only, Log) run once regardless
 - [x] `Get-FltTestResultsPath`, `Get-FltTestResults`, `Save-FltTestResult` helpers

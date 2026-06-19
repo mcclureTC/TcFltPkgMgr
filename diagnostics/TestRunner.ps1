@@ -7,7 +7,7 @@
 #    1      Run all diagnostic tests
 #    9      Run all integration tests against selected targets
 #    11-16  Run a specific integration suite
-#    21+    Toggle a target on/off for integration SSH tests
+#    101+   Toggle a target on/off for integration SSH tests
 #    0      Back
 #
 #  Results are persisted to config/test-results.json.
@@ -108,13 +108,13 @@ function _Show-TestRunnerDashboard {
     # ── Target list ───────────────────────────────────────────────────────────
     $n = $Script:FleetTargets.Count
     if ($n -gt 0) {
-        Paint-FltRow $row '  ── Targets for integration tests (21+ to toggle) ────────────────────' 'Dark'
+        Paint-FltRow $row '  ── Targets for integration tests (101+ to toggle) ───────────────────' 'Dark'
         $row++
         for ($i = 0; $i -lt $n; $i++) {
             $t    = $Script:FleetTargets[$i]
             $tick = if ($SelectedTargets -contains $t.Name) { [char]0x25CF } else { ' ' }
             $clr  = if ($SelectedTargets -contains $t.Name) { 'Green' } else { 'Dark' }
-            Paint-FltRow $row ('  {0,-4}  {1} {2,-24}  {3}' -f (21+$i), $tick, $t.Name, $t.Address) $clr
+            Paint-FltRow $row ('  {0,-4}  {1} {2,-24}  {3}' -f (101+$i), $tick, $t.Name, $t.Address) $clr
             $row++
         }
     }
@@ -127,7 +127,7 @@ function _Show-TestRunnerDashboard {
 
     Paint-FltRow $sepRow    ('-' * $sw) 'Dark'
     Paint-FltRow $footerRow '  1. All diagnostics   9. All integration   00. Clear results   0. Back' 'Dark'
-    Paint-FltRow $sep2Row   '  11-20. Integration suite   21+. Toggle target (21,23 or 21-24 or 21..24)' 'Dark'
+    Paint-FltRow $sep2Row   '  11-99. Integration suite   101+. Toggle target (101,103 or 101-104 or 101..104)' 'Dark'
 
     if ($Result) {
         $clr = if ($ResultColor) { $ResultColor }
@@ -183,6 +183,7 @@ function _TR_RunIntSuite {
             'Invoke-IT_ReadOnly'        { Invoke-IT_ReadOnly }
             'Invoke-IT_Log'             { Invoke-IT_Log }
             'Invoke-IT_WinGet'          { Invoke-IT_WinGet }
+            'Invoke-IT_Ansible'         { Invoke-IT_Ansible }
             'Invoke-IT_SSH'             { Invoke-IT_SSH -Target ($Targets | Select-Object -First 1) -Credential $Credential }
             'Invoke-IT_ReachCache'      { Invoke-IT_ReachCache -Target ($Targets | Select-Object -First 1) }
             'Invoke-IT_TcpkgLocal'      { Invoke-IT_TcpkgLocal -Target ($Targets | Select-Object -First 1) }
@@ -203,6 +204,7 @@ function _TR_RunIntSuite {
                 'Invoke-IT_PackageQueries'  { Invoke-IT_PackageQueries -Target $target }
                 'Invoke-IT_WinGet'           { Invoke-IT_WinGet }
                 'Invoke-IT_WinGetLive'       { Invoke-IT_WinGetLive -Target $target -Credential $Credential }
+                'Invoke-IT_Ansible'          { Invoke-IT_Ansible }
                 default {
                     Write-Host "  Unknown suite: $($Suite.Function)" -ForegroundColor Red
                     _IT_NewResult
@@ -276,8 +278,8 @@ function Invoke-FltTestRunner {
 
         $choice = (Read-Host '  Choice').Trim()
 
-        # Accept pure digits OR range expressions starting with 21+ (e.g. "21,23" "21-24" "21..24")
-        $isRange = $choice -match '^2[1-9]' -and $choice -match '[,\.\-]'
+        # Accept pure digits OR range expressions starting with 101+ (e.g. "101,103" "101-104" "101..104")
+        $isRange = $choice -match '^1[01][0-9]' -and $choice -match '[,\.\-]'
         if (-not $isRange -and -not ($choice -match '^\d+$')) {
             $result = 'Numbers only — see footer for valid choices'
             $resultClr = 'Yellow'
@@ -320,7 +322,7 @@ function Invoke-FltTestRunner {
             $cred    = $null
             if ($itSuites | Where-Object { $_.NeedsSSH }) {
                 if ($selObjs.Count -eq 0) {
-                    $result = 'SSH suite needs a target — toggle one with 21+'
+                    $result = 'SSH suite needs a target — toggle one with 101+'
                     $resultClr = 'Yellow'
                     continue
                 }
@@ -340,7 +342,7 @@ function Invoke-FltTestRunner {
         }
 
         # 11-16 — run specific integration suite
-        if ($num -ge 11 -and $num -le 20) {
+        if ($num -ge 11 -and $num -le 99) {
             $id    = $num - 10
             $suite = $itSuites | Where-Object { $_.Id -eq $id }
             if (-not $suite) { $result = "No suite $num"; continue }
@@ -364,14 +366,14 @@ function Invoke-FltTestRunner {
             continue
         }
 
-        # 21+ — toggle target selection (single, comma list, or range: 21,23 or 21-24 or 21..24)
-        if ($num -ge 21) {
+        # 101+ — toggle target selection (single, comma list, or range: 101,103 or 101-104 or 101..104)
+        if ($num -ge 101) {
             # Re-read the raw input to support ranges — $choice already has the first number
             # but the user may have typed "21,23,24" or "21-24"
-            $indices = @(Expand-FltSelectionRange -RawInput $choice -Max (20 + $Script:FleetTargets.Count))
+            $indices = @(Expand-FltSelectionRange -RawInput $choice -Max (100 + $Script:FleetTargets.Count))
             $toggled = @()
             foreach ($idx_num in $indices) {
-                $idx = $idx_num - 21
+                $idx = $idx_num - 101
                 if ($idx -ge 0 -and $idx -lt $Script:FleetTargets.Count) {
                     $tName = $Script:FleetTargets[$idx].Name
                     if ($selectedTargets -contains $tName) {
@@ -393,7 +395,7 @@ function Invoke-FltTestRunner {
             continue
         }
 
-        $result = 'Invalid: 1 (diagnostics), 9 (all integration), 11-16 (suite), 21+ or 21-24 (toggle targets), 0 (back)'
+        $result = 'Invalid: 1 (diagnostics), 9 (all integration), 11-99 (suite), 101+ or 101-104 (toggle targets), 0 (back)'
         $resultClr = 'Yellow'
     }
 }

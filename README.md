@@ -263,6 +263,24 @@ Microsoft Store apps (`msstore` source) are automatically excluded from Install 
 
 ---
 
+## Ansible prerequisites
+
+Ansible support (Phase 5) manages Linux targets via SSH playbooks. Before using it:
+
+1. Install `ansible-playbook` on the operator machine (native or via WSL)
+2. If using WSL, set `ansible.useWsl = true` and optionally `ansible.wslDistro` in `settings.local.json`
+3. Install the `community.docker` collection if managing containers: `ansible-galaxy collection install community.docker`
+
+Run **Setup → 10. Diagnostics → Suite 21** to verify Ansible is detected correctly.
+
+| Mode | Detection | How invoked |
+|------|-----------|-------------|
+| `native` | `ansible-playbook` on PATH | `ansible-playbook` |
+| `wsl` | `wsl ansible-playbook --version` exits 0 | `wsl [-d <distro>] ansible-playbook` |
+| *(none)* | Neither found | Suite 21 passes with Available=false |
+
+---
+
 ## Preparing targets for WinGet
 
 Use **Setup → select target → 4. Prepare target** to install WinGet on a remote Windows machine via SSH. The installer:

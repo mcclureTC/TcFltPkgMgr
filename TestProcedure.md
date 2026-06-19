@@ -1,7 +1,7 @@
 # TcFltPkgMgr — Test Procedure
 
 **Location:** Setup → 10 → Test Runner  
-**Input scheme:** `1` all diagnostics · `9` all integration · `11`–`20` specific suite · `21+` toggle targets · `00` clear results · `0` back  
+**Input scheme:** `1` all diagnostics · `9` all integration · `11`–`99` specific suite · `101+` toggle targets · `00` clear results · `0` back  
 **Result history:** saved to `config/test-results.json` between sessions
 
 ---
@@ -81,7 +81,7 @@ Run from the test runner with `1`. No network, SSH, or tcpkg calls. All 29 tests
 
 ## Integration Tests
 
-Run from the test runner with `9` (all) or `11`–`18` (individual suite). Suites marked **[needs target]** require at least one target toggled on with `21+`. All suites are safe to run multiple times — they restore any state they change.
+Run from the test runner with `9` (all) or `11`–`99` (individual suite). Suites marked **[needs target]** require at least one target toggled on with `101+`. All suites are safe to run multiple times — they restore any state they change.
 
 ---
 
@@ -270,6 +270,23 @@ Tests a real install, verify, and uninstall cycle using `7zip.7zip` via `Invoke-
 | 10c | Verify installed | `winget list --id 7zip.7zip` finds the package after install | SSH → `winget list --id 7zip.7zip`, checks output contains package id |
 | 10d | Uninstall `7zip.7zip` | `Invoke-FltWinGetBatch -Action uninstall` returns `Status='OK'` | Calls batch executor, checks status |
 | 10e | Verify removed | `winget list --id 7zip.7zip` does not find the package after uninstall | SSH → `winget list --id 7zip.7zip`, checks output does NOT contain package id |
+
+---
+
+### Suite 21 — Ansible availability
+
+**Infrastructure required:** None — operator machine only  
+**Per target:** No
+
+Tests the `AnsibleRepository.ps1` functions. All checks pass gracefully when Ansible is not installed — they verify the functions return correct empty/false values, not that Ansible is present.
+
+| # | Test name | What is tested | How verified |
+|---|-----------|----------------|--------------|
+| 11a | `Get-FltAnsibleMode` returns valid value | Returns `'native'`, `'wsl'`, or `''` — never anything else | Calls `Get-FltAnsibleMode`, checks result is one of the three valid values |
+| 11b | `Test-FltAnsibleAvailable` consistent with mode | `$true` iff mode is not `''` | Calls both functions, checks `Available == (mode -ne '')` |
+| 11c | `Get-FltAnsibleVersion` correct per mode | Returns `''` when unavailable, non-empty string when available | Checks version matches mode state. WARN if version empty when mode found. |
+| 11d | `Get-FltAnsibleStatus` correct shape | Returns object with `Available`, `Mode`, `Version`, `HasCommunityDocker` | Creates object, checks all four properties exist via `PSObject.Properties` |
+| 11e | `Test-FltAnsibleCollection` returns bool | Returns `$false` when unavailable; `$true` if `community.docker` installed | Checks return type is `[bool]`. WARN if collection missing (install instructions shown). |
 
 ---
 

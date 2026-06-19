@@ -939,6 +939,15 @@ function Get-IT_Suites {
             NeedsSSH    = $true
             PerTarget   = $true    # runs against each selected target
             Function    = 'Invoke-IT_WinGetLive'
+        },
+        [pscustomobject]@{
+            Id          = 11
+            Name        = 'Ansible availability'
+            Description = 'Ansible mode detection, version, community.docker collection check'
+            NeedsTarget = $false
+            NeedsSSH    = $false
+            PerTarget   = $false   # local check only
+            Function    = 'Invoke-IT_Ansible'
         }
     )
 }
@@ -1373,6 +1382,92 @@ function Invoke-IT_WinGetLive {
             _IT_Fail $r 'Verify removal via SSH' $_.Exception.Message
         }
     }
+
+    return $r
+}
+
+# ── Suite 11 — Ansible availability ───────────────────────────────────────────
+
+# Tests Ansible availability checks in AnsibleRepository.ps1.
+# All checks WARN and skip gracefully if Ansible is not installed —
+# these are operator-machine checks with no SSH or target required.
+function Invoke-IT_Ansible {
+    $r = _IT_NewResult
+    _IT_Section 'Ansible availability'
+
+    # 11a. Get-FltAnsibleMode returns a valid value
+    try {
+        $mode = Get-FltAnsibleMode
+        if ($mode -in @('native', 'wsl', '')) {
+            _IT_Pass $r "Get-FltAnsibleMode: returned valid mode ('$mode')"
+        } else {
+            _IT_Fail $r 'Get-FltAnsibleMode: valid return value' "Got unexpected value: '$mode'"
+        }
+    } catch { _IT_Fail $r 'Get-FltAnsibleMode' $_.Exception.Message }
+
+    # 11b. Test-FltAnsibleAvailable is consistent with Get-FltAnsibleMode
+    try {
+        $avail = Test-FltAnsibleAvailable
+        $mode  = Get-FltAnsibleMode
+        $expected = $mode -ne ''
+        if ($avail -eq $expected) {
+            _IT_Pass $r "Test-FltAnsibleAvailable: consistent with Get-FltAnsibleMode ($mode)"
+        } else {
+            _IT_Fail $r 'Test-FltAnsibleAvailable: consistent with mode' "Available=$avail but mode='$mode'"
+        }
+    } catch { _IT_Fail $r 'Test-FltAnsibleAvailable' $_.Exception.Message }
+
+    # 11c. Get-FltAnsibleVersion returns a string (non-null) when available
+    try {
+        $mode = Get-FltAnsibleMode
+        $ver  = Get-FltAnsibleVersion
+        if ($mode -eq '') {
+            if ($ver -eq '') {
+                _IT_Pass $r 'Get-FltAnsibleVersion: returns empty string when not available'
+            } else {
+                _IT_Fail $r 'Get-FltAnsibleVersion: empty when unavailable' "Got: '$ver'"
+            }
+        } else {
+            if ($ver -ne '') {
+                _IT_Pass $r "Get-FltAnsibleVersion: '$ver'"
+            } else {
+                _IT_Warn $r 'Get-FltAnsibleVersion: returned empty' 'Ansible found but version string empty'
+            }
+        }
+    } catch { _IT_Fail $r 'Get-FltAnsibleVersion' $_.Exception.Message }
+
+    # 11d. Get-FltAnsibleStatus returns correct shape
+    try {
+        $status = Get-FltAnsibleStatus
+        $hasAll = $null -ne $status -and
+                  $null -ne $status.PSObject.Properties['Available'] -and
+                  $null -ne $status.PSObject.Properties['Mode'] -and
+                  $null -ne $status.PSObject.Properties['Version'] -and
+                  $null -ne $status.PSObject.Properties['HasCommunityDocker']
+        if ($hasAll) {
+            _IT_Pass $r "Get-FltAnsibleStatus: correct shape (Available=$($status.Available) Mode='$($status.Mode)')"
+        } else {
+            _IT_Fail $r 'Get-FltAnsibleStatus: correct shape' 'Missing one or more expected properties'
+        }
+    } catch { _IT_Fail $r 'Get-FltAnsibleStatus' $_.Exception.Message }
+
+    # 11e. Test-FltAnsibleCollection returns bool (regardless of whether installed)
+    try {
+        $mode   = Get-FltAnsibleMode
+        $result = Test-FltAnsibleCollection 'community.docker'
+        if ($result -is [bool]) {
+            if ($mode -eq '') {
+                _IT_Pass $r 'Test-FltAnsibleCollection: returns $false when Ansible not available'
+            } elseif ($result) {
+                _IT_Pass $r 'Test-FltAnsibleCollection: community.docker is installed'
+            } else {
+                _IT_Warn $r 'Test-FltAnsibleCollection: community.docker not installed' `
+                    "Run: ansible-galaxy collection install community.docker"
+            }
+        } else {
+            _IT_Fail $r 'Test-FltAnsibleCollection: returns bool' "Got type: $($result.GetType().Name)"
+        }
+    } catch { _IT_Fail $r 'Test-FltAnsibleCollection' $_.Exception.Message }
 
     return $r
 }
