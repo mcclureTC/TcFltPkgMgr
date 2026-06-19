@@ -263,21 +263,95 @@ Microsoft Store apps (`msstore` source) are automatically excluded from Install 
 
 ---
 
+## Docker prerequisites
+
+Docker Desktop must be installed on the operator machine for:
+- Managing containers on remote Linux targets (DCC-4, DCC-5) via SSH
+- Running the Ansible operator container (`tcflt-ansible`)
+- Managing Windows containers (future)
+
+Install Docker Desktop from https://www.docker.com/products/docker-desktop/
+
+TcFltPkgMgr detects Docker status automatically:
+
+| Status | Meaning |
+|--------|---------|
+| `running` | Docker daemon is ready — all Docker operations available |
+| `starting` | Docker Desktop is open but daemon still initialising |
+| `stopped` | Docker Desktop installed but not running — TcFltPkgMgr can start it |
+| `not-installed` | Docker Desktop not found |
+
+Run **Suite 22** in the test runner to check Docker status. TcFltPkgMgr will offer to start Docker Desktop from Setup when needed (Phase 7).
+
+---
+
+## Docker Desktop (operator machine)
+
+Docker Desktop must be installed and running on the operator machine for:
+- The Ansible operator container (`tcflt-ansible`)
+- Managing Docker containers on remote targets (Phase 7)
+- Windows containers (future)
+
+TcFltPkgMgr can start Docker Desktop automatically if it is installed but not running — this is available from **Setup → Prepare** (Phase 7 UI).
+
+| Status | Meaning |
+|--------|---------|
+| `running` | Daemon ready — all Docker operations available |
+| `starting` | Docker Desktop launched, daemon still initialising |
+| `stopped` | Docker Desktop installed but not running — TcFltPkgMgr can start it |
+| `not-installed` | Docker Desktop not found — install from https://www.docker.com/products/docker-desktop/ |
+
+Run **Setup → 10. Diagnostics → Suite 22** to check Docker status.
+
+---
+
+## Docker Desktop (operator machine)
+
+TcFltPkgMgr uses Docker on the operator machine for two purposes:
+- **Ansible operator container** (`tcflt-ansible`) — provides Ansible without WSL
+- **Windows containers** — managing Windows container workloads (Phase 7)
+
+Docker Desktop is detected automatically. Status is shown in **Setup → Diagnostics → Suite 22**.
+
+| Status | Meaning |
+|--------|---------|
+| `running` | Daemon ready — all Docker features available |
+| `starting` | Docker Desktop launched, daemon initialising |
+| `stopped` | Docker Desktop installed but not running — TcFltPkgMgr can start it from Setup |
+| `not-installed` | Docker Desktop not installed |
+
+TcFltPkgMgr can launch Docker Desktop automatically when needed (via `Start-FltDockerDesktop`). Docker Desktop is detected at its standard path (`C:\Program Files\Docker\Docker\Docker Desktop.exe`) or via the Windows App Paths registry key.
+
+---
+
 ## Ansible prerequisites
 
-Ansible support (Phase 5) manages Linux targets via SSH playbooks. Before using it:
+Ansible runs in a Docker container on the operator Windows machine — no WSL or separate Linux machine needed. The container (`tcflt-ansible`) is built from `docker/Dockerfile.ansible` included in this project.
 
-1. Install `ansible-playbook` on the operator machine (native or via WSL)
-2. If using WSL, set `ansible.useWsl = true` and optionally `ansible.wslDistro` in `settings.local.json`
-3. Install the `community.docker` collection if managing containers: `ansible-galaxy collection install community.docker`
+### Quick start
 
-Run **Setup → 10. Diagnostics → Suite 21** to verify Ansible is detected correctly.
+```powershell
+# 1. Build the Ansible operator container (once)
+docker build -f docker/Dockerfile.ansible -t tcflt-ansible .
+
+# 2. Start the container (persists across reboots)
+docker run -d --name tcflt-ansible --restart unless-stopped `
+  -v ${PWD}/ansible:/ansible `
+  tcflt-ansible
+
+# 3. Verify in TcFltPkgMgr — Setup → 10. Diagnostics → Suite 21
+```
+
+### Detection modes (in priority order)
 
 | Mode | Detection | How invoked |
 |------|-----------|-------------|
 | `native` | `ansible-playbook` on PATH | `ansible-playbook` |
 | `wsl` | `wsl ansible-playbook --version` exits 0 | `wsl [-d <distro>] ansible-playbook` |
-| *(none)* | Neither found | Suite 21 passes with Available=false |
+| `docker` | `docker exec tcflt-ansible ansible-playbook --version` exits 0 | `docker exec tcflt-ansible ansible-playbook` |
+| *(none)* | None of the above | Suite 21 passes with Available=false |
+
+The container name defaults to `tcflt-ansible` and can be overridden via `ansible.dockerContainer` in `settings.local.json`. The `community.docker`, `community.general`, and `ansible.posix` collections are pre-installed in the container.
 
 ---
 

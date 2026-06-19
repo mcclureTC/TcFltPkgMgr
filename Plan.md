@@ -446,6 +446,48 @@ Mode priority: `native` → `wsl` → `docker` → `''`
 - [x] Run: `docker run -d --name tcflt-ansible --restart unless-stopped -v \${PWD}/ansible:/ansible tcflt-ansible`
 - [ ] Suite 21 checks 11f/11g WARN until container is built — instructions shown inline
 
+### 5.1.6 — Docker operator repository (`data/DockerRepository.ps1`) ✅
+
+> Docker separated from Ansible — Docker Desktop is needed for Windows containers
+> too, independent of Ansible. `DockerRepository.ps1` handles operator-machine
+> Docker state; remote Docker management is `DockerExecutor.ps1` (Phase 7).
+
+- [x] `Get-FltDockerDesktopPath` — finds Docker Desktop exe via known paths + HKCU registry
+- [x] `Test-FltDockerAvailable` — checks daemon is running and responsive (`docker info`)
+- [x] `Test-FltDockerDesktopRunning` — checks if Docker Desktop process is running
+- [x] `Get-FltDockerStatus` — returns `'running'` | `'starting'` | `'stopped'` | `'not-installed'`
+- [x] `Start-FltDockerDesktop` — launches Docker Desktop, optionally waits for daemon ready
+- [x] `Ensure-FltDockerRunning` — idempotent: no-op if running, waits if starting, launches if stopped
+- [x] Suite 22 (Docker operator): 5 checks — `12a`-`12e` all pass/warn gracefully per state
+- [x] Suite 21 docker checks (11f/11g) updated to use `Get-FltDockerStatus` from DockerRepository
+
+### 5.1.7 — Docker operator repository (`data/DockerRepository.ps1`) ✅
+
+Separated from Ansible — Docker is used independently (Windows containers, remote
+container management, Ansible operator container). Loaded before AnsibleRepository.
+
+- [x] `Get-FltDockerDesktopPath` — finds Docker Desktop exe (known paths + HKCU registry)
+- [x] `Test-FltDockerAvailable` — returns `$true` when daemon is responsive
+- [x] `Test-FltDockerDesktopRunning` — returns `$true` when Docker Desktop process exists
+- [x] `Get-FltDockerStatus` — returns `'running'` | `'starting'` | `'stopped'` | `'not-installed'`
+- [x] `Start-FltDockerDesktop` — launches Docker Desktop, optionally waits for daemon
+- [x] `Ensure-FltDockerRunning` — checks status, optionally prompts and starts
+- [x] Suite 22 (Docker operator): 5/5, 1 WARN (Docker stopped) — tested and working
+
+### 5.1.7 — Docker operator repository (`data/DockerRepository.ps1`) ✅
+
+Separated from Ansible — Docker is used independently for Windows containers,
+remote management, and hosting the Ansible operator container.
+
+- [x] `Get-FltDockerDesktopPath` — known paths + HKCU App Paths registry
+- [x] `Test-FltDockerAvailable` — daemon responsive via `docker info`
+- [x] `Test-FltDockerDesktopRunning` — process running (even if daemon not yet ready)
+- [x] `Get-FltDockerStatus` — `'running'` | `'starting'` | `'stopped'` | `'not-installed'`
+- [x] `Start-FltDockerDesktop` — launches Desktop, optionally waits for daemon
+- [x] `Ensure-FltDockerRunning` — checks status, prompts operator, starts if needed
+- [x] Suite 22 (Docker operator): 5/5 ✅ (4 pass, 1 WARN — Docker Desktop stopped)
+- [x] Suite 21 checks 11f/11g now use `Get-FltDockerStatus` for clearer daemon-vs-container messages
+
 ### 5.2 — Ansible inventory builder (`execution/AnsibleExecutor.ps1`) — new file
 
 - [ ] `New-FltAnsibleInventory` — writes temp INI inventory from

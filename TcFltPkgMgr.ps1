@@ -87,6 +87,7 @@ $modules = @(
     'data\PackageRepository.ps1',
     'data\FleetQuery.ps1',
     'data\WinGetRepository.ps1',          # WinGet package search and version listing
+    'data\DockerRepository.ps1',          # Docker operator-machine management (start, status)
     'data\AnsibleRepository.ps1',         # Ansible availability checks
     'execution\WinGetExecutor.ps1',       # WinGet parallel SSH batch executor
     'execution\SshExecutor.ps1',

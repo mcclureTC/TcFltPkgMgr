@@ -184,6 +184,7 @@ function _TR_RunIntSuite {
             'Invoke-IT_Log'             { Invoke-IT_Log }
             'Invoke-IT_WinGet'          { Invoke-IT_WinGet }
             'Invoke-IT_Ansible'         { Invoke-IT_Ansible }
+            'Invoke-IT_DockerOperator'  { Invoke-IT_DockerOperator }
             'Invoke-IT_SSH'             { Invoke-IT_SSH -Target ($Targets | Select-Object -First 1) -Credential $Credential }
             'Invoke-IT_ReachCache'      { Invoke-IT_ReachCache -Target ($Targets | Select-Object -First 1) }
             'Invoke-IT_TcpkgLocal'      { Invoke-IT_TcpkgLocal -Target ($Targets | Select-Object -First 1) }
@@ -205,6 +206,7 @@ function _TR_RunIntSuite {
                 'Invoke-IT_WinGet'           { Invoke-IT_WinGet }
                 'Invoke-IT_WinGetLive'       { Invoke-IT_WinGetLive -Target $target -Credential $Credential }
                 'Invoke-IT_Ansible'          { Invoke-IT_Ansible }
+                'Invoke-IT_DockerOperator'   { Invoke-IT_DockerOperator }
                 default {
                     Write-Host "  Unknown suite: $($Suite.Function)" -ForegroundColor Red
                     _IT_NewResult

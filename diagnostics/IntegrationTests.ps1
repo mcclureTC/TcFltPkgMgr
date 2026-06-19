@@ -948,6 +948,15 @@ function Get-IT_Suites {
             NeedsSSH    = $false
             PerTarget   = $false   # local check only
             Function    = 'Invoke-IT_Ansible'
+        },
+        [pscustomobject]@{
+            Id          = 12
+            Name        = 'Docker operator'
+            Description = 'Docker Desktop status, start/stop, and operator container checks'
+            NeedsTarget = $false
+            NeedsSSH    = $false
+            PerTarget   = $false
+            Function    = 'Invoke-IT_DockerOperator'
         }
     )
 }
@@ -1471,39 +1480,127 @@ function Invoke-IT_Ansible {
 
     # 11f. Test-FltAnsibleDockerContainer returns bool
     try {
-        $exists = Test-FltAnsibleDockerContainer
-        if ($exists -is [bool]) {
-            if ($exists) {
-                _IT_Pass $r 'Test-FltAnsibleDockerContainer: container exists'
-            } else {
-                _IT_Warn $r 'Test-FltAnsibleDockerContainer: container not found' `
-                    "Run: docker build -f docker/Dockerfile.ansible -t tcflt-ansible . && docker run -d --name tcflt-ansible --restart unless-stopped tcflt-ansible"
-            }
+        if (-not (Get-Command 'docker' -ErrorAction SilentlyContinue)) {
+            _IT_Warn $r 'Test-FltAnsibleDockerContainer' 'docker not on PATH — install Docker Desktop'
         } else {
-            _IT_Fail $r 'Test-FltAnsibleDockerContainer: returns bool' "Got: $($exists.GetType().Name)"
+            $dockerStatus = Get-FltDockerStatus
+            if ($dockerStatus -ne 'running') {
+                _IT_Warn $r 'Test-FltAnsibleDockerContainer' "Docker daemon not ready (status: $dockerStatus) — run Suite 22 to start Docker"
+            } else {
+                $exists = Test-FltAnsibleDockerContainer
+                if ($exists -is [bool]) {
+                    if ($exists) {
+                        _IT_Pass $r 'Test-FltAnsibleDockerContainer: container exists'
+                    } else {
+                        _IT_Warn $r 'Test-FltAnsibleDockerContainer: container not found' `
+                            "Run: docker build -f docker/Dockerfile.ansible -t tcflt-ansible . && docker run -d --name tcflt-ansible --restart unless-stopped -v `${PWD}/ansible:/ansible tcflt-ansible"
+                    }
+                } else {
+                    _IT_Fail $r 'Test-FltAnsibleDockerContainer: returns bool' "Got: $($exists.GetType().Name)"
+                }
+            }
         }
     } catch { _IT_Fail $r 'Test-FltAnsibleDockerContainer' $_.Exception.Message }
 
     # 11g. Test-FltAnsibleDockerContainerRunning returns bool
     try {
-        $running = Test-FltAnsibleDockerContainerRunning
-        if ($running -is [bool]) {
-            if ($running) {
-                _IT_Pass $r 'Test-FltAnsibleDockerContainerRunning: container is running'
+        if (-not (Get-Command 'docker' -ErrorAction SilentlyContinue)) {
+            _IT_Warn $r 'Test-FltAnsibleDockerContainerRunning' 'docker not on PATH — install Docker Desktop'
+        } else {
+            $dockerStatus = Get-FltDockerStatus
+            if ($dockerStatus -ne 'running') {
+                _IT_Warn $r 'Test-FltAnsibleDockerContainerRunning' "Docker daemon not ready (status: $dockerStatus) — run Suite 22 to start Docker"
             } else {
-                $exists = Test-FltAnsibleDockerContainer
-                if ($exists) {
-                    _IT_Warn $r 'Test-FltAnsibleDockerContainerRunning: container exists but not running' `
-                        "Run: docker start tcflt-ansible"
+                $running = Test-FltAnsibleDockerContainerRunning
+                if ($running -is [bool]) {
+                    if ($running) {
+                        _IT_Pass $r 'Test-FltAnsibleDockerContainerRunning: container is running'
+                    } else {
+                        $exists = Test-FltAnsibleDockerContainer
+                        if ($exists) {
+                            _IT_Warn $r 'Test-FltAnsibleDockerContainerRunning: container exists but not running' `
+                                "Run: docker start tcflt-ansible"
+                        } else {
+                            _IT_Warn $r 'Test-FltAnsibleDockerContainerRunning: container not built yet' `
+                                "Build first: docker build -f docker/Dockerfile.ansible -t tcflt-ansible ."
+                        }
+                    }
                 } else {
-                    _IT_Warn $r 'Test-FltAnsibleDockerContainerRunning: container not built yet' `
-                        "Build first: docker build -f docker/Dockerfile.ansible -t tcflt-ansible ."
+                    _IT_Fail $r 'Test-FltAnsibleDockerContainerRunning: returns bool' "Got: $($running.GetType().Name)"
                 }
             }
-        } else {
-            _IT_Fail $r 'Test-FltAnsibleDockerContainerRunning: returns bool' "Got: $($running.GetType().Name)"
         }
     } catch { _IT_Fail $r 'Test-FltAnsibleDockerContainerRunning' $_.Exception.Message }
+
+    return $r
+}
+
+# ── Suite 12 — Docker operator ────────────────────────────────────────────────
+
+# Tests DockerRepository.ps1 — Docker Desktop status on the operator machine.
+# All checks WARN gracefully when Docker is not installed or not running.
+# Checks progress through states: not-installed → stopped → starting → running.
+function Invoke-IT_DockerOperator {
+    $r = _IT_NewResult
+    _IT_Section 'Docker operator'
+
+    # 12a. docker CLI available
+    try {
+        $hasDocker = $null -ne (Get-Command 'docker' -ErrorAction SilentlyContinue)
+        if ($hasDocker) {
+            $ver = & docker --version 2>&1
+            _IT_Pass $r "docker CLI available: $(($ver -join '').Trim())"
+        } else {
+            _IT_Warn $r 'docker CLI available' 'docker not on PATH — install Docker Desktop from https://www.docker.com/products/docker-desktop/'
+            return $r   # remaining checks all require docker CLI
+        }
+    } catch { _IT_Fail $r 'docker CLI available' $_.Exception.Message; return $r }
+
+    # 12b. Get-FltDockerStatus returns valid value
+    try {
+        $status = Get-FltDockerStatus
+        if ($status -in @('running', 'starting', 'stopped', 'not-installed')) {
+            _IT_Pass $r "Get-FltDockerStatus: '$status'"
+        } else {
+            _IT_Fail $r 'Get-FltDockerStatus: valid value' "Got: '$status'"
+        }
+    } catch { _IT_Fail $r 'Get-FltDockerStatus' $_.Exception.Message }
+
+    # 12c. Get-FltDockerDesktopPath finds installation
+    try {
+        $path = Get-FltDockerDesktopPath
+        if ($path -and (Test-Path $path -PathType Leaf)) {
+            _IT_Pass $r "Get-FltDockerDesktopPath: found at '$path'"
+        } elseif ($path) {
+            _IT_Warn $r 'Get-FltDockerDesktopPath: path returned but file missing' "Path: '$path'"
+        } else {
+            _IT_Warn $r 'Get-FltDockerDesktopPath: Docker Desktop not found' `
+                'Install Docker Desktop or check installation path'
+        }
+    } catch { _IT_Fail $r 'Get-FltDockerDesktopPath' $_.Exception.Message }
+
+    # 12d. Test-FltDockerAvailable consistent with Get-FltDockerStatus
+    try {
+        $avail  = Test-FltDockerAvailable
+        $status = Get-FltDockerStatus
+        $expectAvail = $status -eq 'running'
+        if ($avail -eq $expectAvail) {
+            _IT_Pass $r "Test-FltDockerAvailable: consistent with status '$status' (available=$avail)"
+        } else {
+            _IT_Fail $r 'Test-FltDockerAvailable: consistent with status' "Available=$avail but status='$status'"
+        }
+    } catch { _IT_Fail $r 'Test-FltDockerAvailable' $_.Exception.Message }
+
+    # 12e. Docker daemon running (or WARN with start instructions)
+    try {
+        $status = Get-FltDockerStatus
+        switch ($status) {
+            'running'       { _IT_Pass $r 'Docker daemon is running' }
+            'starting'      { _IT_Warn $r 'Docker daemon is starting' 'Wait a moment and re-run suite 22' }
+            'stopped'       { _IT_Warn $r 'Docker daemon is stopped' 'Start Docker Desktop — or TcFltPkgMgr can start it from Setup' }
+            'not-installed' { _IT_Warn $r 'Docker not installed' 'Install Docker Desktop from https://www.docker.com/products/docker-desktop/' }
+        }
+    } catch { _IT_Fail $r 'Docker daemon status' $_.Exception.Message }
 
     return $r
 }

@@ -275,7 +275,7 @@ Tests a real install, verify, and uninstall cycle using `7zip.7zip` via `Invoke-
 
 ### Suite 21 — Ansible availability
 
-**Infrastructure required:** None — operator machine only  
+**Infrastructure required:** Docker Desktop on operator machine (for 11f/11g checks — both WARN gracefully if Docker not present)  
 **Per target:** No
 
 Tests the `AnsibleRepository.ps1` functions. All checks pass gracefully when Ansible is not installed — they verify the functions return correct empty/false values, not that Ansible is present.
@@ -287,6 +287,40 @@ Tests the `AnsibleRepository.ps1` functions. All checks pass gracefully when Ans
 | 11c | `Get-FltAnsibleVersion` correct per mode | Returns `''` when unavailable, non-empty string when available | Checks version matches mode state. WARN if version empty when mode found. |
 | 11d | `Get-FltAnsibleStatus` correct shape | Returns object with `Available`, `Mode`, `Version`, `HasCommunityDocker` | Creates object, checks all four properties exist via `PSObject.Properties` |
 | 11e | `Test-FltAnsibleCollection` returns bool | Returns `$false` when unavailable; `$true` if `community.docker` installed | Checks return type is `[bool]`. WARN if collection missing (install instructions shown). |
+| 11f | `Test-FltAnsibleDockerContainer` — container exists | Returns `$true` if `tcflt-ansible` container has been built | Calls `docker inspect tcflt-ansible`. WARN with build instructions if not found. |
+| 11g | `Test-FltAnsibleDockerContainerRunning` — container running | Returns `$true` if container is currently running | Calls `docker inspect --format {{.State.Running}}`. WARN with start instructions if stopped; WARN with build instructions if not built. |
+
+---
+
+### Suite 22 — Docker operator
+
+**Infrastructure required:** Docker Desktop installed on operator machine (checks WARN gracefully if not)
+
+Tests `DockerRepository.ps1` — Docker Desktop availability and status on the operator machine. Independent of Ansible.
+
+| # | Test name | What is tested | How verified |
+|---|-----------|----------------|--------------|
+| 12a | docker CLI available | `docker` command is on PATH | `Get-Command docker`. WARN with install instructions if missing. Remaining checks skipped. |
+| 12b | `Get-FltDockerStatus` valid value | Returns one of `running`, `starting`, `stopped`, `not-installed` | Calls function, checks result is in valid set |
+| 12c | `Get-FltDockerDesktopPath` finds installation | Docker Desktop executable found at known path or via registry | Checks known paths and `HKCU:\Software\...\App Paths`. WARN if not found. |
+| 12d | `Test-FltDockerAvailable` consistent with status | `$true` iff status is `running` | Calls both functions, checks consistency |
+| 12e | Docker daemon running | Status is `running` | WARN with appropriate message for each non-running state; PASS when running |
+
+---
+
+### Suite 22 — Docker operator
+
+**Infrastructure required:** Docker Desktop installed on operator machine (checks WARN gracefully if absent)
+
+Tests `DockerRepository.ps1` functions for Docker Desktop management on the operator machine.
+
+| # | Test name | What is tested | How verified |
+|---|-----------|----------------|--------------|
+| 12a | docker CLI available | `docker` command is on PATH | `Get-Command docker`. WARN with install URL if absent. Remaining checks skip if CLI missing. |
+| 12b | `Get-FltDockerStatus` valid value | Returns one of `running`, `starting`, `stopped`, `not-installed` | Calls function, checks against known valid values |
+| 12c | `Get-FltDockerDesktopPath` finds installation | Returns path to `Docker Desktop.exe` | Checks known install paths and HKCU App Paths registry. WARN if not found. |
+| 12d | `Test-FltDockerAvailable` consistent with status | `$true` iff status is `running` | Calls both functions, verifies consistency |
+| 12e | Docker daemon running | Daemon is ready for commands | PASS if running; WARN with appropriate message for `starting`, `stopped`, `not-installed` |
 
 ---
 

@@ -29,3 +29,12 @@ debug.log
 
 # Test run history — machine-specific
 config/test-results.json
+
+# Ansible working files — generated at runtime, contain host-specific data
+ansible/inventory/
+ansible/playbooks/
+ansible/logs/
+ansible/*.retry
+
+# Docker build cache (not source files)
+docker/.build-cache/
