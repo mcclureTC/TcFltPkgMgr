@@ -407,6 +407,40 @@ All playbooks use `become: true` (sudo escalation) and `gather_facts: false` for
 
 ---
 
+## Ansible batch executor (Phase 5.4)
+
+`Invoke-FltAnsibleBatch` in `execution/AnsibleExecutor.ps1` is the top-level entry point for running Ansible playbooks against the fleet. It follows the same contract as `Invoke-FltSshBatch` and `Invoke-FltWinGetBatch` — callers get `BatchResult[]` and an optional `$OnProgress` callback.
+
+### Workflow
+
+1. **Inventory** — calls `New-FltAnsibleInventory` to write `ansible/inventory/hosts.ini`
+2. **Playbook** — evaluates the caller-supplied `$PlaybookBuilder` scriptblock (one of the `_Get-*Playbook` functions)
+3. **Run** — executes `ansible-playbook -i <inv> <playbook> --one-line -o json --forks <n>` via the active Ansible mode (native / WSL / Docker)
+4. **Parse** — `_Parse-AnsibleOutput` maps per-host lines to `BatchResult` entries
+5. **Progress** — fires the `$OnProgress` callback with a status dictionary
+6. **Cleanup** — removes both temp files
+7. **Log** — writes a batch entry via `Write-FltBatchEntry` with `PackageManager = 'ansible'`
+
+### Exit code mapping
+
+| Exit code | Meaning |
+|-----------|---------|
+| 0 | All hosts OK |
+| 2 | One or more hosts failed |
+| 4 | One or more hosts unreachable |
+| 6 | Failures and unreachable |
+| 8 | Ansible config/parse error |
+
+### Read-only mode
+
+When `-ReadOnly $true` is passed, no inventory or playbook is written and no Ansible process is started. All targets return `Status = 'Skipped'` with `Note = 'Read-only mode'` — consistent with the other executors.
+
+### forks
+
+Parallelism is controlled by `ansible.forks` in `settings.default.json` (default 10). Override in `settings.local.json`.
+
+---
+
 ## Preparing targets for WinGet
 
 Use **Setup → select target → 4. Prepare target** to install WinGet on a remote Windows machine via SSH. The installer:

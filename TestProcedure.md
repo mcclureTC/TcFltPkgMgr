@@ -380,6 +380,32 @@ Tests all five `_Get-*Playbook` functions and the shared `_Write-AnsiblePlaybook
 
 ---
 
+### Suite 15 — Ansible batch executor
+
+**Infrastructure required:** None (fully offline — no Ansible installation needed)
+**Per target:** No
+**Check count:** 13 (15a–15m)
+
+Tests `Invoke-FltAnsibleBatch` and `_Parse-AnsibleOutput` in `execution/AnsibleExecutor.ps1`. Read-only mode tests exercise the full function code path without writing files or calling Ansible. Parser tests call `_Parse-AnsibleOutput` directly with synthetic output strings.
+
+| # | Test name | What is tested | How verified |
+|---|-----------|----------------|--------------|
+| 15a | Read-only: single target returns Skipped | `ReadOnly=$true` bypasses Ansible and returns `Status='Skipped'` | Checks `Count=1` and `Status=Skipped` |
+| 15b | Read-only: Note = 'Read-only mode' | Note field is set correctly in read-only path | Checks `Note -eq 'Read-only mode'` |
+| 15c | Read-only: PackageManager = 'ansible' | PackageManager field is always 'ansible' | Checks `PackageManager -eq 'ansible'` |
+| 15d | Read-only: multiple targets all Skipped | All targets return Skipped, not just the first | Passes 3 targets, checks all have `Status=Skipped` |
+| 15e | BatchResult has all required fields | Result object has TargetName, Action, PackageSpec, PackageManager, Status, DurationSec, TimedOut, Note | Checks all 8 fields via `PSObject.Properties.Name` |
+| 15f | BatchResult: Action, PackageSpec, TargetName correct | Field values match what was passed to the function | Checks all three field values |
+| 15g | Parser: SUCCESS → Status=OK | `SUCCESS` host line maps to `Status='OK'` | Passes synthetic output, checks status |
+| 15h | Parser: CHANGED → Status=OK | `CHANGED` host line also maps to `Status='OK'` | Passes synthetic output, checks status |
+| 15i | Parser: FAILED! → Status=Failed, msg in Note | `FAILED!` line maps to `Status='Failed'`; `msg` from JSON appears in Note | Checks both status and Note content |
+| 15j | Parser: UNREACHABLE! → Status=Unreachable | `UNREACHABLE!` line maps to `Status='Unreachable'` | Passes synthetic output, checks status |
+| 15k | Parser: exit code 8 → all Failed | Exit code 8 marks all targets Failed with config error note | Passes empty output + exit 8, checks all Failed and Note contains 'config' or 'parse' |
+| 15l | Parser: mixed output — one OK, one Failed | Per-host status correctly assigned when hosts differ | Passes two-host output, checks lin-1=OK and lin-2=Failed |
+| 15m | OnProgress callback invoked in read-only mode | `$OnProgress` scriptblock is called even in read-only path | Sets a flag variable in callback, checks it was set |
+
+---
+
 ## Adding New Tests
 
 When implementing a new phase, add tests in the appropriate location:

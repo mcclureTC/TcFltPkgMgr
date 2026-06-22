@@ -4,7 +4,7 @@
 #
 #  Phase 5.2 — New-FltAnsibleInventory / Remove-FltAnsibleInventory
 #  Phase 5.3 — Playbook builders (_Get-PackagePlaybook, _Get-ServicePlaybook, etc.)
-#  Phase 5.4 — Invoke-FltAnsibleBatch (stub — implemented in 5.4)
+#  Phase 5.4 — Invoke-FltAnsibleBatch (batch executor)
 #  Phase 5.6 — Vault helpers (stubs — implemented in 5.6)
 # =============================================================================
 
@@ -556,10 +556,338 @@ function _Get-DockerPlaybook {
 }
 
 # ---------------------------------------------------------------------------
-# Phase 5.4 stub — batch executor
+# Phase 5.4 — Batch executor
 # ---------------------------------------------------------------------------
 
-function Invoke-FltAnsibleBatch { throw 'Not implemented — Phase 5.4' }
+<#
+.SYNOPSIS
+    Runs an Ansible playbook against a set of FleetTarget objects and returns
+    BatchResult[] — one per target — matching the shape produced by
+    Invoke-FltSshBatch and Invoke-FltWinGetBatch.
+
+.DESCRIPTION
+    Workflow:
+      1. Build inventory  via New-FltAnsibleInventory
+      2. Build playbook   via the supplied $PlaybookBuilder scriptblock
+      3. Run ansible-playbook -i <inv> <playbook> --one-line -o json --forks <n>
+      4. Parse JSON stdout → BatchResult[] (one entry per host)
+      5. Call $OnProgress with a status dict after completion
+      6. Clean up inventory and playbook files
+      7. Write a batch log entry via Write-FltBatchEntry
+
+    Exit code mapping (ansible-playbook):
+      0  — all hosts OK
+      2  — one or more hosts failed (task error)
+      4  — one or more hosts unreachable
+      6  — both failures and unreachable
+      8  — parse/config error (counted as all-failed)
+
+    The $OnProgress callback receives a ConcurrentDictionary<string,string>
+    keyed by target name, value = "Status|DurationSec|Note" — same contract
+    as Invoke-FltSshBatch.
+
+.PARAMETER Targets
+    Linux FleetTarget objects to manage. Non-Linux targets are silently skipped.
+
+.PARAMETER PlaybookBuilder
+    A scriptblock that returns a [pscustomobject]@{ Ok; Path; Message } by
+    calling one of the _Get-*Playbook functions.  Evaluated by the executor
+    so the caller never writes the playbook file itself.
+    Example: { _Get-PackagePlaybook -Action 'install' -PackageName 'curl' }
+
+.PARAMETER Action
+    Verb stored in BatchResult.Action (e.g. 'install', 'upgrade', 'start').
+
+.PARAMETER PackageSpec
+    Package or resource name stored in BatchResult.PackageSpec.
+
+.PARAMETER OnProgress
+    Optional scriptblock called once after the run completes, receiving the
+    status ConcurrentDictionary. Matches the SshExecutor contract.
+
+.PARAMETER ReadOnly
+    When $true, skips the actual ansible-playbook call and returns Skipped
+    results — mirrors the read-only mode used by the other executors.
+
+.OUTPUTS
+    [BatchResult[]]
+#>
+function Invoke-FltAnsibleBatch {
+    param(
+        [Parameter(Mandatory)] [FleetTarget[]] $Targets,
+        [Parameter(Mandatory)] [scriptblock]   $PlaybookBuilder,
+        [string]      $Action      = 'run',
+        [string]      $PackageSpec = '',
+        [scriptblock] $OnProgress  = $null,
+        [bool]        $ReadOnly    = $false
+    )
+
+    $started = [datetime]::UtcNow
+
+    # ------------------------------------------------------------------
+    # Read-only mode — return Skipped results immediately
+    # ------------------------------------------------------------------
+    if ($ReadOnly) {
+        $results = @($Targets | ForEach-Object {
+            $r = [BatchResult]::new()
+            $r.TargetName     = $_.Name
+            $r.Action         = $Action
+            $r.PackageSpec    = $PackageSpec
+            $r.PackageManager = 'ansible'
+            $r.Status         = 'Skipped'
+            $r.DurationSec    = 0
+            $r.TimedOut       = $false
+            $r.Note           = 'Read-only mode'
+            $r
+        })
+        if ($OnProgress) {
+            $dict = [System.Collections.Concurrent.ConcurrentDictionary[string,string]]::new()
+            foreach ($res in $results) { [void]$dict.TryAdd($res.TargetName, "Skipped|0|Read-only mode") }
+            & $OnProgress $dict
+        }
+        Write-FltBatchEntry -Action $Action -PackageSpec $PackageSpec -Results $results
+        return $results
+    }
+
+    # ------------------------------------------------------------------
+    # Check Ansible availability
+    # ------------------------------------------------------------------
+    $ansibleMode = Get-FltAnsibleMode
+    if ($ansibleMode -eq '') {
+        $results = @($Targets | ForEach-Object {
+            $r = [BatchResult]::new()
+            $r.TargetName     = $_.Name
+            $r.Action         = $Action
+            $r.PackageSpec    = $PackageSpec
+            $r.PackageManager = 'ansible'
+            $r.Status         = 'Failed'
+            $r.DurationSec    = 0
+            $r.TimedOut       = $false
+            $r.Note           = 'Ansible not available — install native, WSL, or Docker container'
+            $r
+        })
+        Write-FltBatchEntry -Action $Action -PackageSpec $PackageSpec -Results $results
+        return $results
+    }
+
+    # ------------------------------------------------------------------
+    # Step 1 — Build inventory
+    # ------------------------------------------------------------------
+    $invResult = New-FltAnsibleInventory -Targets $Targets
+    if (-not $invResult.Ok) {
+        $results = @($Targets | ForEach-Object {
+            $r = [BatchResult]::new()
+            $r.TargetName     = $_.Name
+            $r.Action         = $Action
+            $r.PackageSpec    = $PackageSpec
+            $r.PackageManager = 'ansible'
+            $r.Status         = 'Failed'
+            $r.DurationSec    = 0
+            $r.TimedOut       = $false
+            $r.Note           = "Inventory error: $($invResult.Message)"
+            $r
+        })
+        Write-FltBatchEntry -Action $Action -PackageSpec $PackageSpec -Results $results
+        return $results
+    }
+    $invPath = $invResult.Path
+
+    # ------------------------------------------------------------------
+    # Step 2 — Build playbook
+    # ------------------------------------------------------------------
+    $playbookResult = & $PlaybookBuilder
+    if (-not $playbookResult.Ok) {
+        Remove-FltAnsibleInventory -Path $invPath
+        $results = @($Targets | ForEach-Object {
+            $r = [BatchResult]::new()
+            $r.TargetName     = $_.Name
+            $r.Action         = $Action
+            $r.PackageSpec    = $PackageSpec
+            $r.PackageManager = 'ansible'
+            $r.Status         = 'Failed'
+            $r.DurationSec    = 0
+            $r.TimedOut       = $false
+            $r.Note           = "Playbook error: $($playbookResult.Message)"
+            $r
+        })
+        Write-FltBatchEntry -Action $Action -PackageSpec $PackageSpec -Results $results
+        return $results
+    }
+    $playbookPath = $playbookResult.Path
+
+    # ------------------------------------------------------------------
+    # Step 3 — Run ansible-playbook
+    # ------------------------------------------------------------------
+    $forks      = Get-FltCfgValue 'ansible' 'forks' 10
+    $ansibleCmd = _Get-FltAnsibleCmd
+
+    # Paths passed to Ansible must use forward slashes when running under
+    # Docker or WSL — the operator-side path may use backslashes on Windows.
+    $posixInv      = $invPath      -replace '\\', '/'
+    $posixPlaybook = $playbookPath -replace '\\', '/'
+
+    # --vault-password-file is added in Phase 5.6 when vault is configured.
+    $cmdLine = "$ansibleCmd -i `"$posixInv`" `"$posixPlaybook`" --one-line -o json --forks $forks 2>&1"
+
+    $rawOutput  = ''
+    $exitCode   = -1
+    $runStarted = [datetime]::UtcNow
+
+    try {
+        $rawOutput = (& cmd /c $cmdLine) -join "`n"
+        $exitCode  = $LASTEXITCODE
+    } catch {
+        $rawOutput = $_.Exception.Message
+        $exitCode  = -1
+    }
+
+    $duration = ([datetime]::UtcNow - $runStarted).TotalSeconds
+
+    # ------------------------------------------------------------------
+    # Step 4 — Parse JSON output → BatchResult[]
+    # ------------------------------------------------------------------
+    $results = _Parse-AnsibleOutput `
+        -RawOutput  $rawOutput `
+        -ExitCode   $exitCode `
+        -Targets    $Targets `
+        -Action     $Action `
+        -PackageSpec $PackageSpec `
+        -Duration   $duration
+
+    # ------------------------------------------------------------------
+    # Step 5 — Invoke progress callback
+    # ------------------------------------------------------------------
+    if ($OnProgress) {
+        $dict = [System.Collections.Concurrent.ConcurrentDictionary[string,string]]::new()
+        foreach ($res in $results) {
+            $entry = "$($res.Status)|$([math]::Round($res.DurationSec,1))|$($res.Note)"
+            [void]$dict.TryAdd($res.TargetName, $entry)
+        }
+        & $OnProgress $dict
+    }
+
+    # ------------------------------------------------------------------
+    # Step 6 — Clean up temp files
+    # ------------------------------------------------------------------
+    Remove-FltAnsibleInventory -Path $invPath
+    if (Test-Path $playbookPath) {
+        try { Remove-Item $playbookPath -Force -ErrorAction SilentlyContinue } catch {}
+    }
+
+    # ------------------------------------------------------------------
+    # Step 7 — Log
+    # ------------------------------------------------------------------
+    Write-FltBatchEntry -Action $Action -PackageSpec $PackageSpec -Results $results
+
+    return $results
+}
+
+# ---------------------------------------------------------------------------
+# Phase 5.4 — Ansible JSON output parser (private)
+# ---------------------------------------------------------------------------
+
+function _Parse-AnsibleOutput {
+    param(
+        [string]        $RawOutput,
+        [int]           $ExitCode,
+        [FleetTarget[]] $Targets,
+        [string]        $Action,
+        [string]        $PackageSpec,
+        [double]        $Duration
+    )
+
+    # ansible-playbook --one-line -o json writes one JSON object per host
+    # to stdout, followed by a PLAY RECAP block.  Each host line looks like:
+    #
+    #   hostname | SUCCESS => {"changed": false, "ansible_facts": {...}}
+    #   hostname | FAILED! => {"msg": "...", "task": "task name", ...}
+    #   hostname | UNREACHABLE! => {"msg": "..."}
+    #
+    # Exit code semantics:
+    #   0 — all OK
+    #   2 — one or more FAILED
+    #   4 — one or more UNREACHABLE
+    #   6 — both FAILED and UNREACHABLE
+    #   8 — parse/config error (no per-host output)
+
+    $targetMap = @{}
+    foreach ($t in $Targets) { $targetMap[$t.Name] = $t }
+
+    $results = [System.Collections.Generic.List[BatchResult]]::new()
+
+    # Seed all targets as pending — overwritten as we parse
+    foreach ($t in $Targets) {
+        $r = [BatchResult]::new()
+        $r.TargetName     = $t.Name
+        $r.Action         = $Action
+        $r.PackageSpec    = $PackageSpec
+        $r.PackageManager = 'ansible'
+        $r.DurationSec    = $Duration
+        $r.TimedOut       = $false
+        $r.Status         = 'Failed'
+        $r.Note           = ''
+        $results.Add($r)
+    }
+
+    # Exit code 8 or no output — config/parse error
+    if ($ExitCode -eq 8 -or [string]::IsNullOrWhiteSpace($RawOutput)) {
+        foreach ($r in $results) {
+            $r.Status = 'Failed'
+            $r.Note   = if ($ExitCode -eq 8) { 'Ansible config/parse error' } `
+                        else                  { 'No output from ansible-playbook' }
+        }
+        return $results.ToArray()
+    }
+
+    # Parse per-host lines
+    $parsed = @{}
+    foreach ($line in ($RawOutput -split "`n")) {
+        $line = $line.Trim()
+
+        # Pattern: "hostname | STATUS => {json}" or "hostname | STATUS!"
+        if ($line -match '^(.+?)\s*\|\s*(SUCCESS|FAILED!|UNREACHABLE!|CHANGED)(.*)$') {
+            $hostName   = $Matches[1].Trim()
+            $hostStatus = $Matches[2].Trim()
+            $rest       = $Matches[3].Trim()
+
+            $note = ''
+            # Extract task name and msg from JSON payload when present
+            if ($rest -match '=>\s*(\{.+\})') {
+                $jsonStr = $Matches[1]
+                try {
+                    $obj = $jsonStr | ConvertFrom-Json -ErrorAction Stop
+                    if ($obj.msg)  { $note = ($obj.msg  -split "`n")[0].Trim() }
+                    if ($obj.task) { $note = "$($obj.task): $note".Trim(': ') }
+                } catch {}
+            }
+
+            $status = switch -Wildcard ($hostStatus) {
+                'SUCCESS'     { 'OK'          }
+                'CHANGED'     { 'OK'          }
+                'FAILED!*'    { 'Failed'      }
+                'UNREACHABLE!*' { 'Unreachable' }
+                default       { 'Failed'      }
+            }
+
+            $parsed[$hostName] = [pscustomobject]@{ Status = $status; Note = $note }
+        }
+    }
+
+    # Merge parsed results back into the seeded BatchResult list
+    foreach ($r in $results) {
+        if ($parsed.ContainsKey($r.TargetName)) {
+            $p        = $parsed[$r.TargetName]
+            $r.Status = $p.Status
+            $r.Note   = $p.Note
+        } elseif ($ExitCode -eq 0) {
+            # Host not in output but exit code 0 — treat as OK
+            $r.Status = 'OK'
+        }
+        # else: stays 'Failed' with empty note — host was expected but absent
+    }
+
+    return $results.ToArray()
+}
 
 # ---------------------------------------------------------------------------
 # Phase 5.6 stubs — Vault helpers

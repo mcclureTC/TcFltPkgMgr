@@ -546,18 +546,25 @@ remote management, and hosting the Ansible operator container.
 - [x] `.gitignore`: `ansible/playbooks/` already covered — no new entries needed
 - [x] `README.md`: Phase 5.3 section added
 
-### 5.4 — Ansible executor (`execution/AnsibleExecutor.ps1`)
+### 5.4 — Ansible executor (`execution/AnsibleExecutor.ps1`) ✅
 
-- [ ] `Invoke-FltAnsibleBatch` — writes inventory + playbook, runs
-      `ansible-playbook -i <inv> <playbook> -o json --forks <n>`, parses
-      JSON output into `BatchResult[]`, calls `$OnProgress`, cleans up
-- [ ] Exit code mapping: `0` = OK, `2` = host failures, `4` = unreachable,
-      `8` = parse error
-- [ ] Note column shows failing Ansible task name from JSON output
-- [ ] `Write-FltBatchEntry` with `PackageManager = 'ansible'`
-- [ ] Add `ansible.forks` to `settings.default.json` (default 10 — Ansible's
-      own parallelism). Pass as `--forks <n>` to `ansible-playbook`.
-      *(Deferred from Phase 0.2 — not needed until Ansible executor exists)*
+- [x] `Invoke-FltAnsibleBatch` — 7-step executor:
+      read-only fast path → availability check → inventory → playbook →
+      `ansible-playbook --one-line -o json --forks <n>` via `cmd /c` →
+      `_Parse-AnsibleOutput` → `$OnProgress` callback → cleanup → `Write-FltBatchEntry`
+- [x] `_Parse-AnsibleOutput` — parses `--one-line -o json` per-host lines:
+      `SUCCESS`/`CHANGED`→`OK`, `FAILED!`→`Failed`, `UNREACHABLE!`→`Unreachable`;
+      extracts `msg` and `task` from JSON payload into `Note`
+- [x] Exit code mapping: `0`=OK, `2`=failures, `4`=unreachable, `6`=both, `8`=config error
+- [x] `Write-FltBatchEntry` with `PackageManager = 'ansible'`
+- [x] `ansible.forks` already in `settings.default.json` (default 10) — no change needed
+- [x] Suite 15 (Ansible batch executor) — 13 checks (15a–15m), fully offline:
+      15a–15d read-only mode · 15e–15f BatchResult shape ·
+      15g–15k parser (SUCCESS/CHANGED/FAILED/UNREACHABLE/exit-8) ·
+      15l mixed output · 15m OnProgress callback
+- [x] Security: no secrets in playbook runs; temp files cleaned up after every run
+- [x] `.gitignore`: all ansible/ paths already covered — no new entries needed
+- [x] `README.md`: Phase 5.4 section added
 
 ### 5.5 — Route Ansible targets in `Invoke-FleetAction` (`execution/FleetExecutor.ps1`)
 

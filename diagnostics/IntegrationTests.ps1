@@ -975,6 +975,15 @@ function Get-IT_Suites {
             NeedsSSH    = $false
             PerTarget   = $false   # fully offline — no Ansible required
             Function    = 'Invoke-IT_AnsiblePlaybook'
+        },
+        [pscustomobject]@{
+            Id          = 15
+            Name        = 'Ansible batch executor'
+            Description = 'Invoke-FltAnsibleBatch: read-only mode, output parser, BatchResult shape'
+            NeedsTarget = $false
+            NeedsSSH    = $false
+            PerTarget   = $false   # offline — parser tested directly; live run tested in Phase 5.5+
+            Function    = 'Invoke-IT_AnsibleBatch'
         }
     )
 }
@@ -2089,6 +2098,255 @@ function Invoke-IT_AnsiblePlaybook {
     if (Test-Path $tempDir) {
         Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
     }
+
+    return $r
+}
+
+# ── Suite 15 — Ansible batch executor ─────────────────────────────────────────
+
+# Tests Invoke-FltAnsibleBatch and _Parse-AnsibleOutput.
+# Offline strategy:
+#   - Read-only mode tests exercise the full Invoke-FltAnsibleBatch code path
+#     without calling ansible-playbook.
+#   - Parser tests call _Parse-AnsibleOutput directly with synthetic output
+#     strings, covering all exit codes and host statuses.
+function Invoke-IT_AnsibleBatch {
+    $r = _IT_NewResult
+
+    _IT_Section 'Ansible batch executor'
+
+    # Helper: build a minimal synthetic Linux FleetTarget
+    function _MkLT {
+        param([string]$Name, [string]$Address = '10.0.0.1')
+        $t = [FleetTarget]::new($Name, $Address, 22, 'admin', $false)
+        $t.OS         = 'linux'
+        $t.TargetType = 'physical'
+        $t
+    }
+
+    # ------------------------------------------------------------------
+    # 15a — Read-only mode: returns Skipped results without calling Ansible
+    # ------------------------------------------------------------------
+    try {
+        $targets = @(_MkLT 'lin-1' '10.0.0.1')
+        $results = Invoke-FltAnsibleBatch `
+            -Targets $targets `
+            -PlaybookBuilder { _Get-PackagePlaybook -Action 'install' -PackageName 'curl' } `
+            -Action 'install' -PackageSpec 'curl' `
+            -ReadOnly $true
+        if ($results.Count -eq 1 -and $results[0].Status -eq 'Skipped') {
+            _IT_Pass $r '15a  Read-only mode: single target returns Skipped'
+        } else {
+            _IT_Fail $r '15a  Read-only mode: single target returns Skipped' `
+                "Count=$($results.Count) Status=$($results[0].Status)"
+        }
+    } catch { _IT_Fail $r '15a  Read-only mode' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 15b — Read-only mode: Note says 'Read-only mode'
+    # ------------------------------------------------------------------
+    try {
+        $targets = @(_MkLT 'lin-1')
+        $results = Invoke-FltAnsibleBatch `
+            -Targets $targets `
+            -PlaybookBuilder { _Get-PackagePlaybook -Action 'install' -PackageName 'curl' } `
+            -ReadOnly $true
+        if ($results[0].Note -eq 'Read-only mode') {
+            _IT_Pass $r '15b  Read-only mode: Note = ''Read-only mode'''
+        } else {
+            _IT_Fail $r '15b  Read-only mode: Note = ''Read-only mode''' "Note=$($results[0].Note)"
+        }
+    } catch { _IT_Fail $r '15b  Read-only note' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 15c — Read-only mode: PackageManager = 'ansible'
+    # ------------------------------------------------------------------
+    try {
+        $targets = @(_MkLT 'lin-1')
+        $results = Invoke-FltAnsibleBatch `
+            -Targets $targets `
+            -PlaybookBuilder { _Get-PackagePlaybook -Action 'install' -PackageName 'curl' } `
+            -ReadOnly $true
+        if ($results[0].PackageManager -eq 'ansible') {
+            _IT_Pass $r '15c  Read-only mode: PackageManager = ''ansible'''
+        } else {
+            _IT_Fail $r '15c  Read-only mode: PackageManager = ''ansible''' `
+                "PackageManager=$($results[0].PackageManager)"
+        }
+    } catch { _IT_Fail $r '15c  PackageManager field' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 15d — Read-only mode: multiple targets all return Skipped
+    # ------------------------------------------------------------------
+    try {
+        $targets = @(_MkLT 'lin-1' '10.0.0.1'; _MkLT 'lin-2' '10.0.0.2'; _MkLT 'lin-3' '10.0.0.3')
+        $results = Invoke-FltAnsibleBatch `
+            -Targets $targets `
+            -PlaybookBuilder { _Get-PackagePlaybook -Action 'install' -PackageName 'curl' } `
+            -ReadOnly $true
+        $allSkipped = ($results | Where-Object { $_.Status -ne 'Skipped' }).Count -eq 0
+        if ($results.Count -eq 3 -and $allSkipped) {
+            _IT_Pass $r '15d  Read-only mode: all 3 targets return Skipped'
+        } else {
+            _IT_Fail $r '15d  Read-only mode: all 3 targets return Skipped' `
+                "Count=$($results.Count) NotSkipped=$(($results | Where-Object { $_.Status -ne 'Skipped' }).Count)"
+        }
+    } catch { _IT_Fail $r '15d  Read-only multi-target' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 15e — BatchResult shape: has all required fields
+    # ------------------------------------------------------------------
+    try {
+        $targets = @(_MkLT 'lin-1')
+        $results = Invoke-FltAnsibleBatch `
+            -Targets $targets `
+            -PlaybookBuilder { _Get-PackagePlaybook -Action 'install' -PackageName 'curl' } `
+            -Action 'install' -PackageSpec 'curl' -ReadOnly $true
+        $r0    = $results[0]
+        $props = $r0.PSObject.Properties.Name
+        $required = @('TargetName','Action','PackageSpec','PackageManager','Status','DurationSec','TimedOut','Note')
+        $missing  = $required | Where-Object { $props -notcontains $_ }
+        if ($missing.Count -eq 0) {
+            _IT_Pass $r '15e  BatchResult has all required fields'
+        } else {
+            _IT_Fail $r '15e  BatchResult has all required fields' "Missing: $($missing -join ', ')"
+        }
+    } catch { _IT_Fail $r '15e  BatchResult shape' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 15f — BatchResult field values: Action and PackageSpec preserved
+    # ------------------------------------------------------------------
+    try {
+        $targets = @(_MkLT 'lin-1')
+        $results = Invoke-FltAnsibleBatch `
+            -Targets $targets `
+            -PlaybookBuilder { _Get-PackagePlaybook -Action 'install' -PackageName 'curl' } `
+            -Action 'install' -PackageSpec 'curl' -ReadOnly $true
+        $r0 = $results[0]
+        if ($r0.Action -eq 'install' -and $r0.PackageSpec -eq 'curl' -and $r0.TargetName -eq 'lin-1') {
+            _IT_Pass $r '15f  BatchResult: Action, PackageSpec, TargetName correct'
+        } else {
+            _IT_Fail $r '15f  BatchResult: Action, PackageSpec, TargetName correct' `
+                "Action=$($r0.Action) PackageSpec=$($r0.PackageSpec) TargetName=$($r0.TargetName)"
+        }
+    } catch { _IT_Fail $r '15f  BatchResult field values' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 15g — Parser: SUCCESS line → Status='OK'
+    # ------------------------------------------------------------------
+    try {
+        $targets  = @(_MkLT 'lin-1' '10.0.0.1')
+        $fakeOut  = 'lin-1 | SUCCESS => {"changed": false}'
+        $parsed   = _Parse-AnsibleOutput -RawOutput $fakeOut -ExitCode 0 `
+                        -Targets $targets -Action 'install' -PackageSpec 'curl' -Duration 1.5
+        if ($parsed[0].Status -eq 'OK') {
+            _IT_Pass $r '15g  Parser: SUCCESS line → Status=OK'
+        } else {
+            _IT_Fail $r '15g  Parser: SUCCESS line → Status=OK' "Status=$($parsed[0].Status)"
+        }
+    } catch { _IT_Fail $r '15g  Parser SUCCESS' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 15h — Parser: CHANGED line → Status='OK'
+    # ------------------------------------------------------------------
+    try {
+        $targets = @(_MkLT 'lin-1')
+        $fakeOut = 'lin-1 | CHANGED => {"changed": true}'
+        $parsed  = _Parse-AnsibleOutput -RawOutput $fakeOut -ExitCode 0 `
+                       -Targets $targets -Action 'install' -PackageSpec 'curl' -Duration 1.0
+        if ($parsed[0].Status -eq 'OK') {
+            _IT_Pass $r '15h  Parser: CHANGED line → Status=OK'
+        } else {
+            _IT_Fail $r '15h  Parser: CHANGED line → Status=OK' "Status=$($parsed[0].Status)"
+        }
+    } catch { _IT_Fail $r '15h  Parser CHANGED' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 15i — Parser: FAILED line → Status='Failed', msg in Note
+    # ------------------------------------------------------------------
+    try {
+        $targets = @(_MkLT 'lin-1')
+        $fakeOut = 'lin-1 | FAILED! => {"msg": "No package curl found", "task": "install curl"}'
+        $parsed  = _Parse-AnsibleOutput -RawOutput $fakeOut -ExitCode 2 `
+                       -Targets $targets -Action 'install' -PackageSpec 'curl' -Duration 2.0
+        if ($parsed[0].Status -eq 'Failed' -and $parsed[0].Note -match 'curl') {
+            _IT_Pass $r '15i  Parser: FAILED! → Status=Failed, msg in Note'
+        } else {
+            _IT_Fail $r '15i  Parser: FAILED! → Status=Failed, msg in Note' `
+                "Status=$($parsed[0].Status) Note=$($parsed[0].Note)"
+        }
+    } catch { _IT_Fail $r '15i  Parser FAILED' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 15j — Parser: UNREACHABLE line → Status='Unreachable'
+    # ------------------------------------------------------------------
+    try {
+        $targets = @(_MkLT 'lin-1')
+        $fakeOut = 'lin-1 | UNREACHABLE! => {"msg": "Failed to connect to the host via ssh"}'
+        $parsed  = _Parse-AnsibleOutput -RawOutput $fakeOut -ExitCode 4 `
+                       -Targets $targets -Action 'install' -PackageSpec 'curl' -Duration 0.5
+        if ($parsed[0].Status -eq 'Unreachable') {
+            _IT_Pass $r '15j  Parser: UNREACHABLE! → Status=Unreachable'
+        } else {
+            _IT_Fail $r '15j  Parser: UNREACHABLE! → Status=Unreachable' "Status=$($parsed[0].Status)"
+        }
+    } catch { _IT_Fail $r '15j  Parser UNREACHABLE' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 15k — Parser: exit code 8 → all targets Failed with config error note
+    # ------------------------------------------------------------------
+    try {
+        $targets = @(_MkLT 'lin-1'; _MkLT 'lin-2' '10.0.0.2')
+        $parsed  = _Parse-AnsibleOutput -RawOutput '' -ExitCode 8 `
+                       -Targets $targets -Action 'install' -PackageSpec 'curl' -Duration 0.1
+        $allFailed = ($parsed | Where-Object { $_.Status -ne 'Failed' }).Count -eq 0
+        $hasNote   = $parsed[0].Note -match 'config|parse'
+        if ($allFailed -and $hasNote) {
+            _IT_Pass $r '15k  Parser: exit code 8 → all Failed with config error note'
+        } else {
+            _IT_Fail $r '15k  Parser: exit code 8 → all Failed with config error note' `
+                "AllFailed=$allFailed Note=$($parsed[0].Note)"
+        }
+    } catch { _IT_Fail $r '15k  Parser exit 8' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 15l — Parser: mixed output — one OK, one Failed
+    # ------------------------------------------------------------------
+    try {
+        $targets = @(_MkLT 'lin-1' '10.0.0.1'; _MkLT 'lin-2' '10.0.0.2')
+        $fakeOut = @(
+            'lin-1 | SUCCESS => {"changed": false}'
+            'lin-2 | FAILED! => {"msg": "Permission denied"}'
+        ) -join "`n"
+        $parsed = _Parse-AnsibleOutput -RawOutput $fakeOut -ExitCode 2 `
+                      -Targets $targets -Action 'install' -PackageSpec 'curl' -Duration 3.0
+        $lin1 = $parsed | Where-Object { $_.TargetName -eq 'lin-1' }
+        $lin2 = $parsed | Where-Object { $_.TargetName -eq 'lin-2' }
+        if ($lin1.Status -eq 'OK' -and $lin2.Status -eq 'Failed') {
+            _IT_Pass $r '15l  Parser: mixed output — lin-1=OK, lin-2=Failed'
+        } else {
+            _IT_Fail $r '15l  Parser: mixed output — lin-1=OK, lin-2=Failed' `
+                "lin-1=$($lin1.Status) lin-2=$($lin2.Status)"
+        }
+    } catch { _IT_Fail $r '15l  Parser mixed output' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 15m — OnProgress callback is invoked in read-only mode
+    # ------------------------------------------------------------------
+    try {
+        $targets      = @(_MkLT 'lin-1')
+        $callbackFired = $false
+        $cb = { param($dict); $script:callbackFired = $true }
+        $null = Invoke-FltAnsibleBatch `
+            -Targets $targets `
+            -PlaybookBuilder { _Get-PackagePlaybook -Action 'install' -PackageName 'curl' } `
+            -OnProgress $cb -ReadOnly $true
+        if ($script:callbackFired) {
+            _IT_Pass $r '15m  OnProgress callback invoked in read-only mode'
+        } else {
+            _IT_Fail $r '15m  OnProgress callback invoked in read-only mode' 'Callback was not called'
+        }
+    } catch { _IT_Fail $r '15m  OnProgress callback' $_.Exception.Message }
 
     return $r
 }

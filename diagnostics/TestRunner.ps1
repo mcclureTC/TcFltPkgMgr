@@ -187,6 +187,7 @@ function _TR_RunIntSuite {
             'Invoke-IT_DockerOperator'  { Invoke-IT_DockerOperator }
             'Invoke-IT_AnsibleInventory' { Invoke-IT_AnsibleInventory }
             'Invoke-IT_AnsiblePlaybook'  { Invoke-IT_AnsiblePlaybook }
+            'Invoke-IT_AnsibleBatch'     { Invoke-IT_AnsibleBatch }
             'Invoke-IT_SSH'             { Invoke-IT_SSH -Target ($Targets | Select-Object -First 1) -Credential $Credential }
             'Invoke-IT_ReachCache'      { Invoke-IT_ReachCache -Target ($Targets | Select-Object -First 1) }
             'Invoke-IT_TcpkgLocal'      { Invoke-IT_TcpkgLocal -Target ($Targets | Select-Object -First 1) }
@@ -211,6 +212,7 @@ function _TR_RunIntSuite {
                 'Invoke-IT_DockerOperator'   { Invoke-IT_DockerOperator }
                 'Invoke-IT_AnsibleInventory'  { Invoke-IT_AnsibleInventory }
                 'Invoke-IT_AnsiblePlaybook'   { Invoke-IT_AnsiblePlaybook }
+                'Invoke-IT_AnsibleBatch'      { Invoke-IT_AnsibleBatch }
                 default {
                     Write-Host "  Unknown suite: $($Suite.Function)" -ForegroundColor Red
                     _IT_NewResult
