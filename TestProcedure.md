@@ -429,6 +429,27 @@ Tests the four-bucket routing logic in `Invoke-FleetAction` (`execution/FleetExe
 
 ---
 
+### Suite 17 — Ansible Vault helpers
+
+**Infrastructure required:** None (fully offline — credential store and temp file only)
+**Per target:** No
+**Check count:** 8 (17a–17h)
+
+Tests `_Get-VaultPasswordFile` and `Invoke-FltVaultSetup` in `execution/AnsibleExecutor.ps1`. Seeds the credential store with a known vault password via `Set-FltStoredPassword`, verifies temp file behaviour, then cleans up. Does not invoke `ansible-vault` or any Ansible process.
+
+| # | Test name | What is tested | How verified |
+|---|-----------|----------------|--------------|
+| 17a | No vault password → $null | `_Get-VaultPasswordFile` returns `$null` when no `ansible_vault` credential is stored | Clears credential store, calls function, checks result is `$null` |
+| 17b | Vault password → temp file created | Function writes a temp file when a vault password is stored | Stores test password, calls function, checks `Ok` and `Test-Path` |
+| 17c | Temp file content matches password | The temp file contains exactly the stored vault password | Reads file with `File::ReadAllText`, compares to stored value |
+| 17d | Temp file has .tmp extension | File extension is `.tmp` (covered by `*.tmp` in `.gitignore`) | Checks `Path.GetExtension` |
+| 17e | Temp file in system temp directory | File is written to `Path.GetTempPath()` | Compares `Path.GetDirectoryName` to `GetTempPath()` |
+| 17f | Temp file deletable by caller | No file locks — caller can `Remove-Item` immediately | Calls `Remove-Item -Force`, checks file is gone |
+| 17g | Second call creates fresh temp file | Function is idempotent — does not reuse a deleted path | Calls function again, checks new file exists |
+| 17h | Invoke-FltVaultSetup is defined | Function exists and is callable | `Get-Command 'Invoke-FltVaultSetup'` returns a result |
+
+---
+
 ## Adding New Tests
 
 When implementing a new phase, add tests in the appropriate location:

@@ -5,7 +5,7 @@
 #  Phase 5.2 — New-FltAnsibleInventory / Remove-FltAnsibleInventory
 #  Phase 5.3 — Playbook builders (_Get-PackagePlaybook, _Get-ServicePlaybook, etc.)
 #  Phase 5.4 — Invoke-FltAnsibleBatch (batch executor)
-#  Phase 5.6 — Vault helpers (stubs — implemented in 5.6)
+#  Phase 5.6 — Vault helpers (_Get-VaultPasswordFile, Invoke-FltVaultSetup)
 # =============================================================================
 
 Set-StrictMode -Off
@@ -726,8 +726,13 @@ function Invoke-FltAnsibleBatch {
     $posixInv      = $invPath      -replace '\\', '/'
     $posixPlaybook = $playbookPath -replace '\\', '/'
 
-    # --vault-password-file is added in Phase 5.6 when vault is configured.
-    $cmdLine = "$ansibleCmd -i `"$posixInv`" `"$posixPlaybook`" --one-line -o json --forks $forks 2>&1"
+    # Vault password file — written to a temp path if a vault password is stored.
+    # Omitted entirely when no vault password is configured (playbooks without
+    # encrypted vars work without it).
+    $vaultFile    = _Get-VaultPasswordFile
+    $vaultFlag    = if ($vaultFile) { " --vault-password-file `"$vaultFile`"" } else { '' }
+
+    $cmdLine = "$ansibleCmd -i `"$posixInv`" `"$posixPlaybook`"$vaultFlag --one-line -o json --forks $forks 2>&1"
 
     $rawOutput  = ''
     $exitCode   = -1
@@ -772,6 +777,9 @@ function Invoke-FltAnsibleBatch {
     Remove-FltAnsibleInventory -Path $invPath
     if (Test-Path $playbookPath) {
         try { Remove-Item $playbookPath -Force -ErrorAction SilentlyContinue } catch {}
+    }
+    if ($vaultFile -and (Test-Path $vaultFile)) {
+        try { Remove-Item $vaultFile -Force -ErrorAction SilentlyContinue } catch {}
     }
 
     # ------------------------------------------------------------------
@@ -890,8 +898,99 @@ function _Parse-AnsibleOutput {
 }
 
 # ---------------------------------------------------------------------------
-# Phase 5.6 stubs — Vault helpers
+# Phase 5.6 — Vault helpers
 # ---------------------------------------------------------------------------
 
-function _Get-VaultPasswordFile { throw 'Not implemented — Phase 5.6' }
-function Invoke-FltVaultSetup   { throw 'Not implemented — Phase 5.6' }
+<#
+.SYNOPSIS
+    Retrieves the Ansible Vault password from the credential store and writes
+    it to a temp file for use with --vault-password-file.
+
+.DESCRIPTION
+    Returns the temp file path when a vault password is stored, or $null when
+    none is configured (so callers can omit --vault-password-file entirely).
+    The caller is responsible for deleting the file after the run.
+
+.OUTPUTS
+    [string] Temp file path, or $null if no vault password is stored.
+#>
+function _Get-VaultPasswordFile {
+    $pw = Get-FltStoredPassword -CredentialName 'ansible_vault'
+    if ([string]::IsNullOrEmpty($pw)) { return $null }
+
+    $path = Join-Path ([System.IO.Path]::GetTempPath()) "tcflt_vault_$(Get-Random).tmp"
+    try {
+        # Write with no trailing newline — ansible-vault reads exactly what's there
+        [System.IO.File]::WriteAllText($path, $pw, [System.Text.Encoding]::UTF8)
+        # Restrict permissions on the temp file immediately
+        if ($IsWindows -or $PSVersionTable.Platform -ne 'Unix') {
+            # Windows: set file to current-user-only via ACL
+            try {
+                $acl  = Get-Acl $path
+                $acl.SetAccessRuleProtection($true, $false)
+                $rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
+                    [System.Security.Principal.WindowsIdentity]::GetCurrent().Name,
+                    'FullControl', 'Allow')
+                $acl.AddAccessRule($rule)
+                Set-Acl -Path $path -AclObject $acl
+            } catch { <# non-fatal — temp file is short-lived #> }
+        } else {
+            # Linux/macOS: chmod 600
+            try { & chmod 600 $path } catch {}
+        }
+        return $path
+    } catch {
+        Write-Verbose "_Get-VaultPasswordFile: could not write temp file: $_"
+        return $null
+    }
+}
+
+<#
+.SYNOPSIS
+    Prompts for the Ansible Vault password and saves it to the credential store.
+
+.DESCRIPTION
+    Called from the Linux Admin menu (Phase 6) > Setup > Vault password.
+    The operator enters the vault password once; TcFltPkgMgr passes it
+    automatically to every ansible-playbook run via --vault-password-file.
+
+    To rotate the vault password:
+      1. Re-key vault files: ansible-vault rekey ansible/group_vars/all.yml.vault
+      2. Update here: TcFltPkgMgr > Linux Admin > Setup > Vault password
+
+.OUTPUTS
+    [pscustomobject] @{ Ok; Message }
+#>
+function Invoke-FltVaultSetup {
+    Write-Host ''
+    Write-Host '  Ansible Vault password setup' -ForegroundColor Cyan
+    Write-Host '  The vault password is used to encrypt/decrypt secrets in'
+    Write-Host '  ansible/group_vars/ and ansible/host_vars/ files.'
+    Write-Host ''
+
+    $existing = Get-FltStoredPassword -CredentialName 'ansible_vault'
+    if ($existing) {
+        Write-Host '  A vault password is already stored.' -ForegroundColor Green
+        $choice = (Read-Host '  Replace it? [1] Yes  [0] No (default 0)').Trim()
+        if ($choice -ne '1') {
+            return [pscustomobject]@{ Ok = $true; Message = 'Vault password unchanged.' }
+        }
+    }
+
+    $pw = (Read-Host '  Enter vault password').Trim()
+    if ([string]::IsNullOrEmpty($pw)) {
+        return [pscustomobject]@{ Ok = $false; Message = 'No password entered — vault password not saved.' }
+    }
+
+    $confirm = (Read-Host '  Confirm vault password').Trim()
+    if ($pw -ne $confirm) {
+        return [pscustomobject]@{ Ok = $false; Message = 'Passwords do not match — vault password not saved.' }
+    }
+
+    if (Set-FltStoredPassword -CredentialName 'ansible_vault' -PlainPassword $pw) {
+        Write-Host '  Vault password saved.' -ForegroundColor Green
+        return [pscustomobject]@{ Ok = $true; Message = 'Vault password saved successfully.' }
+    } else {
+        return [pscustomobject]@{ Ok = $false; Message = 'Failed to save vault password to credential store.' }
+    }
+}

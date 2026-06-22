@@ -522,6 +522,55 @@ Use **Setup → select target → 4. Prepare target** to install WinGet on a rem
 
 ---
 
+## Ansible Vault integration (Phase 5.6)
+
+TcFltPkgMgr uses a two-tier credential model to keep secrets out of playbooks and inventory files:
+
+| Tier | What it protects | How it is stored |
+|------|-----------------|------------------|
+| 1 | Ansible Vault password | TcFltPkgMgr credential store (DPAPI on Windows, AES-256 on Linux) |
+| 2 | Playbook secrets (sudo passwords, API keys, service credentials) | Ansible Vault AES-256 encrypted files |
+
+The operator enters the vault password once via **Linux Admin — Setup — Vault password**. TcFltPkgMgr passes it automatically to every `ansible-playbook` run via `--vault-password-file`.
+
+### Vault password setup
+
+```
+TcFltPkgMgr > Linux Admin > Setup > Vault password
+```
+
+Or call directly: `Invoke-FltVaultSetup`
+
+### Vault-encrypted variable files
+
+Encrypted variable files live under `ansible/` and are safe to commit:
+
+```
+ansible/
+├── group_vars/
+│   └── all.yml.vault        # encrypted: sudo credentials, shared secrets
+└── host_vars/
+    └── <hostname>.yml.vault  # per-host secret overrides
+```
+
+To create a vault file: `ansible-vault create ansible/group_vars/all.yml.vault`
+
+### Vault password rotation
+
+```powershell
+# 1. Re-key all vault files
+ansible-vault rekey ansible/group_vars/all.yml.vault
+
+# 2. Update the stored password
+# TcFltPkgMgr > Linux Admin > Setup > Vault password
+```
+
+### How it works at run time
+
+`_Get-VaultPasswordFile` retrieves the vault password from the credential store, writes it to a `*.tmp` file in the system temp directory (permissions restricted to the current user), and returns the path. `Invoke-FltAnsibleBatch` passes this as `--vault-password-file` to `ansible-playbook` and deletes the temp file immediately after the run. If no vault password is stored, the flag is omitted entirely — playbooks without encrypted vars work without it.
+
+---
+
 ## File Layout
 
 ```

@@ -589,40 +589,29 @@ remote management, and hosting the Ansible operator container.
 - [x] `.gitignore`: no new entries needed
 - [x] `README.md`: Phase 5.5 section added
 
-### 5.6 — Ansible Vault integration (`execution/AnsibleExecutor.ps1`)
+### 5.6 — Ansible Vault integration (`execution/AnsibleExecutor.ps1`) ✅
 
-Ansible Vault encrypts secrets (SSH sudo passwords, API keys, service account
-credentials) stored alongside playbooks using AES-256. The vault password is
-the only secret needed to decrypt — encrypted files can be safely committed to
-the repo.
-
-**Two-tier credential model:**
-- Tier 1: TcFltPkgMgr credential store protects the Ansible Vault password
-          (DPAPI on Windows, random-key AES-256 on Linux)
-- Tier 2: Ansible Vault protects playbook secrets using that vault password
-The operator enters the vault password once; the tool manages it from there.
-
-- [ ] Add `_Get-VaultPasswordFile` helper — retrieves vault password from
-      `Get-FltStoredPassword -CredentialName 'ansible_vault'` and writes it
-      to a temp file passed as `--vault-password-file` to `ansible-playbook`
-- [ ] `Invoke-FltAnsibleBatch` passes `--vault-password-file` when a vault
-      password is stored; omits the flag if none is configured (playbooks
-      without encrypted vars work without a vault password)
-- [ ] Add `Invoke-FltVaultSetup` in the Linux Admin menu — prompts for vault
-      password and saves it via `Set-FltStoredPassword -CredentialName 'ansible_vault'`
-- [ ] Add `ansible/` folder at project root for vault-encrypted variable files:
-      ```
-      ansible/
-      ├── group_vars/
-      │   └── all.yml.vault   # encrypted: SSH passwords, sudo credentials
-      └── host_vars/
-          └── <hostname>.yml.vault   # per-host secret overrides
-      ```
-- [ ] Vault files are safe to commit encrypted — add to `.gitignore` only if
-      secrets should not be in the repo at all
-- [ ] Document vault password rotation in README:
-      `ansible-vault rekey ansible/group_vars/all.yml.vault`
-      then update via TcFltPkgMgr Setup > Linux Admin
+- [x] `_Get-VaultPasswordFile` — retrieves vault password from
+      `Get-FltStoredPassword -CredentialName 'ansible_vault'`; writes it to a
+      `*.tmp` file in the system temp directory; tightens permissions (Windows
+      ACL / Linux `chmod 600`); returns `$null` when no password is stored
+- [x] `Invoke-FltAnsibleBatch` — passes `--vault-password-file` when
+      `_Get-VaultPasswordFile` returns a path; omits flag entirely when `$null`;
+      deletes temp file in step 6 cleanup alongside inventory and playbook files
+- [x] `Invoke-FltVaultSetup` — interactive setup: detects existing password,
+      prompts with confirmation entry, saves via
+      `Set-FltStoredPassword -CredentialName 'ansible_vault'`;
+      returns `[pscustomobject]@{ Ok; Message }`
+- [x] Vault files (`ansible/group_vars/`, `ansible/host_vars/`) are NOT
+      gitignored — AES-256 encrypted files are safe to commit
+- [x] `*.tmp` already in `.gitignore` — covers vault temp file; no new entries
+- [x] Suite 17 (Ansible Vault helpers) — 8 checks (17a–17h), fully offline:
+      17a null when no password · 17b temp file created · 17c content matches ·
+      17d .tmp extension · 17e system temp location · 17f deletable ·
+      17g fresh file on second call · 17h Invoke-FltVaultSetup defined
+- [x] Security: vault password never written to playbook or inventory;
+      temp file restricted to current user; deleted immediately after run
+- [x] `README.md`: Phase 5.6 section added with vault setup and rotation docs
 
 ---
 
