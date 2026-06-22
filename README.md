@@ -441,6 +441,21 @@ Parallelism is controlled by `ansible.forks` in `settings.default.json` (default
 
 ---
 
+## Fleet executor routing (Phase 5.5)
+
+`Invoke-FleetAction` in `execution/FleetExecutor.ps1` now routes targets into four buckets:
+
+| Bucket | Condition | Executor |
+|--------|-----------|---------|
+| Ansible | `OS='linux'` AND `TargetType != 'container'` | `Invoke-FltAnsibleBatch` |
+| tcpkg SSH | Windows, `InternetAccess=$true`, PackageManager = `tcpkg`/`both` | `Invoke-FltSshBatch` |
+| WinGet SSH | Windows, `InternetAccess=$true`, PackageManager = `winget`/`both` | `Invoke-FltWinGetBatch` |
+| Push | Windows, `InternetAccess=$false` | tcpkg `-r` push |
+
+Linux targets are separated first and never enter the Windows bucket logic. Targets that land in no bucket (e.g. Linux containers with no package manager assigned) receive an immediate `Status='Unsupported'` result — they are never silently dropped.
+
+---
+
 ## Preparing targets for WinGet
 
 Use **Setup → select target → 4. Prepare target** to install WinGet on a remote Windows machine via SSH. The installer:
@@ -511,32 +526,50 @@ Use **Setup → select target → 4. Prepare target** to install WinGet on a rem
 
 ```
 TcFltPkgMgr/
-├── TcFltPkgMgr.ps1           # Entry point
+├── TcFltPkgMgr.ps1                   # Entry point — loads all modules
+├── THIRD-PARTY-NOTICES.md
+├── classes/
+│   └── Models.ps1                    # FleetTarget, BatchResult, CommandEntry
 ├── config/
-│   ├── feeds.default.json    # Built-in Beckhoff feed presets (do not edit)
-│   ├── feeds.local.json      # Your local feed overrides (gitignored)
-│   ├── settings.default.json
-│   ├── settings.local.json   # Your local settings (gitignored)
-│   └── credentials.win.json  # Encrypted credentials — Windows (gitignored)
+│   ├── feeds.default.json            # Built-in Beckhoff feed presets (do not edit)
+│   └── settings.default.json         # All default settings
+├── data/
+│   ├── AnsibleRepository.ps1         # Ansible mode detection (native/wsl/docker)
+│   ├── ConfigRepository.ps1          # Settings load/save, Get-FltCfgValue
+│   ├── CredentialAdapter.ps1         # Stable credential interface
+│   ├── CredentialBackendFile.ps1     # AES-256 file backend (cross-platform)
+│   ├── CredentialBackendWindows.ps1  # DPAPI backend (Windows only)
+│   ├── CredentialBackends.ps1        # Backend selector
+│   ├── CredentialRepository.ps1      # Credential store — get/set/resolve
+│   ├── DockerRepository.ps1          # Docker Desktop status and operator mgmt
+│   ├── FleetQuery.ps1                # Fleet target filtering and queries
+│   ├── PackageRepository.ps1         # tcpkg package queries
+│   ├── TargetRepository.ps1          # Fleet target load/save/add/remove
+│   └── WinGetRepository.ps1          # WinGet search, versions, table parser
 ├── diagnostics/
-│   └── Diagnostics.ps1       # Built-in self-test (Setup > 10)
-├── logs/
-│   └── commands.ndjson       # Command log (gitignored)
-├── classes/                  # PS class definitions (FleetTarget etc.)
-├── data/                     # Config, credential, target, package repositories
-│   ├── CredentialAdapter.ps1        # Stable credential interface
-│   ├── CredentialBackendWindows.ps1 # DPAPI backend (Windows)
-│   ├── CredentialBackendFile.ps1    # AES-256 backend (Linux)
-│   └── CredentialBackends.ps1       # Backend selector
-├── execution/                # SSH executor, fleet executor, command log writer
+│   ├── Diagnostics.ps1               # Suite 1 — all diagnostic checks
+│   ├── IntegrationTests.ps1          # Suites 13–16 — integration test functions
+│   ├── TestRunner.ps1                # Interactive test runner
+│   └── TestProcedure.md              # Full test documentation
+├── docker/
+│   └── Dockerfile.ansible            # Builds tcflt-ansible Ansible operator container
+├── execution/
+│   ├── AnsibleExecutor.ps1           # Ansible inventory, playbook builder, batch executor
+│   ├── CommandLog.ps1                # Batch log entries
+│   ├── FleetExecutor.ps1             # Routes targets → ansible/tcpkg/winget/push
+│   ├── SshExecutor.ps1               # tcpkg SSH batch executor
+│   └── WinGetExecutor.ps1            # WinGet SSH batch executor
 └── ui/
-    ├── DisplayAdapter.ps1    # Stable display interface (replaceable)
-    ├── DashboardAnsi.ps1     # ANSI terminal backend
-    ├── DisplayBackends.ps1   # Display backend selector
-    ├── SortFilter.ps1        # Sort/filter helpers and interactive pickers
+    ├── Dashboard.ps1                 # Dashboard base helpers
+    ├── DashboardAnsi.ps1             # ANSI terminal backend
+    ├── DisplayAdapter.ps1            # Stable display interface
+    ├── DisplayBackends.ps1           # Display backend selector
+    ├── Prompts.ps1                   # Interactive prompts and pickers
+    ├── SortFilter.ps1                # Sort/filter helpers
     └── menus/
-        ├── FleetMenu.ps1
-        ├── PackageMenu.ps1
-        ├── TargetMenu.ps1
-        └── UiConfigMenu.ps1  # Runtime UI settings (page size, display backend)
+        ├── FleetMenu.ps1             # Top-level fleet menu
+        ├── PackageMenu.ps1           # tcpkg package operations
+        ├── TargetMenu.ps1            # Target management
+        ├── UiConfigMenu.ps1          # Runtime UI settings
+        └── WinGetMenu.ps1            # WinGet install/upgrade/uninstall/status
 ```

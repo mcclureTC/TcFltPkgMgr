@@ -984,6 +984,15 @@ function Get-IT_Suites {
             NeedsSSH    = $false
             PerTarget   = $false   # offline — parser tested directly; live run tested in Phase 5.5+
             Function    = 'Invoke-IT_AnsibleBatch'
+        },
+        [pscustomobject]@{
+            Id          = 16
+            Name        = 'Fleet executor routing'
+            Description = 'Invoke-FleetAction: Ansible/tcpkg/winget/push bucket routing in read-only mode'
+            NeedsTarget = $false
+            NeedsSSH    = $false
+            PerTarget   = $false   # fully offline — read-only mode exercises bucket logic
+            Function    = 'Invoke-IT_FleetRouting'
         }
     )
 }
@@ -2347,6 +2356,211 @@ function Invoke-IT_AnsibleBatch {
             _IT_Fail $r '15m  OnProgress callback invoked in read-only mode' 'Callback was not called'
         }
     } catch { _IT_Fail $r '15m  OnProgress callback' $_.Exception.Message }
+
+    return $r
+}
+
+# ── Suite 16 — Fleet executor routing ─────────────────────────────────────────
+
+# Tests the Ansible/tcpkg/winget/push bucket routing in Invoke-FleetAction.
+# Uses read-only mode throughout — no SSH, no Ansible, no tcpkg calls are made.
+# Sets $Script:FltReadOnly = $true and $Script:FltBatchStatus = @{} before each
+# call, then restores the original values afterward.
+function Invoke-IT_FleetRouting {
+    $r = _IT_NewResult
+
+    _IT_Section 'Fleet executor routing'
+
+    # Save and restore script-scope state
+    $savedReadOnly     = $Script:FltReadOnly
+    $savedBatchStatus  = $Script:FltBatchStatus
+    $Script:FltReadOnly    = $true
+    $Script:FltBatchStatus = @{}
+
+    # Helper: build a minimal FleetTarget
+    function _MkT {
+        param([string]$Name, [string]$OS='windows', [string]$Type='physical',
+              [string]$PM='', [bool]$IA=$true)
+        $t = [FleetTarget]::new($Name, "10.0.0.1", 22, 'admin', $IA)
+        $t.OS            = $OS
+        $t.TargetType    = $Type
+        $t.PackageManager = $PM
+        $t
+    }
+
+    # ------------------------------------------------------------------
+    # 16a — Linux physical target routes to Ansible bucket (read-only status)
+    # ------------------------------------------------------------------
+    try {
+        $Script:FltBatchStatus = @{}
+        $targets = @(_MkT 'lin-1' 'linux' 'physical')
+        $results = Invoke-FleetAction -Action 'install' -PackageSpec 'curl' -Targets $targets
+        $r0 = $results | Where-Object { $_.TargetName -eq 'lin-1' }
+        if ($r0 -and $r0.Status -match 'ansible') {
+            _IT_Pass $r '16a  Linux physical target routes to Ansible bucket'
+        } else {
+            _IT_Fail $r '16a  Linux physical target routes to Ansible bucket' `
+                "Status=$($r0.Status)"
+        }
+    } catch { _IT_Fail $r '16a  Linux → Ansible routing' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 16b — Linux VM target routes to Ansible bucket
+    # ------------------------------------------------------------------
+    try {
+        $Script:FltBatchStatus = @{}
+        $targets = @(_MkT 'lin-vm-1' 'linux' 'vm')
+        $results = Invoke-FleetAction -Action 'install' -PackageSpec 'curl' -Targets $targets
+        $r0 = $results | Where-Object { $_.TargetName -eq 'lin-vm-1' }
+        if ($r0 -and $r0.Status -match 'ansible') {
+            _IT_Pass $r '16b  Linux VM target routes to Ansible bucket'
+        } else {
+            _IT_Fail $r '16b  Linux VM target routes to Ansible bucket' "Status=$($r0.Status)"
+        }
+    } catch { _IT_Fail $r '16b  Linux VM → Ansible routing' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 16c — Linux container target does NOT route to Ansible bucket;
+    #        gets Unsupported result (no package manager configured)
+    # ------------------------------------------------------------------
+    try {
+        $Script:FltBatchStatus = @{}
+        $targets = @(_MkT 'cntr-1' 'linux' 'container')
+        $results = Invoke-FleetAction -Action 'install' -PackageSpec 'curl' -Targets $targets
+        $r0 = $results | Where-Object { $_.TargetName -eq 'cntr-1' }
+        if ($r0 -and $r0.Status -eq 'Unsupported' -and $r0.Status -notmatch 'ansible') {
+            _IT_Pass $r '16c  Linux container: Unsupported (not routed to Ansible)'
+        } else {
+            _IT_Fail $r '16c  Linux container: Unsupported (not routed to Ansible)' `
+                "Status=$($r0.Status)"
+        }
+    } catch { _IT_Fail $r '16c  Container not Ansible' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 16d — Windows target does NOT route to Ansible bucket
+    # ------------------------------------------------------------------
+    try {
+        $Script:FltBatchStatus = @{}
+        $targets = @(_MkT 'win-1' 'windows' 'physical' 'tcpkg' $true)
+        $results = Invoke-FleetAction -Action 'install' -PackageSpec 'curl' -Targets $targets
+        $r0 = $results | Where-Object { $_.TargetName -eq 'win-1' }
+        if ($r0 -and $r0.Status -notmatch 'ansible') {
+            _IT_Pass $r '16d  Windows target does NOT route to Ansible bucket'
+        } else {
+            _IT_Fail $r '16d  Windows target does NOT route to Ansible bucket' `
+                "Status=$($r0.Status)"
+        }
+    } catch { _IT_Fail $r '16d  Windows not Ansible' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 16e — Windows tcpkg target routes to tcpkg SSH bucket
+    # ------------------------------------------------------------------
+    try {
+        $Script:FltBatchStatus = @{}
+        $targets = @(_MkT 'win-1' 'windows' 'physical' 'tcpkg' $true)
+        $results = Invoke-FleetAction -Action 'install' -PackageSpec 'curl' -Targets $targets
+        $r0 = $results | Where-Object { $_.TargetName -eq 'win-1' }
+        if ($r0 -and $r0.Status -match 'tcpkg') {
+            _IT_Pass $r '16e  Windows tcpkg target routes to tcpkg SSH bucket'
+        } else {
+            _IT_Fail $r '16e  Windows tcpkg target routes to tcpkg SSH bucket' `
+                "Status=$($r0.Status)"
+        }
+    } catch { _IT_Fail $r '16e  Windows → tcpkg routing' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 16f — Windows winget target routes to WinGet SSH bucket
+    # ------------------------------------------------------------------
+    try {
+        $Script:FltBatchStatus = @{}
+        $targets = @(_MkT 'win-wg' 'windows' 'physical' 'winget' $true)
+        $results = Invoke-FleetAction -Action 'install' -PackageSpec 'curl' -Targets $targets
+        $r0 = $results | Where-Object { $_.TargetName -eq 'win-wg' }
+        if ($r0 -and $r0.Status -match 'winget') {
+            _IT_Pass $r '16f  Windows winget target routes to WinGet SSH bucket'
+        } else {
+            _IT_Fail $r '16f  Windows winget target routes to WinGet SSH bucket' `
+                "Status=$($r0.Status)"
+        }
+    } catch { _IT_Fail $r '16f  Windows → WinGet routing' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 16g — Windows target with InternetAccess=False routes to push bucket
+    # ------------------------------------------------------------------
+    try {
+        $Script:FltBatchStatus = @{}
+        $targets = @(_MkT 'win-push' 'windows' 'physical' 'tcpkg' $false)
+        $results = Invoke-FleetAction -Action 'install' -PackageSpec 'curl' -Targets $targets
+        $r0 = $results | Where-Object { $_.TargetName -eq 'win-push' }
+        if ($r0 -and $r0.Status -match 'push') {
+            _IT_Pass $r '16g  Windows IA=False routes to push bucket'
+        } else {
+            _IT_Fail $r '16g  Windows IA=False routes to push bucket' "Status=$($r0.Status)"
+        }
+    } catch { _IT_Fail $r '16g  Windows → push routing' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 16h — Mixed fleet: Linux→Ansible, Windows→tcpkg, in one call
+    # ------------------------------------------------------------------
+    try {
+        $Script:FltBatchStatus = @{}
+        $targets = @(
+            (_MkT 'lin-1'  'linux'   'physical' ''      $true)
+            (_MkT 'win-1'  'windows' 'physical' 'tcpkg' $true)
+        )
+        $results = Invoke-FleetAction -Action 'install' -PackageSpec 'curl' -Targets $targets
+        $lin = $results | Where-Object { $_.TargetName -eq 'lin-1' }
+        $win = $results | Where-Object { $_.TargetName -eq 'win-1' }
+        if ($lin.Status -match 'ansible' -and $win.Status -match 'tcpkg') {
+            _IT_Pass $r '16h  Mixed fleet: lin-1→Ansible, win-1→tcpkg'
+        } else {
+            _IT_Fail $r '16h  Mixed fleet: lin-1→Ansible, win-1→tcpkg' `
+                "lin=$($lin.Status) win=$($win.Status)"
+        }
+    } catch { _IT_Fail $r '16h  Mixed fleet routing' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 16i — Ansible result has PackageManager = 'ansible'
+    # ------------------------------------------------------------------
+    try {
+        $Script:FltBatchStatus = @{}
+        $targets = @(_MkT 'lin-1' 'linux' 'physical')
+        $results = Invoke-FleetAction -Action 'install' -PackageSpec 'curl' -Targets $targets
+        $r0 = $results | Where-Object { $_.TargetName -eq 'lin-1' }
+        if ($r0 -and $r0.PackageManager -eq 'ansible') {
+            _IT_Pass $r '16i  Ansible bucket result has PackageManager=''ansible'''
+        } else {
+            _IT_Fail $r '16i  Ansible bucket result has PackageManager=''ansible''' `
+                "PackageManager=$($r0.PackageManager)"
+        }
+    } catch { _IT_Fail $r '16i  Ansible PackageManager field' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 16j — All targets return a result (no silent drops)
+    # ------------------------------------------------------------------
+    try {
+        $Script:FltBatchStatus = @{}
+        $targets = @(
+            (_MkT 'lin-1'    'linux'   'physical'  ''       $true)
+            (_MkT 'lin-2'    'linux'   'vm'        ''       $true)
+            (_MkT 'win-1'    'windows' 'physical'  'tcpkg'  $true)
+            (_MkT 'win-wg'   'windows' 'physical'  'winget' $true)
+            (_MkT 'win-push' 'windows' 'physical'  'tcpkg'  $false)
+        )
+        $results = Invoke-FleetAction -Action 'install' -PackageSpec 'curl' -Targets $targets
+        if ($results.Count -eq 5) {
+            _IT_Pass $r '16j  All 5 targets return a result (no silent drops)'
+        } else {
+            _IT_Fail $r '16j  All 5 targets return a result (no silent drops)' `
+                "Got $($results.Count) results, expected 5"
+        }
+    } catch { _IT_Fail $r '16j  No silent drops' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # Restore script-scope state
+    # ------------------------------------------------------------------
+    $Script:FltReadOnly    = $savedReadOnly
+    $Script:FltBatchStatus = $savedBatchStatus
 
     return $r
 }

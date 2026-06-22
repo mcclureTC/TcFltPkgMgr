@@ -566,13 +566,28 @@ remote management, and hosting the Ansible operator container.
 - [x] `.gitignore`: all ansible/ paths already covered — no new entries needed
 - [x] `README.md`: Phase 5.4 section added
 
-### 5.5 — Route Ansible targets in `Invoke-FleetAction` (`execution/FleetExecutor.ps1`)
+### 5.5 — Route Ansible targets in `Invoke-FleetAction` (`execution/FleetExecutor.ps1`) ✅
 
-- [ ] Add `ansibleTargets` bucket — `OS -eq 'linux'` AND
-      `TargetType -ne 'container'`
-- [ ] No feed check for Ansible targets
-- [ ] No push bucket for Linux
-- [ ] Merge results into `$allResults`
+- [x] `$ansibleTargets` bucket: `OS='linux'` AND `TargetType != 'container'`;
+      separated first before Windows bucket logic runs
+- [x] `$windowsTargets` — all non-Ansible targets; feeds existing tcpkg/winget/push
+      routing unchanged
+- [x] No feed check for Ansible targets
+- [x] No push bucket for Linux
+- [x] Ansible bucket execution: `Invoke-FltAnsibleBatch` with
+      `_Get-PackagePlaybook` as `$PlaybookBuilder`
+- [x] Read-only mode: `[read-only] would run ansible: <Action> <PackageSpec>`
+- [x] Unrouted-targets catch: targets landing in no bucket receive
+      `Status='Unsupported'`, `PackageManager='none'` — never silently dropped
+- [x] Merge results into `$allResults`
+- [x] Suite 16 (Fleet executor routing) — 10 checks (16a–16j), fully offline
+      via read-only mode:
+      16a–16b Linux physical/VM→Ansible · 16c container→Unsupported ·
+      16d Windows not Ansible · 16e tcpkg · 16f WinGet · 16g push ·
+      16h mixed fleet · 16i PackageManager field · 16j no silent drops
+- [x] Security: no new secrets or credential handling
+- [x] `.gitignore`: no new entries needed
+- [x] `README.md`: Phase 5.5 section added
 
 ### 5.6 — Ansible Vault integration (`execution/AnsibleExecutor.ps1`)
 

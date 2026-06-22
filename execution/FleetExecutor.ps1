@@ -166,23 +166,29 @@ function Invoke-FleetAction {
         }
     }
 
-    # Split targets into three buckets by package manager:
+    # Split targets into four buckets by OS and package manager:
+    #   Ansible    — OS = 'linux' AND TargetType != 'container' (no feed check, no push)
     #   tcpkg SSH  — InternetAccess = True AND EffectivePackageManager = 'tcpkg'/'both'
     #   WinGet SSH — InternetAccess = True AND EffectivePackageManager = 'winget'/'both'
     #   Push       — InternetAccess = False (local tcpkg push, Windows/tcpkg only)
+
+    # Ansible targets are separated first — they never enter the Windows buckets
+    $ansibleTargets   = @($Targets | Where-Object { $_.OS -eq 'linux' -and $_.TargetType -ne 'container' })
+    $windowsTargets   = @($Targets | Where-Object { $_.OS -ne 'linux' -or $_.TargetType -eq 'container' })
+
     if ($ForceSequential) {
         $tcpkgSshTargets  = @()
         $wingetSshTargets = @()
-        $pushTargets      = @($Targets)
+        $pushTargets      = @($windowsTargets)
     } elseif ($Action -in @('install','upgrade')) {
-        $iaTargets        = @($Targets | Where-Object { $_.InternetAccess })
+        $iaTargets        = @($windowsTargets | Where-Object { $_.InternetAccess })
         $tcpkgSshTargets  = @($iaTargets | Where-Object { (Get-FltEffectivePackageManager $_) -in @('tcpkg','both') })
         $wingetSshTargets = @($iaTargets | Where-Object { (Get-FltEffectivePackageManager $_) -in @('winget','both') })
-        $pushTargets      = @($Targets   | Where-Object { -not $_.InternetAccess })
+        $pushTargets      = @($windowsTargets | Where-Object { -not $_.InternetAccess })
     } else {
         # uninstall/repair: no feed fetch needed — route by package manager
-        $tcpkgSshTargets  = @($Targets | Where-Object { (Get-FltEffectivePackageManager $_) -in @('tcpkg','both') })
-        $wingetSshTargets = @($Targets | Where-Object { (Get-FltEffectivePackageManager $_) -in @('winget','both') })
+        $tcpkgSshTargets  = @($windowsTargets | Where-Object { (Get-FltEffectivePackageManager $_) -in @('tcpkg','both') })
+        $wingetSshTargets = @($windowsTargets | Where-Object { (Get-FltEffectivePackageManager $_) -in @('winget','both') })
         $pushTargets      = @()
     }
 
@@ -198,6 +204,55 @@ function Invoke-FleetAction {
     }
 
     $allResults = [System.Collections.Generic.List[object]]::new()
+
+    # Targets that landed in no bucket (e.g. Linux containers with no package
+    # manager assigned) get an immediate Unsupported result so they are never
+    # silently dropped.
+    $routedNames     = @($ansibleTargets + $tcpkgSshTargets + $wingetSshTargets + $pushTargets |
+                         ForEach-Object { $_.Name })
+    $unroutedTargets = @($Targets | Where-Object { $_.Name -notin $routedNames })
+    foreach ($t in $unroutedTargets) {
+        $r = [BatchResult]::new()
+        $r.TargetName     = $t.Name
+        $r.Action         = $Action
+        $r.PackageSpec    = $PackageSpec
+        $r.PackageManager = 'none'
+        $r.Status         = 'Unsupported'
+        $r.DurationSec    = 0
+        $r.TimedOut       = $false
+        $r.Note           = 'No package manager configured for this target type'
+        $allResults.Add($r)
+    }
+
+    # ── Ansible bucket (Linux non-container targets) ─────────────────────────
+    if ($ansibleTargets.Count -gt 0) {
+        if ($Script:FltReadOnly) {
+            foreach ($t in $ansibleTargets) {
+                $r = [BatchResult]::new()
+                $r.TargetName     = $t.Name
+                $r.Action         = $Action
+                $r.PackageSpec    = $PackageSpec
+                $r.PackageManager = 'ansible'
+                $r.Status         = "[read-only] would run ansible: $Action $PackageSpec"
+                $r.DurationSec    = 0
+                $r.TimedOut       = $false
+                $r.Note           = ''
+                $allResults.Add($r)
+            }
+        } else {
+            foreach ($t in $ansibleTargets) {
+                Update-FltBatchRow $t.Name 'Running (Ansible)' 0 ''
+            }
+            $ansibleResults = Invoke-FltAnsibleBatch `
+                -Targets        $ansibleTargets `
+                -PlaybookBuilder { _Get-PackagePlaybook -Action $Action -PackageName $PackageSpec } `
+                -Action         $Action `
+                -PackageSpec    $PackageSpec `
+                -OnProgress     $OnProgress `
+                -ReadOnly       $false
+            foreach ($r in $ansibleResults) { $allResults.Add($r) }
+        }
+    }
 
     # ── tcpkg SSH bucket ──────────────────────────────────────────────────────
     if ($tcpkgSshTargets.Count -gt 0 -and -not $Script:FltReadOnly) {

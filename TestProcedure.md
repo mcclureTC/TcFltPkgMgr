@@ -406,6 +406,29 @@ Tests `Invoke-FltAnsibleBatch` and `_Parse-AnsibleOutput` in `execution/AnsibleE
 
 ---
 
+### Suite 16 — Fleet executor routing
+
+**Infrastructure required:** None (fully offline — read-only mode)
+**Per target:** No
+**Check count:** 10 (16a–16j)
+
+Tests the four-bucket routing logic in `Invoke-FleetAction` (`execution/FleetExecutor.ps1`). Sets `$Script:FltReadOnly = $true` before each call so no SSH, Ansible, or tcpkg processes are started. Inspects `BatchResult.Status` and `BatchResult.PackageManager` to verify each target was routed to the correct bucket.
+
+| # | Test name | What is tested | How verified |
+|---|-----------|----------------|--------------|
+| 16a | Linux physical → Ansible bucket | `OS='linux'`, `TargetType='physical'` routes to Ansible | `Status` matches `ansible` |
+| 16b | Linux VM → Ansible bucket | `OS='linux'`, `TargetType='vm'` routes to Ansible | `Status` matches `ansible` |
+| 16c | Linux container → Unsupported | `OS='linux'`, `TargetType='container'` lands in unrouted catch | `Status='Unsupported'`, not `ansible` |
+| 16d | Windows not Ansible | `OS='windows'` target does not route to Ansible bucket | `Status` does not match `ansible` |
+| 16e | Windows tcpkg → tcpkg SSH | `PackageManager='tcpkg'`, `InternetAccess=$true` | `Status` matches `tcpkg` |
+| 16f | Windows winget → WinGet SSH | `PackageManager='winget'`, `InternetAccess=$true` | `Status` matches `winget` |
+| 16g | Windows IA=False → push | `InternetAccess=$false` routes to push bucket | `Status` matches `push` |
+| 16h | Mixed fleet routed correctly | Linux and Windows targets in one call each reach their correct bucket | `lin-1` status matches `ansible`, `win-1` matches `tcpkg` |
+| 16i | Ansible result PackageManager='ansible' | `PackageManager` field is set correctly for Ansible bucket | `PackageManager -eq 'ansible'` |
+| 16j | No silent drops | All 5 targets (2 Linux, 2 Windows SSH, 1 push) return a result | `results.Count -eq 5` |
+
+---
+
 ## Adding New Tests
 
 When implementing a new phase, add tests in the appropriate location:
