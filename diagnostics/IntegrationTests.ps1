@@ -957,6 +957,15 @@ function Get-IT_Suites {
             NeedsSSH    = $false
             PerTarget   = $false
             Function    = 'Invoke-IT_DockerOperator'
+        },
+        [pscustomobject]@{
+            Id          = 13
+            Name        = 'Ansible inventory builder'
+            Description = 'New-FltAnsibleInventory: INI generation, groups, auth vars, cleanup'
+            NeedsTarget = $false
+            NeedsSSH    = $false
+            PerTarget   = $false   # fully offline — synthetic targets only
+            Function    = 'Invoke-IT_AnsibleInventory'
         }
     )
 }
@@ -1601,6 +1610,226 @@ function Invoke-IT_DockerOperator {
             'not-installed' { _IT_Warn $r 'Docker not installed' 'Install Docker Desktop from https://www.docker.com/products/docker-desktop/' }
         }
     } catch { _IT_Fail $r 'Docker daemon status' $_.Exception.Message }
+
+    return $r
+}
+
+# ── Suite 13 — Ansible inventory builder ──────────────────────────────────────
+
+# Tests New-FltAnsibleInventory and Remove-FltAnsibleInventory.
+# Fully offline — no Ansible installation required.
+# Uses synthetic FleetTarget objects and a temp path; the live ansible/
+# directory is never touched.
+function Invoke-IT_AnsibleInventory {
+    $r       = _IT_NewResult
+    $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) "TcFlt_IT13_$(Get-Random)"
+    $inv     = Join-Path $tempDir 'hosts.ini'
+
+    _IT_Section 'Ansible inventory builder'
+
+    # Helper — build a minimal synthetic FleetTarget
+    function _MkT {
+        param([string]$Name, [string]$Address, [int]$Port=22,
+              [string]$OS='linux', [string]$TargetType='physical',
+              [string]$DockerHost='', [string]$ContainerName='')
+        $t = [FleetTarget]::new($Name, $Address, $Port, 'admin', $false)
+        $t.OS            = $OS
+        $t.TargetType    = $TargetType
+        $t.DockerHost    = $DockerHost
+        $t.ContainerName = $ContainerName
+        $t
+    }
+
+    # ------------------------------------------------------------------
+    # 13a — No Linux targets → Ok=$false, TargetCount=0, file not written
+    # ------------------------------------------------------------------
+    try {
+        $winOnly = @(_MkT 'DCC-1' '192.168.8.10' 22 'windows' 'physical')
+        $res = New-FltAnsibleInventory -Targets $winOnly -Path $inv
+        if ($res.Ok -eq $false -and $res.TargetCount -eq 0 -and -not (Test-Path $inv)) {
+            _IT_Pass $r '13a  No Linux targets: Ok=$false, TargetCount=0, no file written'
+        } else {
+            _IT_Fail $r '13a  No Linux targets: Ok=$false, TargetCount=0, no file written' `
+                "Ok=$($res.Ok) Count=$($res.TargetCount) FileExists=$(Test-Path $inv)"
+        }
+    } catch { _IT_Fail $r '13a  No Linux targets guard' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 13b — Single physical Linux target → file created, Ok=$true
+    # ------------------------------------------------------------------
+    try {
+        $null = New-Item -ItemType Directory -Path $tempDir -Force
+        $targets = @(_MkT 'DCC-Linux-1' '192.168.8.110')
+        $res = New-FltAnsibleInventory -Targets $targets -Path $inv
+        if ($res.Ok -and (Test-Path $inv)) {
+            _IT_Pass $r '13b  Single physical target: Ok=$true and file exists'
+        } else {
+            _IT_Fail $r '13b  Single physical target: Ok=$true and file exists' `
+                "Ok=$($res.Ok) FileExists=$(Test-Path $inv) Msg=$($res.Message)"
+        }
+    } catch { _IT_Fail $r '13b  Single physical target written' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 13c — ansible_host and ansible_port in file
+    # ------------------------------------------------------------------
+    try {
+        $content = if (Test-Path $inv) { Get-Content $inv -Raw } else { '' }
+        if ($content -match 'ansible_host=192\.168\.8\.110' -and $content -match 'ansible_port=22') {
+            _IT_Pass $r '13c  ansible_host and ansible_port present in inventory'
+        } else {
+            _IT_Fail $r '13c  ansible_host and ansible_port present in inventory' `
+                "host=$(($content -match 'ansible_host') ) port=$(($content -match 'ansible_port') )"
+        }
+    } catch { _IT_Fail $r '13c  ansible_host / ansible_port' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 13d — Target name is the INI hostname key
+    # ------------------------------------------------------------------
+    try {
+        $content = if (Test-Path $inv) { Get-Content $inv -Raw } else { '' }
+        if ($content -match 'DCC-Linux-1') {
+            _IT_Pass $r '13d  Target name appears as INI hostname key'
+        } else {
+            _IT_Fail $r '13d  Target name appears as INI hostname key' 'DCC-Linux-1 not found in inventory'
+        }
+    } catch { _IT_Fail $r '13d  Target name as hostname key' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 13e — TargetCount counts only Linux targets (Windows excluded)
+    # ------------------------------------------------------------------
+    try {
+        $mixed = @(
+            (_MkT 'Lin-1' '10.0.0.1')
+            (_MkT 'Lin-2' '10.0.0.2' 22 'linux' 'vm')
+            (_MkT 'Win-1' '10.0.0.3' 22 'windows' 'physical')
+        )
+        $res = New-FltAnsibleInventory -Targets $mixed -Path $inv
+        if ($res.TargetCount -eq 2) {
+            _IT_Pass $r '13e  TargetCount=2 (Linux only, Windows excluded)'
+        } else {
+            _IT_Fail $r '13e  TargetCount=2 (Linux only, Windows excluded)' `
+                "Got TargetCount=$($res.TargetCount)"
+        }
+    } catch { _IT_Fail $r '13e  TargetCount Linux-only' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 13f — VM target appears under [vm] group header
+    # ------------------------------------------------------------------
+    try {
+        $content = if (Test-Path $inv) { Get-Content $inv -Raw } else { '' }
+        if ($content -match '\[vm\]' -and $content -match 'Lin-2') {
+            _IT_Pass $r '13f  VM target in [vm] group'
+        } else {
+            _IT_Fail $r '13f  VM target in [vm] group' `
+                "[vm]=$($content -match '\[vm\]') Lin-2=$($content -match 'Lin-2')"
+        }
+    } catch { _IT_Fail $r '13f  VM group' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 13g — [linux:children] meta-group present when multiple groups exist
+    # ------------------------------------------------------------------
+    try {
+        $content = if (Test-Path $inv) { Get-Content $inv -Raw } else { '' }
+        if ($content -match '\[linux:children\]') {
+            _IT_Pass $r '13g  [linux:children] meta-group present'
+        } else {
+            _IT_Fail $r '13g  [linux:children] meta-group present' '[linux:children] not found'
+        }
+    } catch { _IT_Fail $r '13g  linux:children' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 13h — Container target gets ansible_connection + ansible_docker_host
+    # ------------------------------------------------------------------
+    try {
+        $withContainer = @(
+            (_MkT 'dcc4'  '192.168.8.50')
+            (_MkT 'web-1' '192.168.8.50' 22 'linux' 'container' 'dcc4' 'web-1')
+        )
+        $res = New-FltAnsibleInventory -Targets $withContainer -Path $inv
+        $content = if (Test-Path $inv) { Get-Content $inv -Raw } else { '' }
+        $hasConn   = $content -match 'ansible_connection=community\.docker\.docker_api'
+        $hasDocker = $content -match 'ansible_docker_host=tcp://'
+        if ($hasConn -and $hasDocker) {
+            _IT_Pass $r '13h  Container: ansible_connection and ansible_docker_host present'
+        } else {
+            _IT_Fail $r '13h  Container: ansible_connection and ansible_docker_host present' `
+                "connection=$hasConn dockerHost=$hasDocker"
+        }
+    } catch { _IT_Fail $r '13h  Container vars' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 13i — Docker host address resolved from target list
+    # ------------------------------------------------------------------
+    try {
+        $content = if (Test-Path $inv) { Get-Content $inv -Raw } else { '' }
+        # The Docker host dcc4 has address 192.168.8.50 — should appear in docker_host URL
+        if ($content -match 'ansible_docker_host=tcp://192\.168\.8\.50:') {
+            _IT_Pass $r '13i  Docker host address resolved from fleet target list'
+        } else {
+            _IT_Fail $r '13i  Docker host address resolved from fleet target list' `
+                'Expected tcp://192.168.8.50: not found in ansible_docker_host'
+        }
+    } catch { _IT_Fail $r '13i  Docker host address resolution' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 13j — Remove-FltAnsibleInventory deletes the file
+    # ------------------------------------------------------------------
+    try {
+        # Ensure file exists first (may have been written by 13h)
+        if (-not (Test-Path $inv)) {
+            $null = New-FltAnsibleInventory -Targets @(_MkT 'Lin-X' '1.2.3.4') -Path $inv
+        }
+        Remove-FltAnsibleInventory -Path $inv
+        if (-not (Test-Path $inv)) {
+            _IT_Pass $r '13j  Remove-FltAnsibleInventory: file deleted'
+        } else {
+            _IT_Fail $r '13j  Remove-FltAnsibleInventory: file deleted' 'File still exists after removal'
+        }
+    } catch { _IT_Fail $r '13j  Remove-FltAnsibleInventory' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 13k — Remove-FltAnsibleInventory is a no-op when file absent
+    # ------------------------------------------------------------------
+    try {
+        Remove-FltAnsibleInventory -Path $inv   # file was removed in 13j
+        _IT_Pass $r '13k  Remove-FltAnsibleInventory: no-op when file absent'
+    } catch { _IT_Fail $r '13k  Remove-FltAnsibleInventory no-op' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 13l — Parent directory auto-created for deep paths
+    # ------------------------------------------------------------------
+    try {
+        $deepPath = Join-Path $tempDir 'sub' 'deep' 'hosts.ini'
+        $res = New-FltAnsibleInventory -Targets @(_MkT 'Lin-D' '1.2.3.5') -Path $deepPath
+        if ($res.Ok -and (Test-Path $deepPath)) {
+            _IT_Pass $r '13l  Parent directory auto-created for deep path'
+        } else {
+            _IT_Fail $r '13l  Parent directory auto-created for deep path' `
+                "Ok=$($res.Ok) FileExists=$(Test-Path $deepPath) Msg=$($res.Message)"
+        }
+    } catch { _IT_Fail $r '13l  Auto-create parent directory' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 13m — Return object has Ok, Path, TargetCount, Message properties
+    # ------------------------------------------------------------------
+    try {
+        $res   = New-FltAnsibleInventory -Targets @(_MkT 'Lin-S' '5.6.7.8') -Path $inv
+        $props = $res.PSObject.Properties.Name
+        if (($props -contains 'Ok') -and ($props -contains 'Path') -and
+            ($props -contains 'TargetCount') -and ($props -contains 'Message')) {
+            _IT_Pass $r '13m  Return object has Ok, Path, TargetCount, Message'
+        } else {
+            _IT_Fail $r '13m  Return object has Ok, Path, TargetCount, Message' `
+                "Properties found: $($props -join ', ')"
+        }
+    } catch { _IT_Fail $r '13m  Return object shape' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # Cleanup
+    # ------------------------------------------------------------------
+    if (Test-Path $tempDir) {
+        Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
 
     return $r
 }

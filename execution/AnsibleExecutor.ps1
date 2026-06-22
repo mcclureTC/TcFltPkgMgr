@@ -1,0 +1,250 @@
+# =============================================================================
+#  TcFltPkgMgr — Ansible Executor
+#  Inventory builder, playbook builder, and batch executor for Linux targets.
+#
+#  Phase 5.2 — New-FltAnsibleInventory / Remove-FltAnsibleInventory
+#  Phase 5.3 — Playbook builders (stubs — implemented in 5.3)
+#  Phase 5.4 — Invoke-FltAnsibleBatch (stub — implemented in 5.4)
+#  Phase 5.6 — Vault helpers (stubs — implemented in 5.6)
+# =============================================================================
+
+Set-StrictMode -Off
+
+# ---------------------------------------------------------------------------
+# Private helper: resolve the default inventory path at call time.
+# Cannot be set at module scope — $Script:FltConfigDir is assigned by
+# TcFltPkgMgr.ps1 after all modules are dot-sourced.
+# ---------------------------------------------------------------------------
+
+function _Get-FltAnsibleInventoryPath {
+    $root = Split-Path $Script:FltConfigDir -Parent
+    return Join-Path $root 'ansible' 'inventory' 'hosts.ini'
+}
+
+# ---------------------------------------------------------------------------
+# Private helper: build the ansible_* SSH variable string for one target
+# ---------------------------------------------------------------------------
+
+function _Get-AnsibleSshVars {
+    param([FleetTarget] $Target)
+
+    $port = if ($Target.Port -gt 0) { $Target.Port } else { 22 }
+
+    # User: target's own User field → ssh.defaultUser setting → 'ansible'
+    $user = $Target.User
+    if ([string]::IsNullOrEmpty($user)) {
+        $user = Get-FltCfgValue 'ssh' 'defaultUser' ''
+    }
+    if ([string]::IsNullOrEmpty($user)) { $user = 'ansible' }
+
+    $vars = "ansible_host=$($Target.Address) ansible_user=$user ansible_port=$port"
+
+    # Auth: SSH key file only — passwords are never written to inventory.
+    # If no key is configured, Ansible uses its own key discovery at run time.
+    $keyPath = Get-FltCfgValue 'ssh' 'privateKeyPath' ''
+    if (-not [string]::IsNullOrEmpty($keyPath) -and (Test-Path $keyPath)) {
+        # Normalise to forward-slash for POSIX Ansible (native / WSL / Docker)
+        $posixKey = $keyPath -replace '\\', '/'
+        $vars += " ansible_ssh_private_key_file=$posixKey"
+    }
+
+    $vars
+}
+
+# ---------------------------------------------------------------------------
+# Phase 5.2 — Inventory builder
+# ---------------------------------------------------------------------------
+
+<#
+.SYNOPSIS
+    Generates an Ansible INI-format inventory file from FleetTarget objects.
+
+.DESCRIPTION
+    Filters to Linux OS targets only.  Groups by TargetType:
+      [physical]       — TargetType = 'physical'
+      [vm]             — TargetType = 'vm'
+      [containers]     — TargetType = 'container'
+      [linux:children] — meta-group written when more than one group exists
+
+    Container targets include community.docker.docker_api connection vars.
+    The Docker host address is resolved from the target list; the daemon port
+    comes from docker.daemonPort in settings (default 2375).
+
+    File is written to ansible/inventory/hosts.ini by default (gitignored).
+    The parent directory is created automatically when missing.
+
+.PARAMETER Targets
+    Array of FleetTarget objects.  Non-Linux targets are silently skipped.
+
+.PARAMETER Path
+    Override the output path.  Used by tests; production callers use default.
+
+.OUTPUTS
+    [pscustomobject] @{ Ok; Path; TargetCount; Message }
+#>
+function New-FltAnsibleInventory {
+    param(
+        [Parameter(Mandatory)] [FleetTarget[]] $Targets,
+        [string] $Path = ''
+    )
+
+    if ([string]::IsNullOrEmpty($Path)) { $Path = _Get-FltAnsibleInventoryPath }
+
+    # Filter to Linux only
+    $linuxTargets = @($Targets | Where-Object { $_.OS -eq 'linux' })
+
+    if ($linuxTargets.Count -eq 0) {
+        return [pscustomobject]@{
+            Ok          = $false
+            Path        = $Path
+            TargetCount = 0
+            Message     = 'No Linux targets in fleet — inventory not written.'
+        }
+    }
+
+    # Ensure parent directory exists
+    $dir = Split-Path $Path -Parent
+    if (-not (Test-Path $dir)) {
+        try {
+            $null = New-Item -ItemType Directory -Path $dir -Force -ErrorAction Stop
+        } catch {
+            return [pscustomobject]@{
+                Ok          = $false
+                Path        = $Path
+                TargetCount = 0
+                Message     = "Cannot create inventory directory '$dir': $_"
+            }
+        }
+    }
+
+    # Group by TargetType
+    $physical   = @($linuxTargets | Where-Object { $_.TargetType -eq 'physical' })
+    $vms        = @($linuxTargets | Where-Object { $_.TargetType -eq 'vm' })
+    $containers = @($linuxTargets | Where-Object { $_.TargetType -eq 'container' })
+
+    # Build INI lines
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("# Ansible inventory — generated by TcFltPkgMgr")
+    $lines.Add("# $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')  Do not edit — regenerated on each Ansible run.")
+    $lines.Add('')
+
+    if ($physical.Count -gt 0) {
+        $lines.Add('[physical]')
+        foreach ($t in $physical) {
+            $lines.Add("$($t.Name) $(_Get-AnsibleSshVars $t)")
+        }
+        $lines.Add('')
+    }
+
+    if ($vms.Count -gt 0) {
+        $lines.Add('[vm]')
+        foreach ($t in $vms) {
+            $lines.Add("$($t.Name) $(_Get-AnsibleSshVars $t)")
+        }
+        $lines.Add('')
+    }
+
+    if ($containers.Count -gt 0) {
+        $lines.Add('[containers]')
+        $daemonPort = Get-FltCfgValue 'docker' 'daemonPort' 2375
+        if (-not $daemonPort -or $daemonPort -eq 0) { $daemonPort = 2375 }
+
+        foreach ($t in $containers) {
+            # Resolve Docker host address from the full target list
+            $hostTarget = $Targets | Where-Object { $_.Name -eq $t.DockerHost } |
+                          Select-Object -First 1
+            $dockerAddr = if ($null -ne $hostTarget -and $hostTarget.Address) {
+                $hostTarget.Address
+            } else {
+                $t.DockerHost   # fall back to the name itself (DNS/hosts resolution)
+            }
+            $sshVars = _Get-AnsibleSshVars $t
+            # All vars on one line — Ansible INI does not use line continuation
+            $dockerVars = "ansible_connection=community.docker.docker_api" +
+                          " ansible_docker_host=tcp://${dockerAddr}:${daemonPort}"
+            $lines.Add("$($t.Name) $sshVars $dockerVars")
+        }
+        $lines.Add('')
+    }
+
+    # [linux:children] meta-group — only when more than one group was written
+    $groups = @()
+    if ($physical.Count   -gt 0) { $groups += 'physical' }
+    if ($vms.Count        -gt 0) { $groups += 'vm' }
+    if ($containers.Count -gt 0) { $groups += 'containers' }
+
+    if ($groups.Count -gt 1) {
+        $lines.Add('[linux:children]')
+        foreach ($g in $groups) { $lines.Add($g) }
+        $lines.Add('')
+    }
+
+    # Write file (UTF-8, LF line endings — required by Ansible on POSIX hosts)
+    try {
+        $content = $lines -join "`n"
+        [System.IO.File]::WriteAllText($Path, $content, [System.Text.Encoding]::UTF8)
+    } catch {
+        return [pscustomobject]@{
+            Ok          = $false
+            Path        = $Path
+            TargetCount = $linuxTargets.Count
+            Message     = "Failed to write inventory to '$Path': $_"
+        }
+    }
+
+    $noun = if ($linuxTargets.Count -ne 1) { 'targets' } else { 'target' }
+    return [pscustomobject]@{
+        Ok          = $true
+        Path        = $Path
+        TargetCount = $linuxTargets.Count
+        Message     = "Inventory written: $($linuxTargets.Count) Linux $noun."
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Phase 5.2 — Inventory cleanup
+# ---------------------------------------------------------------------------
+
+<#
+.SYNOPSIS
+    Removes the generated hosts.ini inventory file.
+
+.DESCRIPTION
+    Called after each Ansible run to keep the gitignored ansible/ tree clean.
+    Silent no-op when the file does not exist.
+#>
+function Remove-FltAnsibleInventory {
+    param([string] $Path = '')
+    if ([string]::IsNullOrEmpty($Path)) { $Path = _Get-FltAnsibleInventoryPath }
+
+    if (Test-Path $Path) {
+        try {
+            Remove-Item $Path -Force -ErrorAction Stop
+        } catch {
+            Write-Verbose "Remove-FltAnsibleInventory: could not remove '$Path': $_"
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Phase 5.3 stubs — playbook builders
+# ---------------------------------------------------------------------------
+
+function _Get-PackagePlaybook  { param($Action, $PackageName) throw 'Not implemented — Phase 5.3' }
+function _Get-UserPlaybook     { param($Action, $UserName)    throw 'Not implemented — Phase 5.3' }
+function _Get-ServicePlaybook  { param($Action, $ServiceName) throw 'Not implemented — Phase 5.3' }
+function _Get-FilePlaybook     { param($Src, $Dest)           throw 'Not implemented — Phase 5.3' }
+function _Get-DockerPlaybook   { param($Action, $Container)   throw 'Not implemented — Phase 5.3' }
+
+# ---------------------------------------------------------------------------
+# Phase 5.4 stub — batch executor
+# ---------------------------------------------------------------------------
+
+function Invoke-FltAnsibleBatch { throw 'Not implemented — Phase 5.4' }
+
+# ---------------------------------------------------------------------------
+# Phase 5.6 stubs — Vault helpers
+# ---------------------------------------------------------------------------
+
+function _Get-VaultPasswordFile { throw 'Not implemented — Phase 5.6' }
+function Invoke-FltVaultSetup   { throw 'Not implemented — Phase 5.6' }

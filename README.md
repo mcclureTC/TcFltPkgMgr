@@ -355,6 +355,42 @@ The container name defaults to `tcflt-ansible` and can be overridden via `ansibl
 
 ---
 
+## Ansible inventory (Phase 5.2)
+
+`New-FltAnsibleInventory` generates an INI-format Ansible inventory from the fleet target list. It is called automatically before each Ansible run and cleaned up afterward via `Remove-FltAnsibleInventory`.
+
+The file is written to `ansible/inventory/hosts.ini` (gitignored) and recreated fresh on every run.
+
+### Inventory groups
+
+| Group | Targets included |
+|-------|-----------------|
+| `[physical]` | `OS='linux'`, `TargetType='physical'` |
+| `[vm]` | `OS='linux'`, `TargetType='vm'` |
+| `[containers]` | `OS='linux'`, `TargetType='container'` |
+| `[linux:children]` | Meta-group combining all of the above (written when more than one group exists) |
+
+Non-Linux targets are silently skipped. If no Linux targets exist, the file is not written.
+
+### Authentication
+
+Inventory entries use SSH key authentication only — **passwords are never written to inventory files**.
+
+- If `ssh.privateKeyPath` is set in settings and the file exists, `ansible_ssh_private_key_file` is added (path normalised to forward slashes for POSIX Ansible).
+- Otherwise no auth var is written; Ansible uses its own key discovery at run time.
+
+### Container targets
+
+Linux container targets include `community.docker.docker_api` connection vars so the Ansible Docker connection plugin can reach them:
+
+```ini
+web-1 ansible_host=192.168.8.50 ansible_user=admin ansible_port=22 ansible_connection=community.docker.docker_api ansible_docker_host=tcp://192.168.8.50:2375
+```
+
+The Docker host address is resolved from the matching `DockerHost` target in the fleet. The daemon port defaults to 2375 and can be overridden with `docker.daemonPort` in `settings.local.json`.
+
+---
+
 ## Preparing targets for WinGet
 
 Use **Setup → select target → 4. Prepare target** to install WinGet on a remote Windows machine via SSH. The installer:

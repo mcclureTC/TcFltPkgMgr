@@ -324,6 +324,34 @@ Tests `DockerRepository.ps1` functions for Docker Desktop management on the oper
 
 ---
 
+### Suite 13 — Ansible inventory builder
+
+**Infrastructure required:** None (fully offline — no Ansible installation needed)
+**Per target:** No (runs once using synthetic FleetTarget objects)
+**Check count:** 13 (13a–13m)
+
+Tests `New-FltAnsibleInventory` and `Remove-FltAnsibleInventory` in
+`execution/AnsibleExecutor.ps1`. All checks use a temp path and synthetic
+`FleetTarget` objects — the live `ansible/` directory is never touched.
+
+| # | Test name | What is tested | How verified |
+|---|-----------|----------------|--------------|
+| 13a | No Linux targets: Ok=$false, no file | Returns `Ok=$false`, `TargetCount=0`, file not created when fleet has no Linux targets | Passes one Windows target, checks all three conditions |
+| 13b | Single physical target: file created | File is written and `Ok=$true` for one Linux physical target | Calls function, checks `Ok` and `Test-Path` on temp inventory |
+| 13c | ansible_host and ansible_port in file | SSH connection vars appear in generated INI | Reads file content, checks regex for `ansible_host=192.168.8.110` and `ansible_port=22` |
+| 13d | Target name is INI hostname key | `FleetTarget.Name` is the host entry key in the INI file | Reads file, checks `DCC-Linux-1` appears |
+| 13e | TargetCount excludes Windows targets | Count reflects Linux targets only from a mixed fleet | Passes 2 Linux + 1 Windows, checks `TargetCount=2` |
+| 13f | VM target in [vm] group | `TargetType='vm'` target appears under `[vm]` header | Reads file, checks `[vm]` header and target name present |
+| 13g | [linux:children] meta-group present | Meta-group written when both physical and vm groups exist | Reads file, checks `[linux:children]` present |
+| 13h | Container: docker_api vars present | Container targets include `ansible_connection` and `ansible_docker_host` | Passes one physical + one container target, checks both vars in file |
+| 13i | Docker host address resolved from fleet | `ansible_docker_host` URL uses the Docker host target's `.Address`, not its name | Checks `tcp://192.168.8.50:` in the docker_host URL |
+| 13j | Remove-FltAnsibleInventory deletes file | Inventory file is removed after call | Calls `Remove-FltAnsibleInventory`, checks `Test-Path` is `$false` |
+| 13k | Remove-FltAnsibleInventory no-op when absent | Calling remove on a non-existent file does not throw | Calls function again on already-removed path, checks no exception |
+| 13l | Parent directory auto-created | Function creates missing parent directories | Passes a deep temp path with no existing parents, checks file created |
+| 13m | Return object shape | Result has `Ok`, `Path`, `TargetCount`, `Message` properties | Checks all four via `PSObject.Properties.Name` |
+
+---
+
 ## Adding New Tests
 
 When implementing a new phase, add tests in the appropriate location:

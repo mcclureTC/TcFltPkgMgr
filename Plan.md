@@ -488,20 +488,38 @@ remote management, and hosting the Ansible operator container.
 - [x] Suite 22 (Docker operator): 5/5 ✅ (4 pass, 1 WARN — Docker Desktop stopped)
 - [x] Suite 21 checks 11f/11g now use `Get-FltDockerStatus` for clearer daemon-vs-container messages
 
-### 5.2 — Ansible inventory builder (`execution/AnsibleExecutor.ps1`) — new file
+### 5.2 — Ansible inventory builder (`execution/AnsibleExecutor.ps1`) — new file ✅
 
-- [ ] `New-FltAnsibleInventory` — writes temp INI inventory from
-      `[FleetTarget[]]`:
-      ```ini
-      [linux]
-      DCC-Linux-1 ansible_host=192.168.8.110 ansible_user=admin ansible_port=22
-
-      [containers]
-      web-1 ansible_host=192.168.8.50 ansible_user=admin ansible_port=22
-            ansible_connection=community.docker.docker_api
-            ansible_docker_host=tcp://192.168.8.50:2375
-      ```
-- [ ] Clean up temp files after each run
+- [x] `New-FltAnsibleInventory` — generates INI inventory from `[FleetTarget[]]`
+      - Filters to `OS -eq 'linux'`; returns `Ok=$false` immediately if no Linux targets
+      - Groups by TargetType: `[physical]`, `[vm]`, `[containers]`
+      - SSH vars per entry: `ansible_host`, `ansible_user` (target User →
+        `ssh.defaultUser` → `'ansible'`), `ansible_port`
+      - Auth: SSH key only — passwords are never written to inventory;
+        `ansible_ssh_private_key_file` added when `ssh.privateKeyPath` exists
+        and points to a real file (path normalised to forward-slashes for POSIX);
+        no auth var written otherwise — Ansible uses its own key discovery
+      - Container entries include `ansible_connection=community.docker.docker_api`
+        and `ansible_docker_host=tcp://<DockerHostAddr>:<docker.daemonPort>`;
+        Docker host address resolved by name lookup in the passed target list
+      - `[linux:children]` meta-group written when more than one type group exists
+      - Parent directory created automatically when missing
+      - Default path: `ansible/inventory/hosts.ini` (gitignored)
+      - Returns `[pscustomobject]@{ Ok; Path; TargetCount; Message }`
+- [x] `Remove-FltAnsibleInventory` — deletes hosts.ini after each run;
+      silent no-op when file absent
+- [x] Phase 5.3–5.6 function stubs present (`throw 'Not implemented — Phase X.X'`)
+- [x] Suite 13 (Ansible inventory builder) added to `IntegrationTests.ps1` —
+      13 checks (13a–13m), fully offline, no Ansible required:
+      13a empty-fleet guard · 13b file created · 13c ansible_host/port ·
+      13d hostname key · 13e TargetCount · 13f vm group · 13g linux:children ·
+      13h container vars · 13i docker host resolution · 13j remove ·
+      13k remove no-op · 13l auto-mkdir · 13m return shape
+- [x] Suite 13 registered in `Get-IT_Suites` and both dispatch arms in `TestRunner.ps1`
+- [x] Security: no hardcoded secrets; passwords never written to inventory;
+      `ansible_ssh_private_key_file` only when key file present; inventory path gitignored
+- [x] `.gitignore`: `ansible/inventory/` already covered — no new entries needed
+- [x] `README.md`: Phase 5.2 section added (see below)
 
 ### 5.3 — Ansible playbook builder (`execution/AnsibleExecutor.ps1`)
 

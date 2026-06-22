@@ -91,6 +91,7 @@ $modules = @(
     'data\AnsibleRepository.ps1',         # Ansible availability checks
     'execution\WinGetExecutor.ps1',       # WinGet parallel SSH batch executor
     'execution\SshExecutor.ps1',
+    'execution\AnsibleExecutor.ps1',
     'execution\FleetExecutor.ps1',
     'ui\Prompts.ps1',
     'ui\DisplayAdapter.ps1',              # stable display interface
