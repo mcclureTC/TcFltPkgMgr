@@ -521,14 +521,30 @@ remote management, and hosting the Ansible operator container.
 - [x] `.gitignore`: `ansible/inventory/` already covered — no new entries needed
 - [x] `README.md`: Phase 5.2 section added (see below)
 
-### 5.3 — Ansible playbook builder (`execution/AnsibleExecutor.ps1`)
+### 5.3 — Ansible playbook builder (`execution/AnsibleExecutor.ps1`) ✅
 
-- [ ] `_Get-PackagePlaybook` — `ansible.builtin.package` (distro-agnostic)
-- [ ] `_Get-UserPlaybook` — `ansible.builtin.user`
-- [ ] `_Get-ServicePlaybook` — `ansible.builtin.systemd`
-- [ ] `_Get-FilePlaybook` — `ansible.builtin.copy`
-- [ ] `_Get-DockerPlaybook` — `community.docker.docker_container` for
-      container lifecycle (pull, start, stop, restart, recreate, remove)
+- [x] `_Write-AnsiblePlaybook` — private helper: creates `ansible/playbooks/` dir if
+      missing, writes timestamped `.yml` file (UTF-8), returns `{ Ok; Path; Message }`
+- [x] `_Get-PackagePlaybook` — `ansible.builtin.package` (distro-agnostic);
+      `install`→`present`, `upgrade`→`latest`, `remove`→`absent`
+- [x] `_Get-ServicePlaybook` — `ansible.builtin.systemd`;
+      `start`→`started`, `stop`→`stopped`, `restart`→`restarted`,
+      `enable`→`enabled:true` (no state), `disable`→`enabled:false` (no state)
+- [x] `_Get-UserPlaybook` — `ansible.builtin.user`;
+      `create`→`present` with optional groups/shell; `remove`→`absent` + `remove:true` + `force:true`
+- [x] `_Get-FilePlaybook` — `ansible.builtin.copy` with owner, group, mode (default `0644`)
+- [x] `_Get-DockerPlaybook` — `community.docker.docker_container` for
+      container lifecycle (pull, start, stop, restart, recreate, remove);
+      `recreate` adds `recreate:true`+`pull:true`; `restart` adds `force_kill:true`;
+      default host group is `containers`
+- [x] All playbooks: `become:true`, `gather_facts:false`, FQCN module names
+- [x] Suite 14 (Ansible playbook builder) — 15 checks (14a–14o), fully offline;
+      local `_Get-FltAnsiblePlaybookDir` override redirects writes to temp dir:
+      14a–14d package builder · 14e–14g service builder · 14h–14j user builder ·
+      14k file builder · 14l–14n container builder · 14o return shape
+- [x] Security: no secrets in generated YAML; `ansible/playbooks/` gitignored
+- [x] `.gitignore`: `ansible/playbooks/` already covered — no new entries needed
+- [x] `README.md`: Phase 5.3 section added
 
 ### 5.4 — Ansible executor (`execution/AnsibleExecutor.ps1`)
 

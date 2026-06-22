@@ -966,6 +966,15 @@ function Get-IT_Suites {
             NeedsSSH    = $false
             PerTarget   = $false   # fully offline — synthetic targets only
             Function    = 'Invoke-IT_AnsibleInventory'
+        },
+        [pscustomobject]@{
+            Id          = 14
+            Name        = 'Ansible playbook builder'
+            Description = '_Get-*Playbook: YAML generation, file write, cleanup for all five builders'
+            NeedsTarget = $false
+            NeedsSSH    = $false
+            PerTarget   = $false   # fully offline — no Ansible required
+            Function    = 'Invoke-IT_AnsiblePlaybook'
         }
     )
 }
@@ -1823,6 +1832,256 @@ function Invoke-IT_AnsibleInventory {
                 "Properties found: $($props -join ', ')"
         }
     } catch { _IT_Fail $r '13m  Return object shape' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # Cleanup
+    # ------------------------------------------------------------------
+    if (Test-Path $tempDir) {
+        Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    return $r
+}
+# ── Suite 14 — Ansible playbook builder ───────────────────────────────────────
+
+# Tests all five _Get-*Playbook functions in execution/AnsibleExecutor.ps1.
+# Fully offline — no Ansible installation required.
+# Each test writes a real YAML file to a temp directory and inspects it,
+# then cleans up the temp tree.
+function Invoke-IT_AnsiblePlaybook {
+    $r       = _IT_NewResult
+    $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) "TcFlt_IT14_$(Get-Random)"
+    $null    = New-Item -ItemType Directory -Path $tempDir -Force
+
+    _IT_Section 'Ansible playbook builder'
+
+    # ------------------------------------------------------------------
+    # Helper: call a _Get-*Playbook function with the playbook dir
+    # redirected to $tempDir so we never touch the live ansible/ tree.
+    # We monkey-patch _Get-FltAnsiblePlaybookDir for the duration of
+    # each test by temporarily redefining it in the local scope.
+    # PowerShell resolves functions at call time, so a local override
+    # takes precedence over the module-scope one.
+    # ------------------------------------------------------------------
+
+    # Override the playbook dir helper to point at our temp directory
+    function _Get-FltAnsiblePlaybookDir { return $tempDir }
+
+    # Helper: find the most-recently-written .yml in $tempDir
+    function _LatestYml {
+        Get-ChildItem $tempDir -Filter '*.yml' -File |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+    }
+
+    # Helper: get content of most-recently-written .yml
+    function _YmlContent {
+        $f = _LatestYml
+        if ($f) { Get-Content $f -Raw } else { '' }
+    }
+
+    # ------------------------------------------------------------------
+    # 14a — _Get-PackagePlaybook (install): file written, Ok=$true
+    # ------------------------------------------------------------------
+    try {
+        $res = _Get-PackagePlaybook -Action 'install' -PackageName 'curl'
+        if ($res.Ok -and (Test-Path $res.Path)) {
+            _IT_Pass $r '14a  _Get-PackagePlaybook install: Ok=$true and file exists'
+        } else {
+            _IT_Fail $r '14a  _Get-PackagePlaybook install: Ok=$true and file exists' `
+                "Ok=$($res.Ok) Path=$($res.Path) Msg=$($res.Message)"
+        }
+    } catch { _IT_Fail $r '14a  _Get-PackagePlaybook install' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 14b — Package playbook: correct module and state=present
+    # ------------------------------------------------------------------
+    try {
+        $c = _YmlContent
+        if ($c -match 'ansible\.builtin\.package' -and $c -match 'state:\s*present') {
+            _IT_Pass $r '14b  Package install: ansible.builtin.package with state=present'
+        } else {
+            _IT_Fail $r '14b  Package install: ansible.builtin.package with state=present' `
+                "module=$($c -match 'ansible.builtin.package') state=$($c -match 'state: present')"
+        }
+    } catch { _IT_Fail $r '14b  Package playbook content' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 14c — _Get-PackagePlaybook (upgrade): state=latest
+    # ------------------------------------------------------------------
+    try {
+        $res = _Get-PackagePlaybook -Action 'upgrade' -PackageName 'curl'
+        $c   = if (Test-Path $res.Path) { Get-Content $res.Path -Raw } else { '' }
+        if ($res.Ok -and $c -match 'state:\s*latest') {
+            _IT_Pass $r '14c  Package upgrade: state=latest'
+        } else {
+            _IT_Fail $r '14c  Package upgrade: state=latest' "Ok=$($res.Ok) state-latest=$($c -match 'state: latest')"
+        }
+    } catch { _IT_Fail $r '14c  Package upgrade' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 14d — _Get-PackagePlaybook (remove): state=absent
+    # ------------------------------------------------------------------
+    try {
+        $res = _Get-PackagePlaybook -Action 'remove' -PackageName 'curl'
+        $c   = if (Test-Path $res.Path) { Get-Content $res.Path -Raw } else { '' }
+        if ($res.Ok -and $c -match 'state:\s*absent') {
+            _IT_Pass $r '14d  Package remove: state=absent'
+        } else {
+            _IT_Fail $r '14d  Package remove: state=absent' "Ok=$($res.Ok) state-absent=$($c -match 'state: absent')"
+        }
+    } catch { _IT_Fail $r '14d  Package remove' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 14e — _Get-ServicePlaybook (start): correct module and state=started
+    # ------------------------------------------------------------------
+    try {
+        $res = _Get-ServicePlaybook -Action 'start' -ServiceName 'nginx'
+        $c   = if (Test-Path $res.Path) { Get-Content $res.Path -Raw } else { '' }
+        if ($res.Ok -and $c -match 'ansible\.builtin\.systemd' -and $c -match 'state:\s*started') {
+            _IT_Pass $r '14e  Service start: ansible.builtin.systemd with state=started'
+        } else {
+            _IT_Fail $r '14e  Service start: ansible.builtin.systemd with state=started' `
+                "Ok=$($res.Ok) module=$($c -match 'ansible.builtin.systemd') state=$($c -match 'state: started')"
+        }
+    } catch { _IT_Fail $r '14e  Service start' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 14f — _Get-ServicePlaybook (restart): state=restarted
+    # ------------------------------------------------------------------
+    try {
+        $res = _Get-ServicePlaybook -Action 'restart' -ServiceName 'nginx'
+        $c   = if (Test-Path $res.Path) { Get-Content $res.Path -Raw } else { '' }
+        if ($res.Ok -and $c -match 'state:\s*restarted') {
+            _IT_Pass $r '14f  Service restart: state=restarted'
+        } else {
+            _IT_Fail $r '14f  Service restart: state=restarted' "Ok=$($res.Ok) restarted=$($c -match 'state: restarted')"
+        }
+    } catch { _IT_Fail $r '14f  Service restart' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 14g — _Get-ServicePlaybook (enable): enabled=true, no state key
+    # ------------------------------------------------------------------
+    try {
+        $res = _Get-ServicePlaybook -Action 'enable' -ServiceName 'nginx'
+        $c   = if (Test-Path $res.Path) { Get-Content $res.Path -Raw } else { '' }
+        if ($res.Ok -and $c -match 'enabled:\s*true' -and $c -notmatch 'state:') {
+            _IT_Pass $r '14g  Service enable: enabled=true, no state key'
+        } else {
+            _IT_Fail $r '14g  Service enable: enabled=true, no state key' `
+                "Ok=$($res.Ok) enabled=$($c -match 'enabled: true') no-state=$($c -notmatch 'state:')"
+        }
+    } catch { _IT_Fail $r '14g  Service enable' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 14h — _Get-UserPlaybook (create): correct module and state=present
+    # ------------------------------------------------------------------
+    try {
+        $res = _Get-UserPlaybook -Action 'create' -UserName 'deploy' -Groups @('docker','sudo')
+        $c   = if (Test-Path $res.Path) { Get-Content $res.Path -Raw } else { '' }
+        if ($res.Ok -and $c -match 'ansible\.builtin\.user' -and $c -match 'state:\s*present') {
+            _IT_Pass $r '14h  User create: ansible.builtin.user with state=present'
+        } else {
+            _IT_Fail $r '14h  User create: ansible.builtin.user with state=present' `
+                "Ok=$($res.Ok) module=$($c -match 'ansible.builtin.user') state=$($c -match 'state: present')"
+        }
+    } catch { _IT_Fail $r '14h  User create' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 14i — User create: groups and shell appear in playbook
+    # ------------------------------------------------------------------
+    try {
+        $c = if (Test-Path (_LatestYml)) { Get-Content (_LatestYml) -Raw } else { '' }
+        if ($c -match 'docker' -and $c -match 'sudo' -and $c -match '/bin/bash') {
+            _IT_Pass $r '14i  User create: groups and shell present in playbook'
+        } else {
+            _IT_Fail $r '14i  User create: groups and shell present in playbook' `
+                "docker=$($c -match 'docker') sudo=$($c -match 'sudo') shell=$($c -match '/bin/bash')"
+        }
+    } catch { _IT_Fail $r '14i  User groups and shell' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 14j — _Get-UserPlaybook (remove): state=absent, remove=true
+    # ------------------------------------------------------------------
+    try {
+        $res = _Get-UserPlaybook -Action 'remove' -UserName 'deploy'
+        $c   = if (Test-Path $res.Path) { Get-Content $res.Path -Raw } else { '' }
+        if ($res.Ok -and $c -match 'state:\s*absent' -and $c -match 'remove:\s*true') {
+            _IT_Pass $r '14j  User remove: state=absent and remove=true'
+        } else {
+            _IT_Fail $r '14j  User remove: state=absent and remove=true' `
+                "Ok=$($res.Ok) absent=$($c -match 'state: absent') remove=$($c -match 'remove: true')"
+        }
+    } catch { _IT_Fail $r '14j  User remove' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 14k — _Get-FilePlaybook: correct module, src, dest, mode
+    # ------------------------------------------------------------------
+    try {
+        $res = _Get-FilePlaybook -Src '/tmp/app.conf' -Dest '/etc/app/app.conf' -Mode '0640'
+        $c   = if (Test-Path $res.Path) { Get-Content $res.Path -Raw } else { '' }
+        if ($res.Ok -and $c -match 'ansible\.builtin\.copy' -and
+            $c -match 'src:.*app\.conf' -and $c -match "mode:.*0640") {
+            _IT_Pass $r '14k  File copy: ansible.builtin.copy with correct src, dest, mode'
+        } else {
+            _IT_Fail $r '14k  File copy: ansible.builtin.copy with correct src, dest, mode' `
+                "Ok=$($res.Ok) module=$($c -match 'ansible.builtin.copy') src=$($c -match 'app.conf') mode=$($c -match '0640')"
+        }
+    } catch { _IT_Fail $r '14k  File copy' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 14l — _Get-DockerPlaybook (start): correct module and state=started
+    # ------------------------------------------------------------------
+    try {
+        $res = _Get-DockerPlaybook -Action 'start' -ContainerName 'web-1' -Image 'nginx:latest'
+        $c   = if (Test-Path $res.Path) { Get-Content $res.Path -Raw } else { '' }
+        if ($res.Ok -and $c -match 'community\.docker\.docker_container' -and $c -match 'state:\s*started') {
+            _IT_Pass $r '14l  Container start: community.docker.docker_container with state=started'
+        } else {
+            _IT_Fail $r '14l  Container start: community.docker.docker_container with state=started' `
+                "Ok=$($res.Ok) module=$($c -match 'community.docker.docker_container') state=$($c -match 'state: started')"
+        }
+    } catch { _IT_Fail $r '14l  Container start' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 14m — _Get-DockerPlaybook (remove): state=absent
+    # ------------------------------------------------------------------
+    try {
+        $res = _Get-DockerPlaybook -Action 'remove' -ContainerName 'web-1'
+        $c   = if (Test-Path $res.Path) { Get-Content $res.Path -Raw } else { '' }
+        if ($res.Ok -and $c -match 'state:\s*absent') {
+            _IT_Pass $r '14m  Container remove: state=absent'
+        } else {
+            _IT_Fail $r '14m  Container remove: state=absent' "Ok=$($res.Ok) absent=$($c -match 'state: absent')"
+        }
+    } catch { _IT_Fail $r '14m  Container remove' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 14n — _Get-DockerPlaybook (recreate): recreate=true and pull=true
+    # ------------------------------------------------------------------
+    try {
+        $res = _Get-DockerPlaybook -Action 'recreate' -ContainerName 'web-1' -Image 'nginx:latest'
+        $c   = if (Test-Path $res.Path) { Get-Content $res.Path -Raw } else { '' }
+        if ($res.Ok -and $c -match 'recreate:\s*true' -and $c -match 'pull:\s*true') {
+            _IT_Pass $r '14n  Container recreate: recreate=true and pull=true'
+        } else {
+            _IT_Fail $r '14n  Container recreate: recreate=true and pull=true' `
+                "Ok=$($res.Ok) recreate=$($c -match 'recreate: true') pull=$($c -match 'pull: true')"
+        }
+    } catch { _IT_Fail $r '14n  Container recreate' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 14o — Return object has Ok, Path, Message properties
+    # ------------------------------------------------------------------
+    try {
+        $res   = _Get-PackagePlaybook -Action 'install' -PackageName 'git'
+        $props = $res.PSObject.Properties.Name
+        if (($props -contains 'Ok') -and ($props -contains 'Path') -and ($props -contains 'Message')) {
+            _IT_Pass $r '14o  Return object has Ok, Path, Message'
+        } else {
+            _IT_Fail $r '14o  Return object has Ok, Path, Message' "Properties: $($props -join ', ')"
+        }
+    } catch { _IT_Fail $r '14o  Return object shape' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # Cleanup

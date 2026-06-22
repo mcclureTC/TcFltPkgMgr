@@ -352,6 +352,34 @@ Tests `New-FltAnsibleInventory` and `Remove-FltAnsibleInventory` in
 
 ---
 
+### Suite 14 — Ansible playbook builder
+
+**Infrastructure required:** None (fully offline — no Ansible installation needed)
+**Per target:** No (runs once; playbook dir redirected to a temp directory)
+**Check count:** 15 (14a–14o)
+
+Tests all five `_Get-*Playbook` functions and the shared `_Write-AnsiblePlaybook` helper in `execution/AnsibleExecutor.ps1`. Each test writes a real YAML file to a temp directory (via a local `_Get-FltAnsiblePlaybookDir` override) and inspects the content with regex. No Ansible process is invoked.
+
+| # | Test name | What is tested | How verified |
+|---|-----------|----------------|--------------|
+| 14a | Package install: Ok=$true and file exists | `_Get-PackagePlaybook install` writes a file | Checks `Ok=$true` and `Test-Path $res.Path` |
+| 14b | Package install: correct module and state=present | `ansible.builtin.package` with `state: present` | Regex match on written YAML |
+| 14c | Package upgrade: state=latest | `upgrade` action maps to `state: latest` | Regex match on written YAML |
+| 14d | Package remove: state=absent | `remove` action maps to `state: absent` | Regex match on written YAML |
+| 14e | Service start: correct module and state=started | `ansible.builtin.systemd` with `state: started` | Regex match on written YAML |
+| 14f | Service restart: state=restarted | `restart` action maps to `state: restarted` | Regex match on written YAML |
+| 14g | Service enable: enabled=true, no state key | `enable` writes `enabled: true` without a `state:` key | Regex match; also checks `state:` is absent |
+| 14h | User create: correct module and state=present | `ansible.builtin.user` with `state: present` | Regex match on written YAML |
+| 14i | User create: groups and shell present | Supplementary groups and shell path appear in playbook | Regex match for `docker`, `sudo`, `/bin/bash` |
+| 14j | User remove: state=absent and remove=true | `remove` action writes `state: absent` and `remove: true` | Regex match on written YAML |
+| 14k | File copy: correct module, src, dest, mode | `ansible.builtin.copy` with correct src, dest, mode `0640` | Regex match on written YAML |
+| 14l | Container start: correct module and state=started | `community.docker.docker_container` with `state: started` | Regex match on written YAML |
+| 14m | Container remove: state=absent | `remove` action maps to `state: absent` | Regex match on written YAML |
+| 14n | Container recreate: recreate=true and pull=true | `recreate` action writes both `recreate: true` and `pull: true` | Regex match on written YAML |
+| 14o | Return object has Ok, Path, Message | All builders return `{ Ok; Path; Message }` | Checks all three via `PSObject.Properties.Name` |
+
+---
+
 ## Adding New Tests
 
 When implementing a new phase, add tests in the appropriate location:

@@ -3,7 +3,7 @@
 #  Inventory builder, playbook builder, and batch executor for Linux targets.
 #
 #  Phase 5.2 — New-FltAnsibleInventory / Remove-FltAnsibleInventory
-#  Phase 5.3 — Playbook builders (stubs — implemented in 5.3)
+#  Phase 5.3 — Playbook builders (_Get-PackagePlaybook, _Get-ServicePlaybook, etc.)
 #  Phase 5.4 — Invoke-FltAnsibleBatch (stub — implemented in 5.4)
 #  Phase 5.6 — Vault helpers (stubs — implemented in 5.6)
 # =============================================================================
@@ -227,14 +227,333 @@ function Remove-FltAnsibleInventory {
 }
 
 # ---------------------------------------------------------------------------
-# Phase 5.3 stubs — playbook builders
+# Phase 5.3 — Playbook path helper (lazy, mirrors inventory path helper)
 # ---------------------------------------------------------------------------
 
-function _Get-PackagePlaybook  { param($Action, $PackageName) throw 'Not implemented — Phase 5.3' }
-function _Get-UserPlaybook     { param($Action, $UserName)    throw 'Not implemented — Phase 5.3' }
-function _Get-ServicePlaybook  { param($Action, $ServiceName) throw 'Not implemented — Phase 5.3' }
-function _Get-FilePlaybook     { param($Src, $Dest)           throw 'Not implemented — Phase 5.3' }
-function _Get-DockerPlaybook   { param($Action, $Container)   throw 'Not implemented — Phase 5.3' }
+function _Get-FltAnsiblePlaybookDir {
+    $root = Split-Path $Script:FltConfigDir -Parent
+    return Join-Path $root 'ansible' 'playbooks'
+}
+
+# ---------------------------------------------------------------------------
+# Phase 5.3 — Playbook builders
+#
+# Each function returns a [pscustomobject]@{ Ok; Path; Message } after writing
+# a YAML playbook file under ansible/playbooks/ (gitignored).
+# The caller (Invoke-FltAnsibleBatch, Phase 5.4) passes the path to
+# ansible-playbook and removes it afterward.
+#
+# Conventions:
+#   - hosts: linux  (targets the [linux:children] meta-group or explicit group)
+#   - become: true  (sudo escalation — sudo password via Vault if needed)
+#   - gather_facts: false by default to keep runs fast; enabled only when needed
+#   - All modules use their fully-qualified collection name (FQCN)
+# ---------------------------------------------------------------------------
+
+function _Write-AnsiblePlaybook {
+    <#
+    .SYNOPSIS
+        Writes a YAML string to a temp playbook file and returns the path.
+    .PARAMETER Yaml
+        The playbook YAML content (string).
+    .PARAMETER Name
+        Short slug used in the filename, e.g. 'package-install'.
+    .OUTPUTS
+        [pscustomobject] @{ Ok; Path; Message }
+    #>
+    param(
+        [Parameter(Mandatory)] [string] $Yaml,
+        [Parameter(Mandatory)] [string] $Name
+    )
+
+    $dir = _Get-FltAnsiblePlaybookDir
+    if (-not (Test-Path $dir)) {
+        try {
+            $null = New-Item -ItemType Directory -Path $dir -Force -ErrorAction Stop
+        } catch {
+            return [pscustomobject]@{ Ok = $false; Path = ''; Message = "Cannot create playbook dir '$dir': $_" }
+        }
+    }
+
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $path  = Join-Path $dir "$Name-$stamp.yml"
+
+    try {
+        [System.IO.File]::WriteAllText($path, $Yaml, [System.Text.Encoding]::UTF8)
+    } catch {
+        return [pscustomobject]@{ Ok = $false; Path = $path; Message = "Cannot write playbook '$path': $_" }
+    }
+
+    return [pscustomobject]@{ Ok = $true; Path = $path; Message = "Playbook written: $path" }
+}
+
+function _Get-PackagePlaybook {
+    <#
+    .SYNOPSIS
+        Builds a playbook that installs, upgrades, or removes a package.
+    .PARAMETER Action
+        'install' | 'upgrade' | 'remove'
+    .PARAMETER PackageName
+        The distro-agnostic package name (e.g. 'curl', 'docker-ce').
+    .PARAMETER Hosts
+        Ansible host pattern (default 'linux').
+    .OUTPUTS
+        [pscustomobject] @{ Ok; Path; Message }
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('install','upgrade','remove')]
+        [string] $Action,
+
+        [Parameter(Mandatory)] [string] $PackageName,
+        [string] $Hosts = 'linux'
+    )
+
+    $state = switch ($Action) {
+        'install' { 'present' }
+        'upgrade' { 'latest'  }
+        'remove'  { 'absent'  }
+    }
+
+    $yaml = @"
+---
+# TcFltPkgMgr — generated playbook: package $Action
+# Package : $PackageName
+# Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+- name: Package $Action — $PackageName
+  hosts: $Hosts
+  become: true
+  gather_facts: false
+  tasks:
+    - name: $Action $PackageName
+      ansible.builtin.package:
+        name: $PackageName
+        state: $state
+"@
+
+    _Write-AnsiblePlaybook -Yaml $yaml -Name "package-$Action"
+}
+
+function _Get-ServicePlaybook {
+    <#
+    .SYNOPSIS
+        Builds a playbook that starts, stops, restarts, enables, or disables a systemd service.
+    .PARAMETER Action
+        'start' | 'stop' | 'restart' | 'enable' | 'disable'
+    .PARAMETER ServiceName
+        The systemd unit name (e.g. 'docker', 'nginx').
+    .PARAMETER Hosts
+        Ansible host pattern (default 'linux').
+    .OUTPUTS
+        [pscustomobject] @{ Ok; Path; Message }
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('start','stop','restart','enable','disable')]
+        [string] $Action,
+
+        [Parameter(Mandatory)] [string] $ServiceName,
+        [string] $Hosts = 'linux'
+    )
+
+    # Map action to state/enabled combinations
+    $state   = $null
+    $enabled = $null
+    switch ($Action) {
+        'start'   { $state = 'started'  }
+        'stop'    { $state = 'stopped'  }
+        'restart' { $state = 'restarted' }
+        'enable'  { $enabled = 'true'   }
+        'disable' { $enabled = 'false'  }
+    }
+
+    $stateYaml   = if ($null -ne $state)   { "`n        state: $state"     } else { '' }
+    $enabledYaml = if ($null -ne $enabled) { "`n        enabled: $enabled" } else { '' }
+
+    $yaml = @"
+---
+# TcFltPkgMgr — generated playbook: service $Action
+# Service  : $ServiceName
+# Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+- name: Service $Action — $ServiceName
+  hosts: $Hosts
+  become: true
+  gather_facts: false
+  tasks:
+    - name: $Action $ServiceName
+      ansible.builtin.systemd:
+        name: $ServiceName$stateYaml$enabledYaml
+        daemon_reload: false
+"@
+
+    _Write-AnsiblePlaybook -Yaml $yaml -Name "service-$Action"
+}
+
+function _Get-UserPlaybook {
+    <#
+    .SYNOPSIS
+        Builds a playbook that creates or removes a system user.
+    .PARAMETER Action
+        'create' | 'remove'
+    .PARAMETER UserName
+        The Linux username (e.g. 'deploy').
+    .PARAMETER Groups
+        Optional array of supplementary groups (e.g. @('docker','sudo')).
+    .PARAMETER Shell
+        Login shell (default '/bin/bash').
+    .PARAMETER Hosts
+        Ansible host pattern (default 'linux').
+    .OUTPUTS
+        [pscustomobject] @{ Ok; Path; Message }
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('create','remove')]
+        [string] $Action,
+
+        [Parameter(Mandatory)] [string] $UserName,
+        [string[]] $Groups = @(),
+        [string]   $Shell  = '/bin/bash',
+        [string]   $Hosts  = 'linux'
+    )
+
+    $state = if ($Action -eq 'create') { 'present' } else { 'absent' }
+
+    $groupsYaml = if ($Groups.Count -gt 0 -and $Action -eq 'create') {
+        "`n        groups: " + ($Groups -join ',')
+    } else { '' }
+
+    $shellYaml  = if ($Action -eq 'create') { "`n        shell: $Shell" } else { '' }
+    $removeYaml = if ($Action -eq 'remove') { "`n        remove: true`n        force: true" } else { '' }
+
+    $yaml = @"
+---
+# TcFltPkgMgr — generated playbook: user $Action
+# User     : $UserName
+# Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+- name: User $Action — $UserName
+  hosts: $Hosts
+  become: true
+  gather_facts: false
+  tasks:
+    - name: $Action user $UserName
+      ansible.builtin.user:
+        name: $UserName
+        state: $state$groupsYaml$shellYaml$removeYaml
+"@
+
+    _Write-AnsiblePlaybook -Yaml $yaml -Name "user-$Action"
+}
+
+function _Get-FilePlaybook {
+    <#
+    .SYNOPSIS
+        Builds a playbook that copies a file from the Ansible controller to targets.
+    .PARAMETER Src
+        Source path on the Ansible controller (absolute, or relative to the playbook).
+    .PARAMETER Dest
+        Destination path on the target hosts.
+    .PARAMETER Owner
+        File owner on the target (default 'root').
+    .PARAMETER Group
+        File group on the target (default 'root').
+    .PARAMETER Mode
+        File mode in octal string form (default '0644').
+    .PARAMETER Hosts
+        Ansible host pattern (default 'linux').
+    .OUTPUTS
+        [pscustomobject] @{ Ok; Path; Message }
+    #>
+    param(
+        [Parameter(Mandatory)] [string] $Src,
+        [Parameter(Mandatory)] [string] $Dest,
+        [string] $Owner = 'root',
+        [string] $Group = 'root',
+        [string] $Mode  = '0644',
+        [string] $Hosts = 'linux'
+    )
+
+    $yaml = @"
+---
+# TcFltPkgMgr — generated playbook: file copy
+# Src      : $Src
+# Dest     : $Dest
+# Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+- name: Copy file to targets
+  hosts: $Hosts
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Copy $Src to $Dest
+      ansible.builtin.copy:
+        src: $Src
+        dest: $Dest
+        owner: $Owner
+        group: $Group
+        mode: '$Mode'
+"@
+
+    _Write-AnsiblePlaybook -Yaml $yaml -Name 'file-copy'
+}
+
+function _Get-DockerPlaybook {
+    <#
+    .SYNOPSIS
+        Builds a playbook that manages a Docker container lifecycle on targets.
+    .PARAMETER Action
+        'pull' | 'start' | 'stop' | 'restart' | 'recreate' | 'remove'
+    .PARAMETER ContainerName
+        The Docker container name (e.g. 'web-1').
+    .PARAMETER Image
+        Docker image (required for 'pull', 'start', 'recreate').
+    .PARAMETER Hosts
+        Ansible host pattern (default 'containers').
+    .OUTPUTS
+        [pscustomobject] @{ Ok; Path; Message }
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('pull','start','stop','restart','recreate','remove')]
+        [string] $Action,
+
+        [Parameter(Mandatory)] [string] $ContainerName,
+        [string] $Image = '',
+        [string] $Hosts = 'containers'
+    )
+
+    # Map action to community.docker.docker_container state
+    $state = switch ($Action) {
+        'pull'     { 'started'  }  # pulls image then ensures running
+        'start'    { 'started'  }
+        'stop'     { 'stopped'  }
+        'restart'  { 'started'  }  # force_kill + started = restart
+        'recreate' { 'started'  }  # recreate=true forces pull + recreate
+        'remove'   { 'absent'   }
+    }
+
+    $forceKillYaml = if ($Action -eq 'restart')  { "`n        force_kill: true"   } else { '' }
+    $recreateYaml  = if ($Action -eq 'recreate') { "`n        recreate: true`n        pull: true" } else { '' }
+    $pullYaml      = if ($Action -eq 'pull')     { "`n        pull: true"          } else { '' }
+    $imageYaml     = if (-not [string]::IsNullOrEmpty($Image)) { "`n        image: $Image" } else { '' }
+
+    $yaml = @"
+---
+# TcFltPkgMgr — generated playbook: container $Action
+# Container: $ContainerName
+# Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+- name: Container $Action — $ContainerName
+  hosts: $Hosts
+  become: true
+  gather_facts: false
+  tasks:
+    - name: $Action container $ContainerName
+      community.docker.docker_container:
+        name: $ContainerName$imageYaml
+        state: $state$forceKillYaml$recreateYaml$pullYaml
+"@
+
+    _Write-AnsiblePlaybook -Yaml $yaml -Name "container-$Action"
+}
 
 # ---------------------------------------------------------------------------
 # Phase 5.4 stub — batch executor

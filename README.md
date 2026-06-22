@@ -391,6 +391,22 @@ The Docker host address is resolved from the matching `DockerHost` target in the
 
 ---
 
+## Ansible playbook builder (Phase 5.3)
+
+Five private functions in `execution/AnsibleExecutor.ps1` generate YAML playbooks and write them to `ansible/playbooks/` (gitignored) before each Ansible run. Files are timestamped and cleaned up after the run.
+
+| Function | Ansible module | Actions |
+|----------|---------------|---------|
+| `_Get-PackagePlaybook` | `ansible.builtin.package` | `install` · `upgrade` · `remove` |
+| `_Get-ServicePlaybook` | `ansible.builtin.systemd` | `start` · `stop` · `restart` · `enable` · `disable` |
+| `_Get-UserPlaybook` | `ansible.builtin.user` | `create` · `remove` |
+| `_Get-FilePlaybook` | `ansible.builtin.copy` | copy a file from controller to targets |
+| `_Get-DockerPlaybook` | `community.docker.docker_container` | `pull` · `start` · `stop` · `restart` · `recreate` · `remove` |
+
+All playbooks use `become: true` (sudo escalation) and `gather_facts: false` for speed. Package operations use `ansible.builtin.package` which is distro-agnostic — the same playbook works on Debian, Ubuntu, and RPM-based targets. Docker container playbooks default to `hosts: containers`; all others default to `hosts: linux`.
+
+---
+
 ## Preparing targets for WinGet
 
 Use **Setup → select target → 4. Prepare target** to install WinGet on a remote Windows machine via SSH. The installer:
