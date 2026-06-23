@@ -227,3 +227,30 @@ function Get-FltEffectivePackageManager {
         return 'apt'
     }
 }
+
+function Get-FltEffectiveAddress {
+    param([FleetTarget]$Target)
+    if ($Target.TargetType -eq 'container' -and $Target.DockerHost -and $Target.ContainerName) {
+        return "$($Target.DockerHost)/$($Target.ContainerName)"
+    }
+    return $Target.Address
+}
+
+function Get-FltIsContainer {
+    param([FleetTarget]$Target)
+    return $Target.TargetType -eq 'container'
+}
+
+function Get-FltTypeDisplay {
+    param([FleetTarget]$Target)
+    if     ($Target.TargetType -eq 'vm')        { return 'VM'   }
+    elseif ($Target.TargetType -eq 'container') { return 'Cntr' }
+    else                                         { return 'Phys' }
+}
+
+function Get-FltOsDisplay {
+    param([FleetTarget]$Target)
+    if     ($Target.OS -eq 'linux') { return 'Lnx' }
+    elseif ($Target.OS -eq 'macos') { return 'Mac' }
+    else                            { return 'Win' }
+}
