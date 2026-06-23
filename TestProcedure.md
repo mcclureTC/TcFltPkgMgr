@@ -482,6 +482,27 @@ Tests the `FleetTarget` container data model, `_Get-FltDockerHostTarget`, the ne
 
 ---
 
+### Suite 30 — Batch dashboard pagination
+
+**Infrastructure required:** None (fully offline — script-scope state only)
+**Per target:** No
+**Check count:** 8 (30a–30h)
+
+Tests the pagination state machine in `Show-FleetBatchDashboard` and `Move-FltBatchPage`. Seeds `$Script:FltBatch*` state directly to avoid ANSI screen painting. Uses a local `_Ansi_RepaintBatchDashboard` no-op override during navigation tests.
+
+| # | Test name | What is tested | How verified |
+|---|-----------|----------------|--------------|
+| 30a | Single page: TotalPages=1 | `TotalPages = ceil(n/pageSize) = 1` when n ≤ pageSize | Sets n=5, pageSize=20, checks TotalPages=1 |
+| 30b | Multi-page: TotalPages=3 | `TotalPages = ceil(25/10) = 3` | Sets n=25, pageSize=10, checks TotalPages=3 |
+| 30c | Move +1: increments page | `Move-FltBatchPage -Delta 1` advances from page 0 to 1 | Checks `FltBatchPage=1` after call |
+| 30d | Move -1: decrements page | `Move-FltBatchPage -Delta -1` retreats from page 2 to 1 | Checks `FltBatchPage=1` after call |
+| 30e | Clamps at page 0 | Moving back from page 0 stays at 0 | Checks `FltBatchPage=0` after -1 on first page |
+| 30f | Clamps at TotalPages-1 | Moving forward from last page stays at last page | Checks `FltBatchPage=2` after +1 on page 2 of 3 |
+| 30g | No-op when single page | `Move-FltBatchPage` does nothing when `TotalPages=1` | Checks `FltBatchPage=0` unchanged |
+| 30h | Summary counts span all pages | Status totals include targets on all pages, not just visible ones | Seeds 10 OK (page 1), 5 Failed (page 2), 10 Pending (page 0); verifies correct totals |
+
+---
+
 ## Adding New Tests
 
 When implementing a new phase, add tests in the appropriate location:

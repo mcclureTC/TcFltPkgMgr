@@ -694,13 +694,26 @@ remote management, and hosting the Ansible operator container.
 > It can be implemented in parallel or before Phases 5/6 if Docker support is
 > higher priority. The only ordering constraint is Phase 8 must follow Phase 7.
 
-### 7.0 — Batch dashboard pagination
+### 7.0 — Batch dashboard pagination ✅
 > *(Deferred from Phase 0.1 — needed at container scale with 100+ targets)*
 
-- [ ] `Show-FleetBatchDashboard` paginates when targets exceed page size
-- [ ] Auto-scroll to first non-`OK` row on each repaint
-- [ ] Page navigation uses `-` / `+` (numpad) consistent with fleet dashboard
-- [ ] Summary row always visible regardless of current page
+- [x] `_Ansi_ShowFleetBatchDashboard` — calculates `$totalPages = ceil(n / pageSize)`;
+      sets `$Script:FltBatchPage/PageSize/TotalPages/Targets`; height fixed to page size
+- [x] `_Ansi_RepaintBatchDashboard` — new function; paints current page only;
+      mode line shows `Page N/M  (- prev  + next)` when multi-page
+- [x] `_Ansi_UpdateBatchRow` — page-aware: only paints target row if on current page;
+      summary row always updated with all-target totals
+- [x] Auto-scroll to first non-OK row on current page after each repaint
+- [x] `Invoke-FltBatchPageNav` (private) — changes page and triggers repaint
+- [x] `Move-FltBatchPage` (DisplayAdapter) — public wrapper; no-op when `TotalPages=1`
+- [x] Four new script-scope vars initialised in `TcFltPkgMgr.ps1`:
+      `FltBatchPage`, `FltBatchPageSize`, `FltBatchTotalPages`, `FltBatchTargets`
+- [x] Suite 30 (Batch dashboard pagination) — 8 checks (30a–30h), fully offline:
+      30a–30b page count · 30c–30d navigation · 30e–30f boundary clamp ·
+      30g single-page no-op · 30h cross-page summary counts
+- [x] Security: no new secrets or credential handling
+- [x] `.gitignore`: no new entries needed
+- [x] `README.md`: Phase 7.0 section added
 
 ### 7.1 — Container executor (`execution/ContainerExecutor.ps1`) — new file ✅
 

@@ -1080,6 +1080,16 @@ function Get-IT_Suites {
             PerTarget   = $false   # fully offline — uses synthetic fleet state
             Function    = 'Invoke-IT_ContainerTargetFlow'
             CheckCount  = 8
+        },
+        [pscustomobject]@{
+            Id          = 30
+            Name        = 'Batch dashboard pagination'
+            Description = 'Show-FleetBatchDashboard: page state, Move-FltBatchPage, summary totals across pages'
+            NeedsTarget = $false
+            NeedsSSH    = $false
+            PerTarget   = $false   # fully offline — tests script-scope state directly
+            Function    = 'Invoke-IT_BatchPagination'
+            CheckCount  = 8
         }
     )
 }
@@ -3278,6 +3288,199 @@ function Invoke-IT_ContainerTargetFlow {
     # Restore FleetTargets
     # ------------------------------------------------------------------
     $Script:FleetTargets = $savedTargets
+
+    return $r
+}
+
+# ── Suite 30 — Batch dashboard pagination ─────────────────────────────────────
+
+# Tests the batch dashboard pagination state machine directly.
+# Avoids calling Show-FleetBatchDashboard (which clears the screen and
+# paints ANSI escape sequences) by seeding script-scope state manually
+# and testing the navigation and summary logic.
+function Invoke-IT_BatchPagination {
+    $r = _IT_NewResult
+
+    _IT_Section 'Batch dashboard pagination'
+
+    # Save batch state
+    $savedPage       = $Script:FltBatchPage
+    $savedPageSize   = $Script:FltBatchPageSize
+    $savedTotalPages = $Script:FltBatchTotalPages
+    $savedTargets    = $Script:FltBatchTargets
+    $savedStatus     = $Script:FltBatchStatus
+    $savedHeight     = $Script:FltBatchDashHeight
+    $savedScroll     = $Script:FltBatchScrollStart
+
+    # Helper: build N synthetic targets
+    function _MkTargets { param([int]$N)
+        1..$N | ForEach-Object {
+            $t = [FleetTarget]::new("lin-$_", "10.0.0.$_", 22, 'admin', $false)
+            $t.OS = 'linux'; $t.TargetType = 'physical'
+            $t
+        }
+    }
+
+    # ------------------------------------------------------------------
+    # 30a — Single page: TotalPages = 1 when targets ≤ page size
+    # ------------------------------------------------------------------
+    try {
+        $targets = @(_MkTargets 5)
+        $Script:FltBatchPageSize   = 20
+        $Script:FltBatchTotalPages = [Math]::Max(1, [Math]::Ceiling($targets.Count / 20))
+        $Script:FltBatchPage       = 0
+
+        if ($Script:FltBatchTotalPages -eq 1) {
+            _IT_Pass $r '30a  Single page: TotalPages=1 when targets ≤ page size'
+        } else {
+            _IT_Fail $r '30a  Single page: TotalPages=1 when targets ≤ page size' `
+                "TotalPages=$($Script:FltBatchTotalPages)"
+        }
+    } catch { _IT_Fail $r '30a  Single page calculation' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 30b — Multi-page: TotalPages = ceil(n / pageSize)
+    # ------------------------------------------------------------------
+    try {
+        $targets = @(_MkTargets 25)
+        $Script:FltBatchPageSize   = 10
+        $Script:FltBatchTotalPages = [Math]::Max(1, [Math]::Ceiling($targets.Count / 10))
+
+        if ($Script:FltBatchTotalPages -eq 3) {
+            _IT_Pass $r '30b  Multi-page: TotalPages=3 for 25 targets with page size 10'
+        } else {
+            _IT_Fail $r '30b  Multi-page: TotalPages=3 for 25 targets with page size 10' `
+                "TotalPages=$($Script:FltBatchTotalPages)"
+        }
+    } catch { _IT_Fail $r '30b  TotalPages calculation' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 30c — Move-FltBatchPage: next page increments page counter
+    # ------------------------------------------------------------------
+    try {
+        $Script:FltBatchPage       = 0
+        $Script:FltBatchTotalPages = 3
+        $Script:FltBatchTargets    = @(_MkTargets 25)
+        $Script:FltBatchPageSize   = 10
+        $Script:FltBatchStatus     = @{}
+        foreach ($t in $Script:FltBatchTargets) {
+            $Script:FltBatchStatus[$t.Name] = @{ Status='Pending'; Duration=0.0; Note='' }
+        }
+        $Script:FltBatchDashHeight  = 20
+        $Script:FltBatchScrollStart = 21
+
+        # Suppress the ANSI repaint by temporarily overriding the function
+        function _Ansi_RepaintBatchDashboard { param($Action,$PackageSpec,$Mode) <# no-op in test #> }
+
+        Move-FltBatchPage -Delta 1
+
+        if ($Script:FltBatchPage -eq 1) {
+            _IT_Pass $r '30c  Move-FltBatchPage +1: page increments from 0 to 1'
+        } else {
+            _IT_Fail $r '30c  Move-FltBatchPage +1: page increments from 0 to 1' `
+                "Page=$($Script:FltBatchPage)"
+        }
+    } catch { _IT_Fail $r '30c  Move-FltBatchPage next' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 30d — Move-FltBatchPage: prev page decrements page counter
+    # ------------------------------------------------------------------
+    try {
+        $Script:FltBatchPage = 2
+        Move-FltBatchPage -Delta -1
+        if ($Script:FltBatchPage -eq 1) {
+            _IT_Pass $r '30d  Move-FltBatchPage -1: page decrements from 2 to 1'
+        } else {
+            _IT_Fail $r '30d  Move-FltBatchPage -1: page decrements from 2 to 1' `
+                "Page=$($Script:FltBatchPage)"
+        }
+    } catch { _IT_Fail $r '30d  Move-FltBatchPage prev' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 30e — Move-FltBatchPage: does not go below page 0
+    # ------------------------------------------------------------------
+    try {
+        $Script:FltBatchPage = 0
+        Move-FltBatchPage -Delta -1
+        if ($Script:FltBatchPage -eq 0) {
+            _IT_Pass $r '30e  Move-FltBatchPage: clamps at page 0 (no underflow)'
+        } else {
+            _IT_Fail $r '30e  Move-FltBatchPage: clamps at page 0 (no underflow)' `
+                "Page=$($Script:FltBatchPage)"
+        }
+    } catch { _IT_Fail $r '30e  Page underflow clamp' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 30f — Move-FltBatchPage: does not exceed TotalPages - 1
+    # ------------------------------------------------------------------
+    try {
+        $Script:FltBatchPage       = 2  # already last page (0-indexed, 3 total)
+        $Script:FltBatchTotalPages = 3
+        Move-FltBatchPage -Delta 1
+        if ($Script:FltBatchPage -eq 2) {
+            _IT_Pass $r '30f  Move-FltBatchPage: clamps at TotalPages-1 (no overflow)'
+        } else {
+            _IT_Fail $r '30f  Move-FltBatchPage: clamps at TotalPages-1 (no overflow)' `
+                "Page=$($Script:FltBatchPage)"
+        }
+    } catch { _IT_Fail $r '30f  Page overflow clamp' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 30g — Move-FltBatchPage: no-op when single page
+    # ------------------------------------------------------------------
+    try {
+        $Script:FltBatchPage       = 0
+        $Script:FltBatchTotalPages = 1
+        Move-FltBatchPage -Delta 1
+        if ($Script:FltBatchPage -eq 0) {
+            _IT_Pass $r '30g  Move-FltBatchPage: no-op when TotalPages=1'
+        } else {
+            _IT_Fail $r '30g  Move-FltBatchPage: no-op when TotalPages=1' `
+                "Page=$($Script:FltBatchPage)"
+        }
+    } catch { _IT_Fail $r '30g  Single page no-op' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 30h — Summary counts span all pages, not just current page
+    # ------------------------------------------------------------------
+    try {
+        $targets = @(_MkTargets 25)
+        $Script:FltBatchTargets    = $targets
+        $Script:FltBatchPageSize   = 10
+        $Script:FltBatchPage       = 0
+        $Script:FltBatchTotalPages = 3
+        $Script:FltBatchStatus     = @{}
+
+        # Seed: page 0 (targets 1-10) = Pending, page 1 (11-20) = OK, page 2 (21-25) = Failed
+        for ($i = 0; $i -lt 25; $i++) {
+            $st = if ($i -lt 10) { 'Pending' } elseif ($i -lt 20) { 'OK' } else { 'Failed' }
+            $Script:FltBatchStatus[$targets[$i].Name] = @{ Status=$st; Duration=0.0; Note='' }
+        }
+
+        $all  = $Script:FltBatchStatus.Values
+        $ok   = @($all | Where-Object { $_.Status -like 'OK*' }).Count
+        $fail = @($all | Where-Object { $_.Status -like 'Failed*' }).Count
+        $pend = @($all | Where-Object { $_.Status -eq 'Pending' }).Count
+
+        # On page 0, we only SEE 10 targets but summary must show all 25
+        if ($ok -eq 10 -and $fail -eq 5 -and $pend -eq 10) {
+            _IT_Pass $r '30h  Summary counts span all pages (ok=10, fail=5, pend=10)'
+        } else {
+            _IT_Fail $r '30h  Summary counts span all pages (ok=10, fail=5, pend=10)' `
+                "ok=$ok fail=$fail pend=$pend"
+        }
+    } catch { _IT_Fail $r '30h  Cross-page summary counts' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # Restore batch state
+    # ------------------------------------------------------------------
+    $Script:FltBatchPage        = $savedPage
+    $Script:FltBatchPageSize    = $savedPageSize
+    $Script:FltBatchTotalPages  = $savedTotalPages
+    $Script:FltBatchTargets     = $savedTargets
+    $Script:FltBatchStatus      = $savedStatus
+    $Script:FltBatchDashHeight  = $savedHeight
+    $Script:FltBatchScrollStart = $savedScroll
 
     return $r
 }

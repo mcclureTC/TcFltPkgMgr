@@ -641,6 +641,28 @@ Four new standalone wrapper functions were added to `classes/Models.ps1` followi
 
 ---
 
+## Batch dashboard pagination (Phase 7.0)
+
+`Show-FleetBatchDashboard` now paginates when the target count exceeds the page size
+(configured via `ui.dashboardPageSize`, default 20). This keeps the batch operation
+display usable at container scale with 100+ targets.
+
+### Behaviour
+
+- Dashboard height is fixed to the page size — the layout never scrolls off screen
+- The mode line shows `Page N/M  (- prev  + next)` when multiple pages exist
+- The summary row always shows totals across **all** targets regardless of current page
+- Auto-scrolls to the first non-OK row on the current page after each update
+
+### Page navigation
+
+Call `Move-FltBatchPage -Delta 1` (next) or `Move-FltBatchPage -Delta -1` (prev) from
+the menu layer during a batch run. `Move-FltBatchPage` is a no-op when all targets fit
+on a single page. The `-` and `+` keys are the intended triggers, consistent with
+fleet dashboard navigation.
+
+---
+
 ## File Layout
 
 ```

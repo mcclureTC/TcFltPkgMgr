@@ -98,6 +98,15 @@ function Update-FltBatchRow {
     & $Script:FltDisplay_UpdateBatchRow -TargetName $TargetName -Status $Status -Duration $Duration -Note $Note
 }
 
+# Navigate the batch dashboard page (-1 = prev, +1 = next).
+# No-op when target count is within a single page.
+function Move-FltBatchPage {
+    param([int]$Delta)
+    if ($Script:FltBatchTotalPages -gt 1) {
+        Invoke-FltBatchPageNav -Delta $Delta
+    }
+}
+
 # Render a numbered table of items with configurable columns. Used for package
 # search results, version pickers, feed pickers, and other list displays.
 function Show-FltTable {

@@ -184,6 +184,10 @@ $Script:FleetTargets = @()
 $Script:FltBatchStatus      = @{}
 $Script:FltBatchDashHeight  = 0
 $Script:FltBatchScrollStart = 0
+$Script:FltBatchPage        = 0
+$Script:FltBatchPageSize    = 20
+$Script:FltBatchTotalPages  = 1
+$Script:FltBatchTargets     = @()
 
 # General dashboard height tracker.
 $Script:FltDashHeight = 0

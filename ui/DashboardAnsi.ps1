@@ -389,8 +389,18 @@ function _Ansi_ShowFleetBatchDashboard {
     $n          = $Targets.Count
     $maxResult  = 4
     $headerRows = 7
+    $pageSize   = [Math]::Max(1, [int](Get-FltCfgValue 'ui' 'dashboardPageSize' 20))
+    $totalPages = [Math]::Max(1, [Math]::Ceiling($n / $pageSize))
 
-    $Script:FltBatchDashHeight  = $headerRows + $n + 1 + 1 + $maxResult + 1
+    # Script-scope pagination state for the batch dashboard
+    $Script:FltBatchPage      = 0
+    $Script:FltBatchPageSize  = $pageSize
+    $Script:FltBatchTotalPages = $totalPages
+    $Script:FltBatchTargets   = $Targets
+
+    # Height is based on page size, not total targets — summary row always visible
+    $pageRows   = [Math]::Min($pageSize, $n)
+    $Script:FltBatchDashHeight  = $headerRows + $pageRows + 1 + 1 + $maxResult + 1
     $Script:FltBatchScrollStart = $Script:FltBatchDashHeight + 1
 
     $Script:FltBatchStatus = @{}
@@ -399,8 +409,38 @@ function _Ansi_ShowFleetBatchDashboard {
             Status   = 'Pending'
             Duration = 0.0
             Note     = ''
-            Row      = $headerRows + 1 + $i
         }
+    }
+
+    _Ansi_RepaintBatchDashboard -Action $Action -PackageSpec $PackageSpec `
+        -Mode $Mode -TimeoutSecs $TimeoutSecs
+}
+
+# Repaint the batch dashboard for the current page.
+# Called on initial draw, page navigation, and progress updates.
+function _Ansi_RepaintBatchDashboard {
+    param(
+        [string] $Action,
+        [string] $PackageSpec,
+        [string] $Mode,
+        [int]    $TimeoutSecs = 0
+    )
+    $sw         = _Ansi_GetSafeWidth
+    $headerRows = 7
+    $page       = $Script:FltBatchPage
+    $pageSize   = $Script:FltBatchPageSize
+    $totalPages = $Script:FltBatchTotalPages
+    $targets    = $Script:FltBatchTargets
+    $n          = $targets.Count
+
+    # Targets on this page
+    $pageStart  = $page * $pageSize
+    $pageEnd    = [Math]::Min($pageStart + $pageSize, $n) - 1
+    $pageTargets = @($targets[$pageStart..$pageEnd])
+
+    # Update row assignments for current page
+    for ($i = 0; $i -lt $pageTargets.Count; $i++) {
+        $Script:FltBatchStatus[$pageTargets[$i].Name]['Row'] = $headerRows + 1 + $i
     }
 
     Clear-Host
@@ -409,11 +449,16 @@ function _Ansi_ShowFleetBatchDashboard {
 
     $modeStr = "  Mode: $Mode"
     if ($TimeoutSecs -gt 0) { $modeStr += "   Timeout: ${TimeoutSecs} s" }
+    if ($totalPages -gt 1)  { $modeStr += "   Page $($page + 1)/$totalPages  (- prev  + next)" }
     _Ansi_PaintRow 3 $modeStr 'Dark'
 
     $remoteTcpkg = (Get-FltCfgValue 'tcpkg' 'remoteTcpkgPath' 'TcPkg.exe')
     $cmdPreview  = if ($Mode -like 'WinGet*') {
         "  > winget $Action --id $PackageSpec --silent --accept-package-agreements"
+    } elseif ($Mode -like 'Ansible*') {
+        "  > ansible-playbook -i inventory/hosts.ini <playbook>"
+    } elseif ($Mode -like 'docker*' -or $Mode -like 'Docker*') {
+        "  > docker exec -i <container> <pkgcmd>"
     } else {
         "  > `"$remoteTcpkg`" $Action $PackageSpec -y"
     }
@@ -422,14 +467,49 @@ function _Ansi_ShowFleetBatchDashboard {
     _Ansi_PaintRow 6 ('  {0,-22} {1,-14} {2,9}  {3}' -f 'Target','Status','Duration','Note') 'Dark'
     _Ansi_PaintRow 7 ('-' * $sw) 'Dark'
 
-    for ($i = 0; $i -lt $n; $i++) {
-        _Ansi_PaintRow (8 + $i) ('  {0,-22} {1,-14}' -f $Targets[$i].Name, 'Pending') ''
+    # Paint current page targets
+    for ($i = 0; $i -lt $pageTargets.Count; $i++) {
+        $t   = $pageTargets[$i]
+        $st  = $Script:FltBatchStatus[$t.Name]
+        $row = $headerRows + 1 + $i
+        $durStr = if ($st.Duration -gt 0) { '{0,7:F1} s' -f $st.Duration } else { '         ' }
+        $line   = '  {0,-22} {1,-14} {2}  {3}' -f $t.Name, $st.Status, $durStr, $st.Note
+        if ($line.Length -gt $sw) { $line = $line.Substring(0, $sw) }
+        $clr = switch -Wildcard ($st.Status) {
+            'OK*'      { "`e[92m" }  'Failed*' { "`e[91m" }
+            'Timed out' { "`e[93m" } 'Running*' { "`e[96m" }
+            'Skipped'  { "`e[90m" }  default    { ''       }
+        }
+        $rst = if ($clr) { "`e[0m" } else { '' }
+        Write-Host -NoNewline "`e[${row};1H${clr}${line}${rst}`e[K"
     }
 
-    _Ansi_PaintRow ($headerRows + $n + 1) ('-' * $sw) 'Dark'
-    _Ansi_PaintRow ($headerRows + $n + 2) '  Pending...' 'Dark'
-    _Ansi_PaintRow $Script:FltBatchDashHeight '' ''
+    $sepRow = $headerRows + $pageTargets.Count + 1
+    _Ansi_PaintRow $sepRow ('-' * $sw) 'Dark'
+
+    # Summary row — always shows totals across ALL targets (not just current page)
+    $all   = $Script:FltBatchStatus.Values
+    $ok    = @($all | Where-Object { $_.Status -like 'OK*' }).Count
+    $run   = @($all | Where-Object { $_.Status -like 'Running*' }).Count
+    $fail  = @($all | Where-Object { $_.Status -like 'Failed*' -or $_.Status -eq 'Timed out' }).Count
+    $skip  = @($all | Where-Object { $_.Status -eq 'Skipped' }).Count
+    $pend  = @($all | Where-Object { $_.Status -eq 'Pending' }).Count
+    $sumStr = "  $ok OK  |  $run running  |  $fail failed  |  $skip skipped  |  $pend pending"
+    if ($n -gt $pageSize) { $sumStr += "  (showing $($pageStart+1)-$([Math]::Min($pageStart+$pageSize,$n)) of $n)" }
+    Write-Host -NoNewline "`e[$($sepRow+1);1H`e[90m${sumStr}`e[0m`e[K"
+
+    Write-Host -NoNewline "`e[$($Script:FltBatchDashHeight);1H"
     Write-Host -NoNewline "`e[$($Script:FltBatchScrollStart);1H"
+
+    # Auto-scroll to first non-OK row on current page
+    $firstNonOk = $pageTargets | Where-Object {
+        $Script:FltBatchStatus[$_.Name].Status -notin @('OK','Pending') -and
+        $Script:FltBatchStatus[$_.Name].Status -notlike 'OK*'
+    } | Select-Object -First 1
+    if ($firstNonOk) {
+        $targetRow = $Script:FltBatchStatus[$firstNonOk.Name]['Row']
+        if ($targetRow) { Write-Host -NoNewline "`e[${targetRow};1H" }
+    }
 }
 
 function _Ansi_UpdateBatchRow {
@@ -441,22 +521,35 @@ function _Ansi_UpdateBatchRow {
     $st.Duration = $Duration
     $st.Note     = $Note
 
-    $sw     = _Ansi_GetSafeWidth
-    $row    = $st.Row
-    $durStr = if ($Duration -gt 0) { '{0,7:F1} s' -f $Duration } else { '         ' }
-    $line   = '  {0,-22} {1,-14} {2}  {3}' -f $TargetName, $Status, $durStr, $Note
-    if ($line.Length -gt $sw) { $line = $line.Substring(0, $sw) }
+    # Only paint the target row if it is on the current page
+    $page      = if ($null -ne $Script:FltBatchPage)     { $Script:FltBatchPage }     else { 0  }
+    $pageSize  = if ($null -ne $Script:FltBatchPageSize)  { $Script:FltBatchPageSize }  else { 20 }
+    $targets   = $Script:FltBatchTargets
+    if (-not $targets) { return }
 
-    if     ($Status -like 'OK*')      { $clr = "`e[92m" }
-    elseif ($Status -like 'Failed*')  { $clr = "`e[91m" }
-    elseif ($Status -eq 'Timed out')  { $clr = "`e[93m" }
-    elseif ($Status -like 'Running*') { $clr = "`e[96m" }
-    elseif ($Status -eq 'Skipped')    { $clr = "`e[90m" }
-    else                               { $clr = ''       }
-    $rst = if ($clr) { "`e[0m" } else { '' }
+    $n          = $targets.Count
+    $pageStart  = $page * $pageSize
+    $pageEnd    = [Math]::Min($pageStart + $pageSize, $n) - 1
+    $pageNames  = @($targets[$pageStart..$pageEnd] | ForEach-Object { $_.Name })
+    $onPage     = $pageNames -contains $TargetName
 
-    Write-Host -NoNewline "`e[s`e[${row};1H${clr}${line}${rst}`e[K`e[u"
+    if ($onPage -and $st.ContainsKey('Row')) {
+        $sw     = _Ansi_GetSafeWidth
+        $row    = $st['Row']
+        $durStr = if ($Duration -gt 0) { '{0,7:F1} s' -f $Duration } else { '         ' }
+        $line   = '  {0,-22} {1,-14} {2}  {3}' -f $TargetName, $Status, $durStr, $Note
+        if ($line.Length -gt $sw) { $line = $line.Substring(0, $sw) }
 
+        $clr = switch -Wildcard ($Status) {
+            'OK*'       { "`e[92m" }  'Failed*'  { "`e[91m" }
+            'Timed out' { "`e[93m" }  'Running*' { "`e[96m" }
+            'Skipped'   { "`e[90m" }  default    { ''       }
+        }
+        $rst = if ($clr) { "`e[0m" } else { '' }
+        Write-Host -NoNewline "`e[s`e[${row};1H${clr}${line}${rst}`e[K`e[u"
+    }
+
+    # Summary row always shows totals across ALL targets (not just current page)
     $all    = $Script:FltBatchStatus.Values
     $ok     = @($all | Where-Object { $_.Status -like 'OK*' }).Count
     $run    = @($all | Where-Object { $_.Status -like 'Running*' }).Count
@@ -465,7 +558,23 @@ function _Ansi_UpdateBatchRow {
     $pend   = @($all | Where-Object { $_.Status -eq 'Pending' }).Count
     $sumRow = $Script:FltBatchDashHeight - 1
     $sumStr = "  $ok OK  |  $run running  |  $fail failed  |  $skip skipped  |  $pend pending"
-    Write-Host -NoNewline "`e[s`e[${sumRow};1H`e[90m${sumStr}`e[0m`e[K`e[u"
+    if ($n -gt $pageSize) { $sumStr += "  (showing $($pageStart+1)-$([Math]::Min($pageStart+$pageSize,$n)) of $n)" }
+    Write-Host -NoNewline "`e[s`e[$($sumRow);1H`e[90m${sumStr}`e[0m`e[K`e[u"
+}
+
+# Navigate the batch dashboard page during a running batch.
+# Delta = -1 (prev page) or +1 (next page).
+function Invoke-FltBatchPageNav {
+    param([int]$Delta)
+    if (-not $Script:FltBatchTotalPages) { return }
+    $newPage = [Math]::Max(0, [Math]::Min(
+        $Script:FltBatchPage + $Delta,
+        $Script:FltBatchTotalPages - 1
+    ))
+    if ($newPage -ne $Script:FltBatchPage) {
+        $Script:FltBatchPage = $newPage
+        _Ansi_RepaintBatchDashboard -Action '' -PackageSpec '' -Mode ''
+    }
 }
 
 # ── Simple list renderer ──────────────────────────────────────────────────────
