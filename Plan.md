@@ -251,8 +251,8 @@ every subsequent phase builds on a scalable foundation.
 > Pagination deferred to Phase 7.0. Mode/Summary row updates depend on
 > having multiple executors — defer to Phase 10 (after all executors exist).
 
-- [ ] Pagination with auto-scroll to first non-OK row — deferred to Phase 7.0 ✓
-- [ ] `Type` column in batch rows — defer to Phase 9 (alongside 2.1)
+- [x] Pagination with auto-scroll to first non-OK row — done in Phase 7.0
+- [x] `Type` column in batch rows — done in Phase 8.0
 - [ ] Multi-executor `Mode` row and per-executor summary counts —
       defer to Phase 10 (after WinGet, Ansible, Docker executors exist)
 
@@ -848,7 +848,7 @@ be captured before passing to the scriptblock. Apply the same pattern in
        1. tcpkg        3. Linux Admin   5. Profiles
        2. WinGet       4. Containers    6. UI Config    7. Setup    0. Exit
       ```
-- [ ] Footer fits single line at 119 cols
+- [x] Footer fits single line at 119 cols
 
 ### 8.2 — Container Admin menu (`ui/menus/ContainerMenu.ps1`) — new file ✅
 
@@ -1046,7 +1046,7 @@ be captured before passing to the scriptblock. Apply the same pattern in
 
 ## Phase 10 — Command log updates
 
-### 10.1 — `Write-FltBatchEntry` (`execution/CommandLog.ps1`)
+### 10.1 — `Write-FltBatchEntry` (`execution/CommandLog.ps1`) ✅
 
 > Depends on Phases 3, 5, 7 (WinGet, Ansible, Docker executors) being built
 > first so the new PackageManager values are actually emitted.
@@ -1198,7 +1198,14 @@ be captured before passing to the scriptblock. Apply the same pattern in
 | `execution/ContainerExecutor.ps1` | ✅ done | Docker exec and lifecycle batch executor |
 | `ui/menus/WinGetMenu.ps1` | ✅ done | WinGet install / upgrade / uninstall / status |
 | `ui/menus/LinuxMenu.ps1` | ✅ done | Linux Admin: packages, users, services, playbooks |
-| `ui/menus/ContainerMenu.ps1` | ✅ done | Container Admin: packages, lifecycle, logs, health |
+| `ui/menus/ContainerMenu.ps1` | ✅ done | Container Admin: packages, lifecycle, logs, health, deploy (Phase 8) |
+| `data/ComposeRepository.ps1` | ✅ done | Compose template/CSV/generation/execution (Phase 8.8) |
+| `docker/Dockerfile.debian-ssh` | ✅ done | Debian SSH container image with Python 3 (Phase 8.8) |
+| `compose/templates/*.yml.template` | ✅ done | TwinCAT XAR, Mosquitto, Debian SSH templates (Phase 8.8) |
+| `diagnostics/IT-Infrastructure.ps1` | ✅ done | Suites 11-16 split from IntegrationTests.ps1 |
+| `diagnostics/IT-TcpkgWinGet.ps1` | ✅ done | Suites 17-20 split from IntegrationTests.ps1 |
+| `diagnostics/IT-Ansible.ps1` | ✅ done | Suites 21-27 split from IntegrationTests.ps1 |
+| `diagnostics/IT-Containers.ps1` | ✅ done | Suites 28-35 split from IntegrationTests.ps1 |
 
 ## Modified files summary
 
@@ -1208,13 +1215,60 @@ be captured before passing to the scriptblock. Apply the same pattern in
 | `data/TargetRepository.ps1` | ✅ done | JSON store; migration; CSV; Add/Edit/Remove |
 | `data/CredentialRepository.ps1` | ✅ done | Refactored into adapter + Windows/file backends |
 | `execution/FleetExecutor.ps1` | ✅ done | Five buckets: tcpkg + WinGet + push + Ansible + Docker/container |
-| `execution/CommandLog.ps1` | partial | `PackageManager` done; `TargetType` — Phase 8.0 |
-| `ui/DashboardAnsi.ps1` | partial | Pagination/sort/filter/batch-pagination done; Type in batch rows pending (8.0) |
-| `ui/menus/FleetMenu.ps1` | partial | Current: 1-6 (tcpkg, WinGet, Linux Admin, Profiles, UIConfig, Setup); Containers→Phase 8 |
-| `ui/menus/TargetMenu.ps1` | partial | Add/Edit/Remove done; container type done (7.4); full OS prompt pending (9.1) |
-| `config/settings.default.json` | partial | docker/ui done; winget/ansible sections pending (phases 3/5) |
-| `config/settings.default.jsonc` | pending | Add when winget/ansible sections added |
+| `execution/CommandLog.ps1` | partial | `PackageManager` and `TargetType` done; log viewer columns pending (10.2) |
+| `ui/DashboardAnsi.ps1` | ✅ done | Pagination/sort/filter/batch-pagination/Type column all done |
+| `ui/menus/FleetMenu.ps1` | ✅ done | 1-7: tcpkg, WinGet, Linux Admin, Containers, Profiles, UIConfig, Setup |
+| `ui/menus/TargetMenu.ps1` | partial | Add/Edit/Remove done; container+compose done (7.4, 8.9); OS/PM prompt pending (9.1) |
+| `config/settings.default.json` | ✅ done | docker, ui, winget, ansible, compose sections all present |
+| `config/settings.default.jsonc` | pending | Add commented reference version alongside settings.default.json |
 | `TcFltPkgMgr.ps1` | partial | OS detection done; Linux config paths pending (phase 12.1) |
+| `ui/menus/ContainerMenu.ps1` | ✅ done | All 10 choices including compose-aware lifecycle and Deploy |
+| `data/ComposeRepository.ps1` | ✅ done | 13 compose functions: templates, CSV import/export, docker compose exec |
+
+---
+
+## Lessons learned (Phases 3-8, apply to upcoming phases)
+
+These patterns emerged during implementation and must be applied to all future phases.
+They supplement the conventions at the top of this document.
+
+**Test isolation:**
+- Any suite that assigns `$Script:FleetTargets` must save as `$savedFleetTargets`
+  and restore in cleanup. This applies even when the assignment is buried inside
+  a helper function (e.g. `_Register-ContainerTarget` calls `Save-FltTargets`).
+- Any suite that causes `Save-FltTargets` to run must also save/restore
+  `targets.local.json` on disk. In-memory restore alone is insufficient.
+- Any suite that modifies `$Script:FltBatch*` vars must save/restore each one.
+
+**Blocking input in read-only/test mode:**
+- Functions with `Read-Host` or `[Console]::ReadKey` in code paths reachable
+  from tests must guard at the top with `if ($Script:FltReadOnly -or
+  [Console]::IsInputRedirected) { return }`. Tests run with `FltReadOnly=$true`.
+
+**PowerShell syntax traps:**
+- `?.Trim()` null-conditional member access is unreliable in complex expressions.
+  Assign the pipeline result to a variable first, then call `.Trim()` on it.
+- `$list.Add([pscustomobject]@{...} | ForEach-Object {...})` fails.
+  Build the object into a variable first, then call `.Add($var)`.
+- Multi-line expressions ending with `)` inside `else {` blocks cause PS7 to
+  close the block early. Break into separate statements.
+
+**Docker Compose on Windows:**
+- Use `cmd /c "docker compose ..."` not `& docker compose`. The latter fails
+  when compose output contains CRLF or progress animations.
+- Group targets by compose file before running; one `docker compose` call per
+  file handles all its services atomically.
+- Store `ComposeFile` as a relative path in `targets.local.json`; resolve to
+  absolute via `$Script:FltScriptRoot` at runtime.
+
+**Error surfacing:**
+- `Invoke-FltComposeCommand` captures full docker output in `.Output`.
+  Callers must explicitly display last 10-15 lines on failure.
+  "Exit 1" alone tells the operator nothing.
+
+**File output formats:**
+- The `.template` extension causes the Claude outputs viewer to render blank.
+  Present template files with `.yml` extension; instruct user to rename.
 
 ---
 
