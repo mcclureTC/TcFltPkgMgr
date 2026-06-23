@@ -807,6 +807,45 @@ See the Ansible section below for `docker build` and `docker run` instructions f
 
 ---
 
+## Adding container targets (Phase 8.9)
+
+Go to **Setup → Add target → 3. Docker container**. After naming the target and
+choosing a Docker host, you are prompted for how to define the container:
+
+| Choice | What it does |
+|--------|-------------|
+| **1. Create from template** | Picks a template, prompts variables, generates a compose file in `compose/`, pulls image, starts container |
+| **2. Use existing compose file** | Lists `.yml` files in `compose/`, pick one, pick a service to associate with this target |
+| **3. Import from CSV** | Reads a CSV, generates a multi-service compose file, registers one fleet target per row, starts all |
+| **0. Manual** | Prompt for container name only — no compose file, no automatic start |
+
+### CSV format for batch container deployment
+
+```
+Name,Template,AmsNetId,IpAddress,SshPort,PackageManager
+tc31-node1,twincat-xar,15.15.15.15.1.1,192.168.20.3,,apt
+tc31-node2,twincat-xar,15.15.15.15.1.2,192.168.20.4,,apt
+mqtt-broker,mosquitto,,192.168.20.2,1883,apt
+ssh-test,debian-ssh,,192.168.20.10,2222,apt
+```
+
+`Template` must be `twincat-xar`, `mosquitto`, or `debian-ssh`. All containers in one
+CSV batch share a single compose file with multiple services.
+
+### What gets stored on the fleet target
+
+After registration, each container target has:
+
+```
+ComposeFile    = compose\myproject.yml   # relative to TcFltPkgMgr root
+ComposeService = tc31-node1              # service name in the compose file
+ComposeProject = myproject               # --project-name for docker compose
+```
+
+These are used by the Container Admin menu for compose-aware lifecycle operations.
+
+---
+
 ## File Layout
 
 ```

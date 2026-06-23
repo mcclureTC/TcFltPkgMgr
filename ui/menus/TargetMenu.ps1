@@ -103,53 +103,27 @@ function Invoke-TargetMenu {
             }
         }
 
-        $containerName = Read-FltValue 'Container name (e.g. web_app, blank to cancel):' -CancelOnBlank
-        if (-not $containerName) { return }
-
+        # ── How to define this container ──────────────────────────────────────
         Write-Host ''
-        Write-Host '  Package manager:' -ForegroundColor Cyan
-        Write-Host '   1. apt  (Debian/Ubuntu — default)'
-        Write-Host '   2. apk  (Alpine)'
-        Write-Host '   3. yum  (RHEL/CentOS)'
-        Write-Host '   4. dnf  (Fedora/RHEL 8+)'
+        Write-Host '  Container definition:' -ForegroundColor Cyan
+        Write-Host '   1. Create from template  (new compose file)'
+        Write-Host '   2. Use existing compose file'
+        Write-Host '   3. Import from CSV        (batch — multiple containers)'
+        Write-Host '   0. Manual                 (no compose file — register name only)'
         Write-Host ''
-        $pmChoice = (Read-Host '  Choice (blank = apt)').Trim()
-        $pm = switch ($pmChoice) {
-            '2' { 'apk' }
-            '3' { 'yum' }
-            '4' { 'dnf' }
-            default { 'apt' }
-        }
+        $defChoice = (Read-Host '  Choice').Trim()
+        if ([string]::IsNullOrEmpty($defChoice)) { return }
 
-        # Container target construction
-        # For __local__, use placeholder values — all docker ops run via local CLI
-        $tAddr = if ($dockerHostName -eq '__local__') { '__local__' } else { $hostTarget.Address }
-        $tPort = if ($dockerHostName -eq '__local__') { 0 }            else { $hostTarget.Port }
-        $tUser = if ($dockerHostName -eq '__local__') { '' }            else { $hostTarget.User }
-        $t = [FleetTarget]::new($name, $tAddr, $tPort, $tUser, $false)
-        $t.OS             = 'linux'
-        $t.TargetType     = 'container'
-        $t.PackageManager = $pm
-        $t.DockerHost     = $dockerHostName
-        $t.ContainerName  = $containerName
-        $t.InternetAccess = $false   # containers don't get their own internet access flag
-        $t.Reachable      = 'unknown'
-
-        $existing = $Script:FleetTargets | Where-Object { $_.Name -eq $name } | Select-Object -First 1
-        if ($existing) {
-            Write-Host "  A target named '$name' already exists." -ForegroundColor Red
-            Read-Host '  Press Enter'
-            return
+        switch ($defChoice) {
+            '1' { _Invoke-AddContainerFromTemplate -Name $name -DockerHostName $dockerHostName }
+            '2' { _Invoke-AddContainerFromFile     -Name $name -DockerHostName $dockerHostName }
+            '3' { _Invoke-AddContainerFromCsv              -DockerHostName $dockerHostName }
+            '0' { _Invoke-AddContainerManual       -Name $name -DockerHostName $dockerHostName }
+            default {
+                Write-Host '  Invalid choice.' -ForegroundColor Red
+                Start-Sleep -Milliseconds 800
+            }
         }
-
-        $Script:FleetTargets += $t
-        $ok = Save-FltTargets -Targets $Script:FleetTargets
-        if ($ok) {
-            Write-Host "  Added container '$name' on '$dockerHostName' ($containerName) using $pm." -ForegroundColor Green
-        } else {
-            Write-Host "  Failed to save target." -ForegroundColor Red
-        }
-        Read-Host '  Press Enter'
         return
     }
 
@@ -200,6 +174,451 @@ function Invoke-TargetMenu {
 }
 
 # ── Source Menu ───────────────────────────────────────────────────────────────
+
+# =============================================================================
+#  Phase 8.9 — Compose-aware container Add Target helpers
+# =============================================================================
+
+# Shared: build a FleetTarget for a container and register it.
+# Returns $true on success, $false on failure.
+function _Register-ContainerTarget {
+    param(
+        [string] $Name,
+        [string] $DockerHostName,
+        [string] $ContainerName,
+        [string] $PackageManager = 'apt',
+        [string] $ComposeFile    = '',
+        [string] $ComposeService = '',
+        [string] $ComposeProject = ''
+    )
+
+    $existing = $Script:FleetTargets | Where-Object { $_.Name -eq $Name } | Select-Object -First 1
+    if ($existing) {
+        Write-Host "  A target named '$Name' already exists." -ForegroundColor Red
+        return $false
+    }
+
+    # Resolve address/port/user from Docker host
+    $hostTgt = $Script:FleetTargets | Where-Object { $_.Name -eq $DockerHostName } | Select-Object -First 1
+    $tAddr   = if ($DockerHostName -eq '__local__') { '__local__' } elseif ($hostTgt) { $hostTgt.Address } else { '' }
+    $tPort   = if ($DockerHostName -eq '__local__') { 0 }           elseif ($hostTgt) { $hostTgt.Port    } else { 22 }
+    $tUser   = if ($DockerHostName -eq '__local__') { '' }          elseif ($hostTgt) { $hostTgt.User    } else { '' }
+
+    $t = [FleetTarget]::new($Name, $tAddr, $tPort, $tUser, $false)
+    $t.OS             = 'linux'
+    $t.TargetType     = 'container'
+    $t.PackageManager = $PackageManager
+    $t.DockerHost     = $DockerHostName
+    $t.ContainerName  = $ContainerName
+    $t.ComposeFile    = $ComposeFile
+    $t.ComposeService = $ComposeService
+    $t.ComposeProject = $ComposeProject
+    $t.InternetAccess = $false
+    $t.Reachable      = 'unknown'
+
+    $Script:FleetTargets += $t
+    return (Save-FltTargets -Targets $Script:FleetTargets)
+}
+
+# Shared: ask for package manager choice.
+function _Read-PackageManager {
+    Write-Host ''
+    Write-Host '  Package manager:' -ForegroundColor Cyan
+    Write-Host '   1. apt  (Debian/Ubuntu — default)'
+    Write-Host '   2. apk  (Alpine)'
+    Write-Host '   3. yum  (RHEL/CentOS)'
+    Write-Host '   4. dnf  (Fedora/RHEL 8+)'
+    Write-Host ''
+    $pmChoice = (Read-Host '  Choice (blank = apt)').Trim()
+    switch ($pmChoice) {
+        '2' { return 'apk' }
+        '3' { return 'yum' }
+        '4' { return 'dnf' }
+        default { return 'apt' }
+    }
+}
+
+# Shared: ask for network definition style and return the NETWORK_DEFINITION value.
+function _Read-NetworkDefinition {
+    param([string]$NetworkName)
+    Write-Host ''
+    Write-Host '  Network definition:' -ForegroundColor Cyan
+    Write-Host '   1. Define inline  (TcFltPkgMgr creates the network on first compose up)'
+    Write-Host '   2. External       (network already exists — you created it separately)'
+    Write-Host ''
+    $netChoice = (Read-Host '  Choice (blank = 1)').Trim()
+    if ($netChoice -eq '2') {
+        return 'external: true'
+    }
+    # Inline — build IPAM block from settings
+    $subnet  = Get-FltCfgValue 'compose' 'subnet'  '192.168.20.0/24'
+    $gateway = Get-FltCfgValue 'compose' 'gateway' '192.168.20.1'
+    return "name: $NetworkName`n    ipam:`n      driver: default`n      config:`n        - subnet: $subnet`n          gateway: $gateway"
+}
+
+# Shared: after registering targets pull images and start containers.
+function _Deploy-ComposeTargets {
+    param(
+        [string]   $ComposeFile,
+        [string]   $ComposeProject,
+        [string[]] $Services,
+        [bool]     $NeedsBuild = $false
+    )
+    Write-Host ''
+    Write-Host '  Pulling images...' -ForegroundColor Cyan
+    $pull = Invoke-FltComposePull -ComposeFile $ComposeFile -ProjectName $ComposeProject `
+                -Services $Services
+    if (-not $pull.Ok) {
+        Write-Host "  Pull warning: $($pull.Message)" -ForegroundColor Yellow
+    } else {
+        Write-Host '  Pull complete.' -ForegroundColor Green
+    }
+
+    Write-Host '  Starting containers (docker compose up -d)...' -ForegroundColor Cyan
+    $up = Invoke-FltComposeUp -ComposeFile $ComposeFile -ProjectName $ComposeProject `
+              -Services $Services -Build $NeedsBuild
+    if ($up.Ok) {
+        Write-Host '  Containers started.' -ForegroundColor Green
+    } else {
+        Write-Host "  Start failed: $($up.Message)" -ForegroundColor Red
+        Write-Host "  Command: $($up.Command)" -ForegroundColor DarkGray
+    }
+}
+
+# ── Path 1: Create from template ─────────────────────────────────────────────
+
+function _Invoke-AddContainerFromTemplate {
+    param(
+        [string] $Name,
+        [string] $DockerHostName
+    )
+
+    $templates = @(Get-FltComposeTemplates)
+    if ($templates.Count -eq 0) {
+        Write-Host '  No templates found in compose	emplates\.' -ForegroundColor Yellow
+        Write-Host '  Place .template files there first.' -ForegroundColor DarkGray
+        Read-Host '  Press Enter'; return
+    }
+
+    Clear-Host
+    Write-Host '  Add New Target  >  Create from template' -ForegroundColor Cyan
+    Write-Host ''
+    for ($i = 0; $i -lt $templates.Count; $i++) {
+        Write-Host "   $($i+1). $($templates[$i].Name)  — $($templates[$i].Description)"
+    }
+    Write-Host '   0. Cancel'
+    Write-Host ''
+    $tChoice = (Read-Host '  Template').Trim()
+    if ($tChoice -eq '0' -or [string]::IsNullOrEmpty($tChoice)) { return }
+    $tIdx = [int]$tChoice - 1
+    if ($tIdx -lt 0 -or $tIdx -ge $templates.Count) {
+        Write-Host '  Invalid choice.' -ForegroundColor Red
+        Start-Sleep -Milliseconds 800; return
+    }
+    $template = $templates[$tIdx]
+
+    Write-Host ''
+    Write-Host "  Template: $($template.Name)" -ForegroundColor DarkGray
+
+    # Prompt for compose file output name
+    $outputName = Read-FltValue "Compose file name (saved as compose\<name>.yml, blank = $Name):" -AllowEmpty
+    if ([string]::IsNullOrEmpty($outputName)) { $outputName = $Name.ToLower() -replace '[^a-z0-9\-_]','' }
+
+    # Network
+    $networkName = Get-FltCfgValue 'compose' 'network' 'container-network'
+    $networkDef  = _Read-NetworkDefinition -NetworkName $networkName
+
+    # Template-specific variable prompts
+    $vars = @{
+        CONTAINER_NAME     = $Name
+        NETWORK_NAME       = $networkName
+        NETWORK_DEFINITION = $networkDef
+    }
+
+    $needsBuild = $false
+    $pm         = 'apt'
+
+    switch ($template.Name) {
+        'twincat-xar' {
+            $vars['AMS_NETID']  = Read-FltValue 'AMS Net ID (e.g. 15.15.15.15.1.1, blank to cancel):' -CancelOnBlank
+            if (-not $vars['AMS_NETID']) { return }
+            $vars['IP_ADDRESS'] = Read-FltValue 'Static IP address on network (blank to cancel):' -CancelOnBlank
+            if (-not $vars['IP_ADDRESS']) { return }
+            $pm = 'apt'
+        }
+        'mosquitto' {
+            $port = Read-FltValue 'Host port (blank = 1883):' -AllowEmpty
+            if ([string]::IsNullOrEmpty($port)) { $port = '1883' }
+            $vars['PORT']       = $port
+            $vars['IP_ADDRESS'] = Read-FltValue 'Static IP address on network (blank to cancel):' -CancelOnBlank
+            if (-not $vars['IP_ADDRESS']) { return }
+
+            # mosquitto.conf
+            Write-Host ''
+            Write-Host '  Mosquitto configuration:' -ForegroundColor Cyan
+            Write-Host '   1. Create minimal mosquitto.conf (listener 1883, allow anonymous)'
+            Write-Host '   2. Use existing mosquitto.conf file (provide path)'
+            Write-Host ''
+            $confChoice = (Read-Host '  Choice (blank = 1)').Trim()
+            $composeDir = Get-FltComposeDir
+            if ($confChoice -eq '2') {
+                $confPath = Read-FltValue 'Path to mosquitto.conf (blank to cancel):' -CancelOnBlank
+                if (-not $confPath) { return }
+                $vars['CONF_VOLUME'] = "- `"$confPath`:/mosquitto/config/mosquitto.conf`""
+            } else {
+                # Create minimal conf next to the compose file
+                $confPath = Join-Path $composeDir 'mosquitto.conf'
+                if (-not (Test-Path $confPath)) {
+                    "listener 1883`nallow_anonymous true`n" | Set-Content $confPath -Encoding UTF8
+                    Write-Host "  Created minimal mosquitto.conf at: $confPath" -ForegroundColor DarkGray
+                }
+                $confPath2 = $confPath -replace '\','/'
+                $vars['CONF_VOLUME'] = "- `"$confPath2`:/mosquitto/config/mosquitto.conf`""
+            }
+            $pm = 'apt'
+        }
+        'debian-ssh' {
+            $sshPort = Read-FltValue 'SSH port on host (blank = 2222):' -AllowEmpty
+            if ([string]::IsNullOrEmpty($sshPort)) { $sshPort = '2222' }
+            $vars['SSH_PORT']   = $sshPort
+            $vars['IP_ADDRESS'] = Read-FltValue 'Static IP address on network (blank to cancel):' -CancelOnBlank
+            if (-not $vars['IP_ADDRESS']) { return }
+
+            # Dockerfile path (absolute, forward-slash for docker build context)
+            $dockerDir = Get-FltComposeBuildDir
+            $vars['DOCKERFILE_PATH'] = $dockerDir -replace '\\','/' -replace '\','/'
+
+            # Root password — stored in credential store
+            $rootPwd = (Read-Host '  Root password for SSH (stored in credential store)').Trim()
+            if ([string]::IsNullOrEmpty($rootPwd)) {
+                Write-Host '  Password is required for debian-ssh containers.' -ForegroundColor Red
+                Read-Host '  Press Enter'; return
+            }
+            $credName = "debian_ssh_$($Name.ToLower() -replace '[^a-z0-9]','_')"
+            Set-FltStoredPassword -CredentialName $credName -PlainPassword $rootPwd | Out-Null
+            Write-Host "  Password stored as credential: $credName" -ForegroundColor DarkGray
+            $needsBuild = $true
+            $pm = 'apt'
+        }
+        default {
+            # Generic — just prompt IP
+            $vars['IP_ADDRESS'] = Read-FltValue 'Static IP address on network (blank to cancel):' -CancelOnBlank
+            if (-not $vars['IP_ADDRESS']) { return }
+            $pm = _Read-PackageManager
+        }
+    }
+
+    # Generate compose file
+    Write-Host ''
+    Write-Host '  Generating compose file...' -ForegroundColor Cyan
+    $result = New-FltComposeFromTemplate -TemplateName $template.Name `
+                  -OutputName $outputName -Variables $vars
+    if (-not $result.Ok) {
+        Write-Host "  Failed: $($result.Message)" -ForegroundColor Red
+        Read-Host '  Press Enter'; return
+    }
+    Write-Host "  Created: $($result.Path)" -ForegroundColor Green
+
+    # Derive relative compose path and project name
+    $relPath     = $result.Path.Replace($Script:FltScriptRoot, '').TrimStart('').TrimStart('/')
+    $projectName = [System.IO.Path]::GetFileNameWithoutExtension($result.Path).ToLower() `
+                   -replace '[^a-z0-9]',''
+
+    # Register fleet target
+    $ok = _Register-ContainerTarget -Name $Name -DockerHostName $DockerHostName `
+              -ContainerName $Name -PackageManager $pm `
+              -ComposeFile $relPath -ComposeService $Name -ComposeProject $projectName
+
+    if (-not $ok) {
+        Write-Host "  Failed to register target '$Name'." -ForegroundColor Red
+        Read-Host '  Press Enter'; return
+    }
+    Write-Host "  Registered fleet target: $Name" -ForegroundColor Green
+
+    # Pull and start
+    if (Read-FltYesNo -Prompt 'Pull image and start container now?') {
+        _Deploy-ComposeTargets -ComposeFile $result.Path -ComposeProject $projectName `
+            -Services @($Name) -NeedsBuild $needsBuild
+    }
+
+    Read-Host '  Press Enter'
+}
+
+# ── Path 2: Use existing compose file ────────────────────────────────────────
+
+function _Invoke-AddContainerFromFile {
+    param(
+        [string] $Name,
+        [string] $DockerHostName
+    )
+
+    Clear-Host
+    Write-Host '  Add New Target  >  Use existing compose file' -ForegroundColor Cyan
+    Write-Host ''
+
+    # List available compose files
+    $composeDir  = Get-FltComposeDir
+    $composeFiles = @(Get-ChildItem $composeDir -Filter '*.yml' -ErrorAction SilentlyContinue |
+                      Where-Object { $_.Name -ne 'mosquitto.conf' })
+    if ($composeFiles.Count -eq 0) {
+        Write-Host '  No compose files found in compose\.' -ForegroundColor Yellow
+        Write-Host '  Use option 1 to create one from a template first.' -ForegroundColor DarkGray
+        Read-Host '  Press Enter'; return
+    }
+
+    Write-Host '  Available compose files:' -ForegroundColor DarkGray
+    for ($i = 0; $i -lt $composeFiles.Count; $i++) {
+        Write-Host "   $($i+1). $($composeFiles[$i].Name)"
+    }
+    Write-Host '   0. Cancel'
+    Write-Host ''
+    $fChoice = (Read-Host '  File number').Trim()
+    if ($fChoice -eq '0' -or [string]::IsNullOrEmpty($fChoice)) { return }
+    $fIdx = [int]$fChoice - 1
+    if ($fIdx -lt 0 -or $fIdx -ge $composeFiles.Count) {
+        Write-Host '  Invalid choice.' -ForegroundColor Red; Start-Sleep -Milliseconds 800; return
+    }
+    $composeFile = $composeFiles[$fIdx].FullName
+
+    # Parse services from the file
+    $services = @(Get-FltComposeServices -Path $composeFile)
+    if ($services.Count -eq 0) {
+        Write-Host '  No services found in this compose file.' -ForegroundColor Red
+        Read-Host '  Press Enter'; return
+    }
+
+    Write-Host ''
+    Write-Host '  Services in this compose file:' -ForegroundColor DarkGray
+    for ($i = 0; $i -lt $services.Count; $i++) {
+        Write-Host "   $($i+1). $($services[$i])"
+    }
+    Write-Host ''
+    $sChoice = (Read-Host '  Service number for this target').Trim()
+    $sIdx = [int]$sChoice - 1
+    if ($sIdx -lt 0 -or $sIdx -ge $services.Count) {
+        Write-Host '  Invalid choice.' -ForegroundColor Red; Start-Sleep -Milliseconds 800; return
+    }
+    $serviceName = $services[$sIdx]
+
+    $pm          = _Read-PackageManager
+    $relPath     = $composeFile.Replace($Script:FltScriptRoot, '').TrimStart('').TrimStart('/')
+    $projectName = [System.IO.Path]::GetFileNameWithoutExtension($composeFile).ToLower() `
+                   -replace '[^a-z0-9]',''
+
+    $ok = _Register-ContainerTarget -Name $Name -DockerHostName $DockerHostName `
+              -ContainerName $serviceName -PackageManager $pm `
+              -ComposeFile $relPath -ComposeService $serviceName -ComposeProject $projectName
+
+    if (-not $ok) {
+        Write-Host "  Failed to register target '$Name'." -ForegroundColor Red
+        Read-Host '  Press Enter'; return
+    }
+    Write-Host "  Registered fleet target: $Name (service: $serviceName)" -ForegroundColor Green
+
+    if (Read-FltYesNo -Prompt 'Start this service now (docker compose up -d)?') {
+        _Deploy-ComposeTargets -ComposeFile $composeFile -ComposeProject $projectName `
+            -Services @($serviceName)
+    }
+
+    Read-Host '  Press Enter'
+}
+
+# ── Path 3: Import from CSV ───────────────────────────────────────────────────
+
+function _Invoke-AddContainerFromCsv {
+    param([string] $DockerHostName)
+
+    Clear-Host
+    Write-Host '  Add New Target  >  Import from CSV' -ForegroundColor Cyan
+    Write-Host ''
+    Write-Host '  CSV columns: Name, Template, AmsNetId, IpAddress, SshPort, PackageManager' -ForegroundColor DarkGray
+    Write-Host '  All containers in the CSV share one compose file (multiple services).' -ForegroundColor DarkGray
+    Write-Host ''
+
+    $csvPath = Read-FltValue 'Path to CSV file (blank to cancel):' -CancelOnBlank
+    if (-not $csvPath) { return }
+    if (-not (Test-Path $csvPath)) {
+        Write-Host "  File not found: $csvPath" -ForegroundColor Red
+        Read-Host '  Press Enter'; return
+    }
+
+    $outputName = Read-FltValue 'Compose file name (saved as compose\<name>.yml, blank to cancel):' -CancelOnBlank
+    if (-not $outputName) { return }
+
+    $networkName = Get-FltCfgValue 'compose' 'network' 'container-network'
+    $networkDef  = _Read-NetworkDefinition -NetworkName $networkName
+    $isExternal  = $networkDef -eq 'external: true'
+
+    Write-Host ''
+    Write-Host '  Generating compose file from CSV...' -ForegroundColor Cyan
+
+    $result = Import-FltContainerCsv -CsvPath $csvPath -OutputName $outputName `
+                  -NetworkName $networkName -NetworkExternal $isExternal
+
+    if (-not $result.Ok) {
+        Write-Host "  Failed: $($result.Message)" -ForegroundColor Red
+        Read-Host '  Press Enter'; return
+    }
+    Write-Host "  Created: $($result.ComposeFile) ($($result.Services.Count) service(s))" `
+        -ForegroundColor Green
+
+    $relPath     = $result.ComposeFile.Replace($Script:FltScriptRoot, '').TrimStart('\').TrimStart('/')
+    $projectName = [System.IO.Path]::GetFileNameWithoutExtension($result.ComposeFile).ToLower() `
+                   -replace '[^a-z0-9]',''
+
+    # Register one fleet target per service
+    $registered  = 0
+    $needsBuild  = $false
+    foreach ($svc in $result.Services) {
+        $ok = _Register-ContainerTarget -Name $svc.Name -DockerHostName $DockerHostName `
+                  -ContainerName $svc.Name -PackageManager $svc.Pm `
+                  -ComposeFile $relPath -ComposeService $svc.Name -ComposeProject $projectName
+        if ($ok) {
+            $registered++
+            Write-Host "  + $($svc.Name)" -ForegroundColor DarkGray
+        } else {
+            Write-Host "  ! $($svc.Name) — already exists, skipped" -ForegroundColor Yellow
+        }
+        if ($svc.Template -eq 'debian-ssh') { $needsBuild = $true }
+    }
+
+    Write-Host ''
+    Write-Host "  Registered $registered of $($result.Services.Count) target(s)." -ForegroundColor Green
+
+    $svcNames = $result.Services | ForEach-Object { $_.Name }
+    if (Read-FltYesNo -Prompt 'Pull images and start all containers now?') {
+        _Deploy-ComposeTargets -ComposeFile $result.ComposeFile -ComposeProject $projectName `
+            -Services @($svcNames) -NeedsBuild $needsBuild
+    }
+
+    Read-Host '  Press Enter'
+}
+
+# ── Path 0: Manual (no compose file) ─────────────────────────────────────────
+
+function _Invoke-AddContainerManual {
+    param(
+        [string] $Name,
+        [string] $DockerHostName
+    )
+
+    $containerName = Read-FltValue 'Container name (e.g. web_app, blank to cancel):' -CancelOnBlank
+    if (-not $containerName) { return }
+
+    $pm = _Read-PackageManager
+
+    $ok = _Register-ContainerTarget -Name $Name -DockerHostName $DockerHostName `
+              -ContainerName $containerName -PackageManager $pm
+
+    if ($ok) {
+        Write-Host "  Added '$Name' → container '$containerName' on '$DockerHostName' ($pm)." `
+            -ForegroundColor Green
+    } else {
+        Write-Host "  Failed to save target." -ForegroundColor Red
+    }
+    Read-Host '  Press Enter'
+}
+
 
 function Get-FltSources {
     $raw  = Invoke-FltTcpkg -ArgList @('source','list','--as-json') -Silent

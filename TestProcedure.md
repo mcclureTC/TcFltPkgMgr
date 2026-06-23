@@ -549,6 +549,27 @@ Tests `data/ComposeRepository.ps1`. All checks run against a temp directory with
 
 ---
 
+### Suite 34 — Container target registration
+
+**Infrastructure required:** None (fully offline)
+**Per target:** No
+**Check count:** 8 (34a–34h)
+
+Tests `_Register-ContainerTarget` and the four `_Invoke-AddContainer*` path functions in `ui/menus/TargetMenu.ps1`. Uses a synthetic fleet with one Docker host target. No interactive prompts are called.
+
+| # | Test name | What is tested | How verified |
+|---|-----------|----------------|--------------|
+| 34a | Target added to FleetTargets | `_Register-ContainerTarget` adds the target to `$Script:FleetTargets` | Checks `Where-Object Name -eq 'web-1'` returns a result |
+| 34b | DockerHost/ContainerName/TargetType/OS fields | All four fields set correctly | Checks exact field values |
+| 34c | Address/Port/User inherited from Docker host | Container inherits connection info from its Docker host fleet target | Checks `Address='10.0.0.1'`, `Port=22`, `User='admin'` |
+| 34d | ComposeFile/Service/Project stored | Compose fields written to `FleetTarget` when supplied | Checks all three fields match supplied values |
+| 34e | Duplicate guard | Second registration of same name returns `$false` without adding | Checks return value and `FleetTargets.Count` unchanged |
+| 34f | `__local__` host address | When `DockerHostName='__local__'`, Address=`__local__`, Port=0, User=empty | Checks all three placeholder values |
+| 34g | All four path functions defined | `_Invoke-AddContainerFromTemplate/File/Csv/Manual` all exist | `Get-Command` checks for each |
+| 34h | `_Deploy-ComposeTargets` defined | Shared deploy helper exists | `Get-Command` returns a result |
+
+---
+
 ## Adding New Tests
 
 When implementing a new phase, add tests in the appropriate location:

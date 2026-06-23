@@ -926,14 +926,24 @@ be captured before passing to the scriptblock. Apply the same pattern in
 - [x] Security: no hardcoded secrets
 - [x] `README.md`: Phase 8.8 compose infrastructure section added
 
-### 8.9 — Updated Add Target flow (compose-aware container branch)
+### 8.9 — Updated Add Target flow (compose-aware container branch) ✅
 
-- [ ] Container Add flow prompts: `1. From existing compose file`  `2. Create from template`  `3. Import from CSV`
-- [ ] Template path: pick template → prompt variables → generate `compose/<name>.yml` → pick services
-- [ ] Existing file path: browse `compose/` → pick `.yml` → pick service
-- [ ] CSV path: import CSV → generate compose file → register all services
-- [ ] After registration: pull images then `docker compose up -d`
-- [ ] `ComposeFile`, `ComposeService`, `ComposeProject` set on each registered target
+- [x] Container Add flow prompts: `1. From existing compose file`  `2. Create from template`  `3. Import from CSV`
+- [x] Template path: pick template → prompt variables → generate `compose/<name>.yml` → pick services
+- [x] Existing file path: browse `compose/` → pick `.yml` → pick service
+- [x] CSV path: import CSV → generate compose file → register all services
+- [x] After registration: pull images then `docker compose up -d`
+- [x] `ComposeFile`, `ComposeService`, `ComposeProject` set on each registered target
+
+- [x] Suite 34 (Container target registration) — 8 checks (34a–34h), fully offline:
+      34a target added · 34b fields · 34c address inheritance · 34d compose fields ·
+      34e duplicate guard · 34f __local__ host · 34g all path functions · 34h deploy function
+- [x] `IntegrationTests.ps1` split into 5 files by subsystem:
+      `IT-Infrastructure.ps1` (6 suites) · `IT-TcpkgWinGet.ps1` (4) ·
+      `IT-Ansible.ps1` (7) · `IT-Containers.ps1` (7)
+      `IntegrationTests.ps1` is now the thin header with helpers + dot-sources
+- [x] Security: no hardcoded secrets
+- [x] `README.md`: Phase 8.9 section added
 
 ### 8.10 — Updated Container Admin menu (compose-aware)
 
