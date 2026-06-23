@@ -945,6 +945,16 @@ be captured before passing to the scriptblock. Apply the same pattern in
 - [x] Security: no hardcoded secrets
 - [x] `README.md`: Phase 8.9 section added
 
+### QOL improvements (alongside Phase 8.9) ✅
+
+- [x] `TestRunner.ps1` — auto-continues between suites when all checks pass;
+      pauses only on failure or warning; 400 ms sleep on all-pass so result is visible
+- [x] `DisplayAdapter.ps1` (`Read-FltBatchNav`) — skips blocking input when
+      `$Script:FltReadOnly` is true or `[Console]::IsInputRedirected` (prevents test hangs)
+- [x] `IT-Containers.ps1` (Suite 34) — saves and restores `targets.local.json`
+      so synthetic test targets are not persisted to disk
+- [x] `IntegrationTests.ps1` split into 5 files by subsystem (see Phase 8.9 notes)
+
 ### 8.10 — Updated Container Admin menu (compose-aware)
 
 - [ ] Pull (3) → `docker compose pull <service>` (when ComposeFile set)

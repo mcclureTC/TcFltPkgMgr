@@ -606,7 +606,8 @@ function Invoke-IT_Phase80PreWork {
 
     _IT_Section 'Phase 8.0 pre-work'
 
-    # Save/restore batch state
+    # Save/restore batch state and fleet targets (31e sets FleetTargets temporarily)
+    $savedFleetTargets = $Script:FleetTargets
     $savedAction      = $Script:FltBatchAction
     $savedPackage     = $Script:FltBatchPackageSpec
     $savedMode        = $Script:FltBatchMode
@@ -774,6 +775,7 @@ function Invoke-IT_Phase80PreWork {
     # ------------------------------------------------------------------
     # Restore state
     # ------------------------------------------------------------------
+    $Script:FleetTargets        = $savedFleetTargets
     $Script:FltBatchAction      = $savedAction
     $Script:FltBatchPackageSpec = $savedPackage
     $Script:FltBatchMode        = $savedMode
@@ -796,7 +798,8 @@ function Invoke-IT_ContainerAdminMenu {
 
     _IT_Section 'Container Admin menu'
 
-    $savedTargets = $Script:FleetTargets
+    $savedTargets      = $Script:FleetTargets
+    $savedFleetTargets = $Script:FleetTargets
 
     function _MkCntr {
         param([string]$Name, [string]$DockerHostName, [string]$Container, [string]$PM = 'apt')
@@ -953,7 +956,7 @@ function Invoke-IT_ContainerAdminMenu {
         _IT_Fail $r '32j  Mixed fleet routing' $_.Exception.Message
     }
 
-    $Script:FleetTargets = $savedTargets
+    $Script:FleetTargets = $savedFleetTargets
     return $r
 }
 

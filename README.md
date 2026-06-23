@@ -846,6 +846,20 @@ These are used by the Container Admin menu for compose-aware lifecycle operation
 
 ---
 
+## Test runner behaviour
+
+**Setup → 10. Tests** opens the test runner.
+
+When running individual suites or all integration tests (option 9):
+
+- **All checks passed** — 400 ms pause then the next suite starts automatically
+- **Any failure or warning** — pauses with “Press Enter to return” so the output can be read
+
+This means a full run of all 24 integration suites completes without any user
+interaction when everything is green.
+
+---
+
 ## File Layout
 
 ```

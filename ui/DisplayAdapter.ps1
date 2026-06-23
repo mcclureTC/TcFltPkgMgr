@@ -111,6 +111,11 @@ function Move-FltBatchPage {
 # then waits for Enter. Call after all batch results are written.
 function Read-FltBatchNav {
     param([string]$PromptText = '  Batch complete. Press Enter to continue (- / + to page)')
+
+    # Skip all blocking input when running non-interactively (tests, piped input)
+    # or in read-only mode where no real batch was run.
+    if ([Console]::IsInputRedirected -or $Script:FltReadOnly) { return }
+
     if ($Script:FltBatchTotalPages -le 1) {
         [void](Read-Host $PromptText.Replace(' (- / + to page)', ''))
         return

@@ -153,7 +153,11 @@ function _Show-TestRunnerDashboard {
 function _TR_RunDiag {
     Clear-Host
     Invoke-FltDiagnostics
-    Read-Host '  Press Enter to return'
+    if ($Script:_diagFail -gt 0 -or $Script:_diagWarn -gt 0) {
+        Read-Host '  Press Enter to return'
+    } else {
+        Start-Sleep -Milliseconds 400
+    }
     return [pscustomobject]@{
         Passed = $Script:_diagPass
         Failed = $Script:_diagFail
@@ -267,7 +271,12 @@ function _TR_RunIntSuite {
         Write-Host "  ($notShown of $defined defined checks not shown — only fire on failure or unmet prerequisites)" -ForegroundColor DarkGray
     }
     Write-Host ''
-    Read-Host '  Press Enter to return'
+    # Auto-continue when all checks passed; pause on any failure or warning
+    if ($r.Failed -gt 0 -or $r.Warned -gt 0) {
+        Read-Host '  Press Enter to return'
+    } else {
+        Start-Sleep -Milliseconds 400   # brief pause so the result is visible
+    }
     return $r
 }
 
