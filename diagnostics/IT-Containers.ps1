@@ -1347,3 +1347,176 @@ function Invoke-IT_ContainerTargetReg {
 
     return $r
 }
+
+# ── Suite 35 — Phase 8.10 compose-aware lifecycle ─────────────────────────────
+
+function Invoke-IT_ComposeLifecycle {
+    $r = _IT_NewResult
+
+    _IT_Section 'Phase 8.10 compose-aware lifecycle'
+
+    $savedFleetTargets = $Script:FleetTargets
+    $savedReadOnly     = $Script:FltReadOnly
+    $savedBatchStatus  = $Script:FltBatchStatus
+    $savedBatchTargets = $Script:FltBatchTargets
+    $savedBatchHeight  = $Script:FltBatchDashHeight
+    $savedBatchScroll  = $Script:FltBatchScrollStart
+    $savedBatchPage    = $Script:FltBatchPage
+    $savedPageSize     = $Script:FltBatchPageSize
+    $savedTotalPages   = $Script:FltBatchTotalPages
+    $savedAction       = $Script:FltBatchAction
+    $savedPackage      = $Script:FltBatchPackageSpec
+    $savedMode         = $Script:FltBatchMode
+    $savedTimeout      = $Script:FltBatchTimeoutSecs
+
+    $Script:FltReadOnly = $true
+
+    # ------------------------------------------------------------------
+    # 35a — _Get-TargetComposeFile: returns '' when ComposeFile empty
+    # ------------------------------------------------------------------
+    try {
+        $t = [FleetTarget]::new('no-compose', '10.0.0.1', 22, 'admin', $false)
+        $t.TargetType = 'container'; $t.ComposeFile = ''
+        $Script:FleetTargets = @($t)
+        $path = _Get-TargetComposeFile -Target $t
+        if ($path -eq '') {
+            _IT_Pass $r '35a  _Get-TargetComposeFile: returns empty string when ComposeFile not set'
+        } else {
+            _IT_Fail $r '35a  _Get-TargetComposeFile: returns empty string when ComposeFile not set' `
+                "Got: $path"
+        }
+    } catch { _IT_Fail $r '35a  _Get-TargetComposeFile empty' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 35b — _Get-TargetComposeFile: returns '' when file does not exist on disk
+    # ------------------------------------------------------------------
+    try {
+        $t = [FleetTarget]::new('missing-compose', '10.0.0.1', 22, 'admin', $false)
+        $t.TargetType = 'container'
+        $t.ComposeFile = 'compose\nonexistent-file.yml'
+        $path = _Get-TargetComposeFile -Target $t
+        if ($path -eq '') {
+            _IT_Pass $r '35b  _Get-TargetComposeFile: returns empty string when file missing from disk'
+        } else {
+            _IT_Fail $r '35b  _Get-TargetComposeFile: returns empty string when file missing from disk' `
+                "Got: $path"
+        }
+    } catch { _IT_Fail $r '35b  _Get-TargetComposeFile missing' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 35c — _Invoke-ComposeOrDockerAction read-only: returns Skipped for compose target
+    # ------------------------------------------------------------------
+    try {
+        $t = [FleetTarget]::new('cntr-1', '__local__', 0, '', $false)
+        $t.TargetType = 'container'; $t.DockerHost = '__local__'
+        $t.ComposeFile = 'compose\test.yml'; $t.ComposeService = 'cntr-1'
+
+        $Script:FltBatchStatus  = @{ 'cntr-1' = @{ Status='Pending'; Duration=0.0; Note='' } }
+        $Script:FltBatchTargets = @($t)
+        $Script:FltBatchDashHeight  = 15
+        $Script:FltBatchScrollStart = 16
+        $Script:FltBatchPage        = 0
+        $Script:FltBatchPageSize    = 20
+        $Script:FltBatchTotalPages  = 1
+
+        # Suppress Update-FltBatchRow output during test
+        function Update-FltBatchRow { param($n,$s,$d,$nt) <# no-op #> }
+
+        $results = @(_Invoke-ComposeOrDockerAction -Verb 'start' -Selected @($t))
+
+        if ($results.Count -gt 0 -and $results[0].Status -eq 'Skipped') {
+            _IT_Pass $r '35c  _Invoke-ComposeOrDockerAction read-only: compose target returns Skipped'
+        } else {
+            _IT_Fail $r '35c  _Invoke-ComposeOrDockerAction read-only: compose target returns Skipped' `
+                "Count=$($results.Count) Status=$($results[0].Status)"
+        }
+    } catch { _IT_Fail $r '35c  _Invoke-ComposeOrDockerAction read-only' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 35d — _Invoke-ComposeOrDockerAction: direct (no compose) target routes to docker CLI
+    # ------------------------------------------------------------------
+    try {
+        $t = [FleetTarget]::new('direct-1', '__local__', 0, '', $false)
+        $t.TargetType = 'container'; $t.DockerHost = '__local__'
+        $t.ComposeFile = ''   # no compose file
+
+        $Script:FltBatchStatus  = @{ 'direct-1' = @{ Status='Pending'; Duration=0.0; Note='' } }
+
+        $results = @(_Invoke-ComposeOrDockerAction -Verb 'start' -DockerVerb 'start' -Selected @($t))
+
+        # Read-only mode + __local__ docker → Skipped (from Invoke-FltDockerLifecycleBatch)
+        if ($results.Count -gt 0 -and $results[0].Status -eq 'Skipped') {
+            _IT_Pass $r '35d  _Invoke-ComposeOrDockerAction: no-compose target routes to docker CLI (Skipped in read-only)'
+        } else {
+            _IT_Fail $r '35d  _Invoke-ComposeOrDockerAction: no-compose target routes to docker CLI' `
+                "Count=$($results.Count) Status=$(if ($results.Count -gt 0) { $results[0].Status } else { 'none' })"
+        }
+    } catch { _IT_Fail $r '35d  _Invoke-ComposeOrDockerAction direct' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 35e — Invoke-ContainerDeployMenu is defined
+    # ------------------------------------------------------------------
+    try {
+        $fn = Get-Command 'Invoke-ContainerDeployMenu' -ErrorAction SilentlyContinue
+        if ($fn) {
+            _IT_Pass $r '35e  Invoke-ContainerDeployMenu is defined'
+        } else {
+            _IT_Fail $r '35e  Invoke-ContainerDeployMenu is defined' 'Function not found'
+        }
+    } catch { _IT_Fail $r '35e  Invoke-ContainerDeployMenu' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 35f — _Get-TargetComposeFile is defined
+    # ------------------------------------------------------------------
+    try {
+        $fn = Get-Command '_Get-TargetComposeFile' -ErrorAction SilentlyContinue
+        if ($fn) {
+            _IT_Pass $r '35f  _Get-TargetComposeFile is defined'
+        } else {
+            _IT_Fail $r '35f  _Get-TargetComposeFile is defined' 'Function not found'
+        }
+    } catch { _IT_Fail $r '35f  _Get-TargetComposeFile defined' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 35g — _Invoke-ComposeOrDockerAction is defined
+    # ------------------------------------------------------------------
+    try {
+        $fn = Get-Command '_Invoke-ComposeOrDockerAction' -ErrorAction SilentlyContinue
+        if ($fn) {
+            _IT_Pass $r '35g  _Invoke-ComposeOrDockerAction is defined'
+        } else {
+            _IT_Fail $r '35g  _Invoke-ComposeOrDockerAction is defined' 'Function not found'
+        }
+    } catch { _IT_Fail $r '35g  _Invoke-ComposeOrDockerAction defined' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 35h — Container Admin menu dispatch includes choice 10
+    # ------------------------------------------------------------------
+    try {
+        # Verify the menu function body contains '10' dispatch
+        $fnBody = (Get-Command 'Invoke-ContainerAdminMenu').ScriptBlock.ToString()
+        if ($fnBody -match "'10'.*Invoke-ContainerDeployMenu") {
+            _IT_Pass $r '35h  Admin menu dispatch includes choice 10 → Invoke-ContainerDeployMenu'
+        } else {
+            _IT_Fail $r '35h  Admin menu dispatch includes choice 10 → Invoke-ContainerDeployMenu' `
+                'Pattern not found in function body'
+        }
+    } catch { _IT_Fail $r '35h  Admin menu choice 10' $_.Exception.Message }
+
+    # Restore
+    $Script:FleetTargets        = $savedFleetTargets
+    $Script:FltReadOnly         = $savedReadOnly
+    $Script:FltBatchStatus      = $savedBatchStatus
+    $Script:FltBatchTargets     = $savedBatchTargets
+    $Script:FltBatchDashHeight  = $savedBatchHeight
+    $Script:FltBatchScrollStart = $savedBatchScroll
+    $Script:FltBatchPage        = $savedBatchPage
+    $Script:FltBatchPageSize    = $savedPageSize
+    $Script:FltBatchTotalPages  = $savedTotalPages
+    $Script:FltBatchAction      = $savedAction
+    $Script:FltBatchPackageSpec = $savedPackage
+    $Script:FltBatchMode        = $savedMode
+    $Script:FltBatchTimeoutSecs = $savedTimeout
+
+    return $r
+}

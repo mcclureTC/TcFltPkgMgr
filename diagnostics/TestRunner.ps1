@@ -206,6 +206,7 @@ function _TR_RunIntSuite {
             'Invoke-IT_ContainerAdminMenu'  { Invoke-IT_ContainerAdminMenu }
             'Invoke-IT_ComposeRepository'   { Invoke-IT_ComposeRepository }
             'Invoke-IT_ContainerTargetReg'  { Invoke-IT_ContainerTargetReg }
+            'Invoke-IT_ComposeLifecycle'     { Invoke-IT_ComposeLifecycle }
             'Invoke-IT_SSH'             { Invoke-IT_SSH -Target ($Targets | Select-Object -First 1) -Credential $Credential }
             'Invoke-IT_ReachCache'      { Invoke-IT_ReachCache -Target ($Targets | Select-Object -First 1) }
             'Invoke-IT_TcpkgLocal'      { Invoke-IT_TcpkgLocal -Target ($Targets | Select-Object -First 1) }
@@ -240,6 +241,7 @@ function _TR_RunIntSuite {
                 'Invoke-IT_ContainerAdminMenu'  { Invoke-IT_ContainerAdminMenu }
                 'Invoke-IT_ComposeRepository'   { Invoke-IT_ComposeRepository }
                 'Invoke-IT_ContainerTargetReg'  { Invoke-IT_ContainerTargetReg }
+                'Invoke-IT_ComposeLifecycle'     { Invoke-IT_ComposeLifecycle }
                 default {
                     Write-Host "  Unknown suite: $($Suite.Function)" -ForegroundColor Red
                     _IT_NewResult

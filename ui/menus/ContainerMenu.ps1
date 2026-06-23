@@ -185,6 +185,121 @@ function _Invoke-DockerLifecycleAction {
 }
 
 # ---------------------------------------------------------------------------
+# Phase 8.10 — Compose-aware lifecycle helper
+# ---------------------------------------------------------------------------
+
+# Returns the absolute compose file path for a target, or '' if not set.
+function _Get-TargetComposeFile {
+    param([FleetTarget]$Target)
+    if ([string]::IsNullOrEmpty($Target.ComposeFile)) { return '' }
+    $abs = Join-Path $Script:FltScriptRoot $Target.ComposeFile
+    if (Test-Path $abs) { return $abs }
+    return ''
+}
+
+# Runs a compose or docker CLI lifecycle action across a selection of targets.
+# Targets with ComposeFile set use docker compose; others use docker CLI directly.
+# Verb mapping: start→start, stop→stop, restart→restart, pull→pull,
+#               up→up -d, recreate→up -d --force-recreate
+function _Invoke-ComposeOrDockerAction {
+    param(
+        [Parameter(Mandatory)][string]   $Verb,        # compose verb: start/stop/restart/pull/up
+        [string]   $DockerVerb  = '',                  # docker CLI verb override (start/stop/restart/pull)
+        [string]   $ExtraArgs   = '',
+        [object[]] $Selected    = @(),
+        [int]      $TimeoutSecs = 300
+    )
+
+    if ($Selected.Count -eq 0) { return }
+
+    $composeTargets = @($Selected | Where-Object { -not [string]::IsNullOrEmpty($_.ComposeFile) })
+    $directTargets  = @($Selected | Where-Object {      [string]::IsNullOrEmpty($_.ComposeFile) })
+
+    $allResults = [System.Collections.Generic.List[object]]::new()
+
+    # ── Compose path ──────────────────────────────────────────────────────────
+    # Group by compose file so one `docker compose` call handles all services in that file
+    if ($composeTargets.Count -gt 0) {
+        $byFile = @{}
+        foreach ($t in $composeTargets) {
+            $absFile = _Get-TargetComposeFile -Target $t
+            if (-not $absFile) {
+                # Compose file missing — fall back to direct docker CLI
+                $directTargets += $t
+                continue
+            }
+            if (-not $byFile.ContainsKey($absFile)) { $byFile[$absFile] = @() }
+            $byFile[$absFile] += $t
+        }
+
+        foreach ($absFile in $byFile.Keys) {
+            $fileTargets = $byFile[$absFile]
+            $services    = @($fileTargets | ForEach-Object { $_.ComposeService } | Where-Object { $_ })
+            $project     = ($fileTargets[0]).ComposeProject
+            if ([string]::IsNullOrEmpty($project)) {
+                $project = [System.IO.Path]::GetFileNameWithoutExtension($absFile).ToLower() `
+                           -replace '[^a-z0-9]',''
+            }
+
+            if ($Script:FltReadOnly) {
+                foreach ($t in $fileTargets) {
+                    $allResults.Add([pscustomobject]@{
+                        TargetName = $t.Name; Status = 'Skipped'
+                        Note = "[read-only] would run: docker compose $Verb $($t.ComposeService)"
+                        DurationSec = 0; PackageManager = 'docker-lifecycle'
+                    })
+                }
+                continue
+            }
+
+            $sw     = [System.Diagnostics.Stopwatch]::StartNew()
+            $result = Invoke-FltComposeCommand -ComposeFile $absFile -ProjectName $project `
+                          -Verb $Verb -Services $services -ExtraArgs $ExtraArgs `
+                          -TimeoutSecs $TimeoutSecs
+            $sw.Stop()
+            $dur = $sw.Elapsed.TotalSeconds
+
+            foreach ($t in $fileTargets) {
+                $allResults.Add([pscustomobject]@{
+                    TargetName    = $t.Name
+                    Status        = if ($result.Ok) { 'OK' } else { 'Failed' }
+                    Note          = if ($result.Ok) { "compose $Verb" } else {
+                                        ($result.Output -split "`n" | Select-Object -Last 2) -join ' ' }
+                    DurationSec   = [math]::Round($dur, 1)
+                    PackageManager = 'docker-lifecycle'
+                })
+                Update-FltBatchRow $t.Name `
+                    (if ($result.Ok) { 'OK' } else { 'Failed' }) $dur `
+                    (if ($result.Ok) { "compose $Verb" } else { 'See output' })
+            }
+        }
+    }
+
+    # ── Direct docker CLI path (no compose file) ──────────────────────────────
+    if ($directTargets.Count -gt 0) {
+        $cliVerb = if ($DockerVerb) { $DockerVerb } else { $Verb }
+        $sshCreds = _Get-ContainerSshCreds -Targets $directTargets
+
+        $results = Invoke-FltDockerLifecycleBatch `
+                       -Targets     $directTargets `
+                       -Action      $cliVerb `
+                       -PackageSpec 'container' `
+                       -DockerArgs  $ExtraArgs `
+                       -Credential  $sshCreds.Credential `
+                       -KeyFile     $sshCreds.KeyFile `
+                       -TimeoutSecs $TimeoutSecs `
+                       -ReadOnly    $Script:FltReadOnly
+
+        foreach ($r in $results) {
+            Update-FltBatchRow $r.TargetName $r.Status $r.DurationSec $r.Note
+            $allResults.Add($r)
+        }
+    }
+
+    return $allResults.ToArray()
+}
+
+# ---------------------------------------------------------------------------
 # Phase 8.3 — Package operations
 # ---------------------------------------------------------------------------
 
@@ -216,13 +331,60 @@ function Invoke-ContainerPullMenu {
     Clear-Host
     Write-Host '  Containers  >  Pull image' -ForegroundColor Cyan
     Write-Host ''
-    Write-Host '  The image will be pulled on each container''s Docker host (not inside the container).' `
-        -ForegroundColor DarkGray
-    Write-Host ''
-    $image = (Read-Host '  Image name/tag (e.g. nginx:latest — blank to cancel)').Trim()
-    if ([string]::IsNullOrEmpty($image)) { return }
+
+    $containers = @(_Get-ContainerTargets)
+    if ($containers.Count -eq 0) {
+        Write-Host '  No container targets configured.' -ForegroundColor Yellow
+        Read-Host '  Press Enter'; return
+    }
+
+    # Check if any targets have a compose file — if so, pull via compose (no image prompt needed)
+    $composeCount = @($containers | Where-Object { -not [string]::IsNullOrEmpty($_.ComposeFile) }).Count
+    $directCount  = @($containers | Where-Object {      [string]::IsNullOrEmpty($_.ComposeFile) }).Count
+
+    $image = ''
+    if ($directCount -gt 0) {
+        Write-Host '  Some targets have no compose file — image name required for those.' -ForegroundColor DarkGray
+        Write-Host ''
+        $image = (Read-Host '  Image name/tag for non-compose targets (blank to skip direct pull)').Trim()
+    }
+
+    Show-FleetDashboard -Targets $containers -LastCommand '' -ResultLines @(
+        'Pull image — select targets', '- / + to page'
+    )
+    $selected = @(Read-FltMultiSelect -Items $containers -Prompt 'Targets (11+)')
+    if ($selected.Count -eq 0) { return }
+
+    if (-not (Read-FltYesNo -Prompt 'Pull images now?')) { return }
+
+    Show-FleetBatchDashboard -Targets $selected -Action 'pull' -PackageSpec 'image' `
+        -Mode 'docker lifecycle' -TimeoutSecs 300
+
+    # Compose targets: docker compose pull (no image arg needed)
+    # Direct targets: docker pull <image> — only if image was provided
+    $composeSelected = @($selected | Where-Object { -not [string]::IsNullOrEmpty($_.ComposeFile) })
+    $directSelected  = @($selected | Where-Object {      [string]::IsNullOrEmpty($_.ComposeFile) })
+
+    if ($directSelected.Count -gt 0 -and [string]::IsNullOrEmpty($image)) {
+        foreach ($t in $directSelected) {
+            Update-FltBatchRow $t.Name 'Skipped' 0 'No image specified for direct pull'
+        }
+        $directSelected = @()
+    }
+
     $capturedImage = $image
-    _Invoke-DockerLifecycleAction -Action 'pull' -PackageSpec $capturedImage -TimeoutSecs 300
+    $allResults = @(_Invoke-ComposeOrDockerAction -Verb 'pull' -DockerVerb 'pull' `
+                        -ExtraArgs $capturedImage -Selected $selected -TimeoutSecs 300)
+
+    $ok   = @($allResults | Where-Object { $_.Status -like 'OK*' }).Count
+    $fail = @($allResults | Where-Object { $_.Status -like 'Failed*' }).Count
+    $skip = @($allResults | Where-Object { $_.Status -like 'Skipped*' }).Count
+    $sumRow = $Script:FltBatchDashHeight - 1
+    $sumClr = if ($fail -gt 0) { "`e[91m" } else { "`e[92m" }
+    Write-Host -NoNewline "`e[${sumRow};1H${sumClr}  Complete: $ok OK  |  $skip skipped  |  $fail failed`e[0m`e[K"
+    Write-Host -NoNewline "`e[$($Script:FltBatchScrollStart);1H"
+    Write-Host ''
+    Read-FltBatchNav
 }
 
 # ---------------------------------------------------------------------------
@@ -277,15 +439,60 @@ function Invoke-ContainerLifecycleMenu {
                     -ForegroundColor Yellow
             }
         }
+        # For compose targets, use force-recreate; for others, use docker run
         $capturedRunArgsLocal = $capturedRunArgs
-        _Invoke-DockerLifecycleAction -Action 'run' -PackageSpec 'container' `
-            -DockerArgs $capturedRunArgsLocal -PreSelected $selected
+        $composeRecreate = @($selected | Where-Object { -not [string]::IsNullOrEmpty($_.ComposeFile) })
+        $directRecreate  = @($selected | Where-Object {      [string]::IsNullOrEmpty($_.ComposeFile) })
+
+        if ($composeRecreate.Count -gt 0) {
+            Show-FleetBatchDashboard -Targets $selected -Action 'recreate' -PackageSpec 'container' `
+                -Mode 'docker lifecycle' -TimeoutSecs 300
+            $allResults = @(_Invoke-ComposeOrDockerAction -Verb 'up' `
+                                -ExtraArgs '-d --force-recreate' -Selected $composeRecreate -TimeoutSecs 300)
+            foreach ($r in $allResults) { Update-FltBatchRow $r.TargetName $r.Status $r.DurationSec $r.Note }
+        }
+        if ($directRecreate.Count -gt 0) {
+            _Invoke-DockerLifecycleAction -Action 'run' -PackageSpec 'container' `
+                -DockerArgs $capturedRunArgsLocal -PreSelected $directRecreate
+        }
+        Read-FltBatchNav
         return
     }
 
-    # start / stop / restart
+    # start / stop / restart — use compose when available, docker CLI as fallback
     $capturedAction = $Action
-    _Invoke-DockerLifecycleAction -Action $capturedAction -PackageSpec 'container'
+    $containers = @(_Get-ContainerTargets)
+    if ($containers.Count -eq 0) {
+        Write-Host '  No container targets configured.' -ForegroundColor Yellow
+        Read-Host '  Press Enter'; return
+    }
+    Show-FleetDashboard -Targets $containers -LastCommand '' -ResultLines @(
+        "Action: $($capturedAction.ToUpper())", 'Select targets'
+    )
+    $selected = @(Read-FltMultiSelect -Items $containers -Prompt 'Targets (11+)')
+    if ($selected.Count -eq 0) { return }
+
+    Write-Host ''
+    Write-Host "  $($capturedAction.ToUpper()) $($selected.Count) container(s)." -ForegroundColor Cyan
+    if (-not (Read-FltYesNo -Prompt 'Proceed?')) { return }
+
+    Show-FleetBatchDashboard -Targets $selected -Action $capturedAction -PackageSpec 'container' `
+        -Mode 'docker lifecycle' -TimeoutSecs 120
+
+    $allResults = @(_Invoke-ComposeOrDockerAction -Verb $capturedAction `
+                        -DockerVerb $capturedAction -Selected $selected -TimeoutSecs 120)
+
+    foreach ($r in $allResults) { Update-FltBatchRow $r.TargetName $r.Status $r.DurationSec $r.Note }
+
+    $ok   = @($allResults | Where-Object { $_.Status -like 'OK*' }).Count
+    $fail = @($allResults | Where-Object { $_.Status -like 'Failed*' }).Count
+    $skip = @($allResults | Where-Object { $_.Status -like 'Skipped*' }).Count
+    $sumRow = $Script:FltBatchDashHeight - 1
+    $sumClr = if ($fail -gt 0) { "`e[91m" } else { "`e[92m" }
+    Write-Host -NoNewline "`e[${sumRow};1H${sumClr}  Complete: $ok OK  |  $skip skipped  |  $fail failed`e[0m`e[K"
+    Write-Host -NoNewline "`e[$($Script:FltBatchScrollStart);1H"
+    Write-Host ''
+    Read-FltBatchNav
 }
 
 # ---------------------------------------------------------------------------
@@ -533,6 +740,138 @@ function Invoke-ContainerHealthMenu {
 # Phase 8.2 — Container Admin top-level menu
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Phase 8.10 — Deploy (first-time container creation via docker compose up -d)
+# ---------------------------------------------------------------------------
+
+function Invoke-ContainerDeployMenu {
+    Clear-Host
+    Write-Host '  Containers  >  Deploy' -ForegroundColor Cyan
+    Write-Host ''
+    Write-Host '  Deploy creates and starts containers that do not yet exist.' -ForegroundColor DarkGray
+    Write-Host '  Only targets with a compose file can be deployed this way.' -ForegroundColor DarkGray
+    Write-Host ''
+
+    $containers = @(_Get-ContainerTargets | Where-Object {
+        -not [string]::IsNullOrEmpty($_.ComposeFile)
+    })
+
+    if ($containers.Count -eq 0) {
+        Write-Host '  No targets with compose files found.' -ForegroundColor Yellow
+        Write-Host '  Add a container target using option 1 or 3 in the Add Target flow.' -ForegroundColor DarkGray
+        Read-Host '  Press Enter'; return
+    }
+
+    Show-FleetDashboard -Targets $containers -LastCommand '' -ResultLines @(
+        'Deploy — docker compose up -d', 'Select targets to deploy'
+    )
+    $selected = @(Read-FltMultiSelect -Items $containers -Prompt 'Targets (11+)')
+    if ($selected.Count -eq 0) { return }
+
+    # Check if any need --build (debian-ssh uses a local Dockerfile)
+    $needsBuild = $false
+    foreach ($t in $selected) {
+        $absFile = _Get-TargetComposeFile -Target $t
+        if ($absFile) {
+            $fileContent = Get-Content $absFile -Raw -ErrorAction SilentlyContinue
+            if ($fileContent -match 'build:') { $needsBuild = $true; break }
+        }
+    }
+
+    if ($needsBuild) {
+        Write-Host ''
+        Write-Host '  One or more compose files use a local build context (Dockerfile).' -ForegroundColor Yellow
+        $buildChoice = Read-FltYesNo -Prompt 'Build images before starting? (required for first deploy)'
+    } else {
+        $buildChoice = $false
+    }
+
+    Write-Host ''
+    Write-Host "  Deploying $($selected.Count) container(s)..." -ForegroundColor Cyan
+    if (-not (Read-FltYesNo -Prompt 'Proceed?')) { return }
+
+    Show-FleetBatchDashboard -Targets $selected -Action 'deploy' -PackageSpec 'container' `
+        -Mode 'docker lifecycle' -TimeoutSecs 600
+
+    # Group by compose file and run once per file
+    $byFile = @{}
+    foreach ($t in $selected) {
+        $absFile = _Get-TargetComposeFile -Target $t
+        if (-not $absFile) {
+            Update-FltBatchRow $t.Name 'Skipped' 0 'No compose file — use Recreate instead'
+            continue
+        }
+        if (-not $byFile.ContainsKey($absFile)) { $byFile[$absFile] = @() }
+        $byFile[$absFile] += $t
+    }
+
+    $allResults = [System.Collections.Generic.List[object]]::new()
+
+    foreach ($absFile in $byFile.Keys) {
+        $fileTargets = $byFile[$absFile]
+        $services    = @($fileTargets | ForEach-Object { $_.ComposeService } | Where-Object { $_ })
+        $project     = ($fileTargets[0]).ComposeProject
+        if ([string]::IsNullOrEmpty($project)) {
+            $project = [System.IO.Path]::GetFileNameWithoutExtension($absFile).ToLower() `
+                       -replace '[^a-z0-9]',''
+        }
+
+        if ($Script:FltReadOnly) {
+            foreach ($t in $fileTargets) {
+                $roResult = [pscustomobject]@{
+                    TargetName    = $t.Name
+                    Status        = 'Skipped'
+                    Note          = "[read-only] would run: docker compose up -d $($t.ComposeService)"
+                    DurationSec   = 0
+                    PackageManager = 'docker-lifecycle'
+                }
+                $allResults.Add($roResult)
+                Update-FltBatchRow $t.Name 'Skipped' 0 'Read-only mode'
+            }
+            continue
+        }
+
+        foreach ($t in $fileTargets) {
+            Update-FltBatchRow $t.Name 'Running' 0 'docker compose up -d'
+        }
+
+        $extraArgs = '-d'
+        if ($buildChoice) { $extraArgs += ' --build' }
+
+        $sw     = [System.Diagnostics.Stopwatch]::StartNew()
+        $result = Invoke-FltComposeCommand -ComposeFile $absFile -ProjectName $project `
+                      -Verb 'up' -Services $services -ExtraArgs $extraArgs -TimeoutSecs 600
+        $sw.Stop()
+        $dur = [math]::Round($sw.Elapsed.TotalSeconds, 1)
+
+        foreach ($t in $fileTargets) {
+            $status = if ($result.Ok) { 'OK' } else { 'Failed' }
+            $errLine = $result.Output -split "`n" |
+                       Where-Object { $_ -match 'Error|error' } |
+                       Select-Object -Last 1
+            $note   = if ($result.Ok) { 'deployed' } elseif ($errLine) { $errLine.Trim() } else { 'failed' }
+            Update-FltBatchRow $t.Name $status $dur $note
+            $allResults.Add([pscustomobject]@{
+                TargetName    = $t.Name
+                Status        = $status
+                Note          = $note
+                DurationSec   = $dur
+                PackageManager = 'docker-lifecycle'
+            })
+        }
+    }
+
+    $ok   = @($allResults | Where-Object { $_.Status -like 'OK*' }).Count
+    $fail = @($allResults | Where-Object { $_.Status -like 'Failed*' }).Count
+    $skip = @($allResults | Where-Object { $_.Status -like 'Skipped*' }).Count
+    $sumRow = $Script:FltBatchDashHeight - 1
+    $sumClr = if ($fail -gt 0) { "`e[91m" } else { "`e[92m" }
+    Write-Host -NoNewline "`e[${sumRow};1H${sumClr}  Complete: $ok OK  |  $skip skipped  |  $fail failed`e[0m`e[K"
+    Write-Host -NoNewline "`e[$($Script:FltBatchScrollStart);1H"
+    Write-Host ''
+    Read-FltBatchNav
+}
+
 function Invoke-ContainerAdminMenu {
     $containers = @(_Get-ContainerTargets)
 
@@ -558,6 +897,7 @@ function Invoke-ContainerAdminMenu {
         Write-Host '  1. Install package   2. Remove package    3. Pull image' -ForegroundColor White
         Write-Host '  4. Start             5. Stop              6. Restart' -ForegroundColor White
         Write-Host '  7. Recreate          8. View logs         9. Health check' -ForegroundColor White
+        Write-Host ' 10. Deploy            (docker compose up -d — first-time creation)' -ForegroundColor White
         Write-Host ''
         Write-Host '  0. Back' -ForegroundColor DarkGray
         Write-Host ''
@@ -572,11 +912,12 @@ function Invoke-ContainerAdminMenu {
             '5' { Invoke-ContainerLifecycleMenu -Action 'stop'    }
             '6' { Invoke-ContainerLifecycleMenu -Action 'restart' }
             '7' { Invoke-ContainerLifecycleMenu -Action 'recreate' }
-            '8' { Invoke-ContainerLogsMenu }
-            '9' { Invoke-ContainerHealthMenu }
-            '0' { return }
+            '8'  { Invoke-ContainerLogsMenu }
+            '9'  { Invoke-ContainerHealthMenu }
+            '10' { Invoke-ContainerDeployMenu }
+            '0'  { return }
             default {
-                Write-Host '  Enter 1-9 for an operation, 0 to go back.' -ForegroundColor Yellow
+                Write-Host '  Enter 1-10 for an operation, 0 to go back.' -ForegroundColor Yellow
                 Start-Sleep -Milliseconds 800
             }
         }

@@ -962,13 +962,25 @@ be captured before passing to the scriptblock. Apply the same pattern in
       so synthetic test targets are not persisted to disk
 - [x] `IntegrationTests.ps1` split into 5 files by subsystem (see Phase 8.9 notes)
 
-### 8.10 — Updated Container Admin menu (compose-aware)
+### 8.10 — Updated Container Admin menu (compose-aware) ✅
 
-- [ ] Pull (3) → `docker compose pull <service>` (when ComposeFile set)
-- [ ] Start/Stop/Restart (4/5/6) → `docker compose start/stop/restart <service>`
-- [ ] Recreate (7) → `docker compose up -d --force-recreate <service>`
-- [ ] New: Deploy (choice 10) → `docker compose up -d <service>` (first-time creation)
-- [ ] Fallback to direct docker CLI when `ComposeFile` is empty
+- [x] Pull (3) → `docker compose pull <service>` (when ComposeFile set)
+- [x] Start/Stop/Restart (4/5/6) → `docker compose start/stop/restart <service>`
+- [x] Recreate (7) → `docker compose up -d --force-recreate <service>`
+- [x] New: Deploy (choice 10) → `docker compose up -d <service>` (first-time creation)
+- [x] Fallback to direct docker CLI when `ComposeFile` is empty
+
+- [x] `_Get-TargetComposeFile` — resolves ComposeFile to absolute path;
+      returns `''` when not set or file missing from disk
+- [x] `_Invoke-ComposeOrDockerAction` — groups compose targets by file,
+      runs one `docker compose` call per file; falls back to docker CLI for non-compose targets
+- [x] `Invoke-ContainerDeployMenu` (choice 10) — first-time creation;
+      detects build: stanzas and offers --build; groups by compose file
+- [x] Suite 35 (Phase 8.10 compose-aware lifecycle) — 8 checks (35a–35h), fully offline:
+      35a–35b ComposeFile path resolution · 35c–35d action routing read-only ·
+      35e–35g function existence · 35h admin menu dispatch
+- [x] Security: no hardcoded secrets
+- [x] `README.md`: Phase 8.10 section added
 
 ---
 

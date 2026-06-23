@@ -860,6 +860,39 @@ interaction when everything is green.
 
 ---
 
+## Compose-aware Container Admin menu (Phase 8.10)
+
+The Container Admin menu is now compose-aware. Operations route to
+`docker compose` when a container target has a `ComposeFile` set,
+and fall back to direct Docker CLI for targets without one.
+
+### Operation routing
+
+| # | Operation | With compose file | Without compose file |
+|---|-----------|------------------|---------------------|
+| 1 | Install package | `docker exec` (unchanged) | `docker exec` |
+| 2 | Remove package | `docker exec` (unchanged) | `docker exec` |
+| 3 | Pull image | `docker compose pull <service>` | `docker pull <image>` (prompts for image) |
+| 4 | Start | `docker compose start <service>` | `docker start <container>` |
+| 5 | Stop | `docker compose stop <service>` | `docker stop <container>` |
+| 6 | Restart | `docker compose restart <service>` | `docker restart <container>` |
+| 7 | Recreate | `docker compose up -d --force-recreate <service>` | `docker stop/rm/run` |
+| 8 | View logs | SSH → `docker logs --tail N <container>` | same |
+| 9 | Health check | `docker inspect --format={{.State.Health.Status}}` | same |
+| **10** | **Deploy** | `docker compose up -d <service>` (first-time creation) | — not available |
+
+### Deploy (choice 10)
+
+Deploy creates and starts containers for the first time. Only targets with a
+`ComposeFile` are shown. If the compose file contains a `build:` stanza
+(e.g. `debian-ssh`), TcFltPkgMgr offers to add `--build` to the command.
+
+Containers in the same compose file are deployed together in one
+`docker compose up -d` call per file, so shared networks and dependencies
+are handled correctly.
+
+---
+
 ## File Layout
 
 ```

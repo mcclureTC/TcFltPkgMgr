@@ -570,6 +570,27 @@ Tests `_Register-ContainerTarget` and the four `_Invoke-AddContainer*` path func
 
 ---
 
+### Suite 35 — Phase 8.10 compose-aware lifecycle
+
+**Infrastructure required:** None (fully offline — read-only mode, function existence checks)
+**Per target:** No
+**Check count:** 8 (35a–35h)
+
+Tests the compose-aware routing helpers and Deploy menu in `ui/menus/ContainerMenu.ps1`.
+
+| # | Test name | What is tested | How verified |
+|---|-----------|----------------|--------------|
+| 35a | `_Get-TargetComposeFile`: empty when not set | Returns `''` when `ComposeFile` is empty string | Checks return value is `''` |
+| 35b | `_Get-TargetComposeFile`: empty when file missing | Returns `''` when `ComposeFile` set but file doesn't exist on disk | Checks return value is `''` |
+| 35c | `_Invoke-ComposeOrDockerAction` read-only: compose target | Compose target returns `Status='Skipped'` in read-only mode | Checks result status |
+| 35d | `_Invoke-ComposeOrDockerAction`: no-compose target routes to docker CLI | Direct (no ComposeFile) target falls back to `Invoke-FltDockerLifecycleBatch` | Checks result is Skipped (read-only + local docker) |
+| 35e | `Invoke-ContainerDeployMenu` is defined | Deploy function exists | `Get-Command` returns a result |
+| 35f | `_Get-TargetComposeFile` is defined | Helper function exists | `Get-Command` returns a result |
+| 35g | `_Invoke-ComposeOrDockerAction` is defined | Routing helper exists | `Get-Command` returns a result |
+| 35h | Admin menu dispatch includes choice 10 | `Invoke-ContainerAdminMenu` body contains `'10'` → `Invoke-ContainerDeployMenu` | Regex match on function body |
+
+---
+
 ## Adding New Tests
 
 When implementing a new phase, add tests in the appropriate location:

@@ -314,6 +314,16 @@ function Get-IT_Suites {
             PerTarget   = $false   # fully offline
             Function    = 'Invoke-IT_ContainerTargetReg'
             CheckCount  = 8
+        },
+        [pscustomobject]@{
+            Id          = 35
+            Name        = 'Phase 8.10 compose-aware lifecycle'
+            Description = '_Get-TargetComposeFile, _Invoke-ComposeOrDockerAction, Invoke-ContainerDeployMenu existence'
+            NeedsTarget = $false
+            NeedsSSH    = $false
+            PerTarget   = $false   # fully offline
+            Function    = 'Invoke-IT_ComposeLifecycle'
+            CheckCount  = 8
         }
     )
 }
