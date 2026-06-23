@@ -617,13 +617,17 @@ remote management, and hosting the Ansible operator container.
 
 ## Phase 6 — Ansible UI
 
-### 6.1 — Fleet menu (`ui/menus/FleetMenu.ps1`)
+### 6.1 — Fleet menu (`ui/menus/FleetMenu.ps1`) ✅
 
 > Current menu (after Phase 4): `1. tcpkg  2. WinGet  3. Profiles  4. UI Config  5. Setup`
 > After Phase 6: `1. tcpkg  2. WinGet  3. Linux Admin  4. Profiles  5. UI Config  6. Setup`
 
-- [ ] Add `3. Linux Admin`; Profiles→4, UI Config→5, Setup→6
-- [ ] Update dashboard footer — stays single line at 119 cols
+- [x] `3. Linux Admin` added; Profiles→4, UI Config→5, Setup→6
+- [x] Dashboard footer updated — 89 chars, within 119 col limit
+- [x] `FleetMenu.ps1` dispatch: `3`→`Invoke-LinuxAdminMenu`, `4`→`Invoke-ProfileMenu`,
+      `5`→`Invoke-UiConfigMenu`, `6`→`Invoke-SetupMenu`; error hint updated to `1-6`
+- [x] No tests required — pure UI wiring; `Invoke-LinuxAdminMenu` implemented in Phase 6.2
+- [x] `README.md`: Phase 6.1 noted in menu structure section
 
 ### 6.2 — Linux Admin menu (`ui/menus/LinuxMenu.ps1`) — new file
 

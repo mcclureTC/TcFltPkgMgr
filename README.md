@@ -571,6 +571,20 @@ ansible-vault rekey ansible/group_vars/all.yml.vault
 
 ---
 
+## Menu structure (Phase 6.1)
+
+The fleet home screen footer now reads:
+
+```
+  1. tcpkg   2. WinGet   3. Linux Admin   4. Profiles   5. UI Config   6. Setup   0. Exit
+```
+
+Selecting **3. Linux Admin** opens the Linux Admin menu (Phase 6.2) which lists all
+`OS='linux'`, non-container fleet targets and provides package, user, service, and
+playbook operations via Ansible.
+
+---
+
 ## File Layout
 
 ```

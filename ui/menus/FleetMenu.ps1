@@ -363,13 +363,14 @@ function Invoke-FleetMenu {
         }
 
         # Fixed operations
-        if ($num -eq 1) { Invoke-TcpkgMenu;  $reachJob = Invoke-FltReloadTargets $reachJob }
-        elseif ($num -eq 2) { Invoke-WinGetMenu; $reachJob = Invoke-FltReloadTargets $reachJob }
-        elseif ($num -eq 3) { Invoke-ProfileMenu }
-        elseif ($num -eq 4) { Invoke-UiConfigMenu }
-        elseif ($num -eq 5) { Invoke-SetupMenu; $reachJob = Invoke-FltReloadTargets $reachJob }
+        if ($num -eq 1) { Invoke-TcpkgMenu;      $reachJob = Invoke-FltReloadTargets $reachJob }
+        elseif ($num -eq 2) { Invoke-WinGetMenu;  $reachJob = Invoke-FltReloadTargets $reachJob }
+        elseif ($num -eq 3) { Invoke-LinuxAdminMenu; $reachJob = Invoke-FltReloadTargets $reachJob }
+        elseif ($num -eq 4) { Invoke-ProfileMenu }
+        elseif ($num -eq 5) { Invoke-UiConfigMenu }
+        elseif ($num -eq 6) { Invoke-SetupMenu;   $reachJob = Invoke-FltReloadTargets $reachJob }
         else {
-            $Script:FltMenuResultLines = @("Enter 11-$(10+$n) for a target, 1-5 for operations, 0 to exit.")
+            $Script:FltMenuResultLines = @("Enter 11-$(10+$n) for a target, 1-6 for operations, 0 to exit.")
         }
 
         & $repaint
