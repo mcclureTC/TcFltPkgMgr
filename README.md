@@ -585,6 +585,35 @@ playbook operations via Ansible.
 
 ---
 
+## Container executor (Phase 7)
+
+Container fleet targets use a two-hop execution model: SSH to the Docker host, then `docker exec` into the container. This avoids requiring SSH inside containers.
+
+### Execution functions
+
+| Function | What it does | `PackageManager` field |
+|----------|-------------|----------------------|
+| `Invoke-FltDockerExecBatch` | Runs package commands inside containers via `docker exec -i <container> <pkgcmd>` | `docker-exec` |
+| `Invoke-FltDockerLifecycleBatch` | Runs `docker pull/stop/start/restart/rm/run` on the Docker host | `docker-lifecycle` |
+| `Test-FltDockerHostReachable` | SSHes to Docker host and runs `docker info`; returns `online`, `docker-down`, or `offline` | — |
+
+### Package manager mapping
+
+The `PackageManager` field on the container target controls which CLI is used inside the container:
+
+| `PackageManager` | Install | Remove |
+|-----------------|---------|--------|
+| `apt` (default) | `apt-get install -y` | `apt-get remove -y` |
+| `apk` | `apk add` | `apk del` |
+| `yum` | `yum install -y` | `yum remove -y` |
+| `dnf` | `dnf install -y` | `dnf remove -y` |
+
+### Fleet routing
+
+`Invoke-FleetAction` routes `TargetType='container'` targets to `Invoke-FltDockerExecBatch` for package operations. The Docker host address and container name are stored on the `FleetTarget` and resolved at run time.
+
+---
+
 ## File Layout
 
 ```
@@ -619,6 +648,7 @@ TcFltPkgMgr/
 ├── execution/
 │   ├── AnsibleExecutor.ps1           # Ansible inventory, playbook builder, batch executor
 │   ├── CommandLog.ps1                # Batch log entries
+│   ├── ContainerExecutor.ps1         # Docker exec/lifecycle batch executor
 │   ├── FleetExecutor.ps1             # Routes targets → ansible/tcpkg/winget/push
 │   ├── SshExecutor.ps1               # tcpkg SSH batch executor
 │   └── WinGetExecutor.ps1            # WinGet SSH batch executor

@@ -166,15 +166,17 @@ function Invoke-FleetAction {
         }
     }
 
-    # Split targets into four buckets by OS and package manager:
+    # Split targets into five buckets by OS, type, and package manager:
     #   Ansible    — OS = 'linux' AND TargetType != 'container' (no feed check, no push)
+    #   Container  — TargetType = 'container' (docker exec or lifecycle, any OS)
     #   tcpkg SSH  — InternetAccess = True AND EffectivePackageManager = 'tcpkg'/'both'
     #   WinGet SSH — InternetAccess = True AND EffectivePackageManager = 'winget'/'both'
     #   Push       — InternetAccess = False (local tcpkg push, Windows/tcpkg only)
 
-    # Ansible targets are separated first — they never enter the Windows buckets
+    # Ansible and container targets are separated first — they never enter the Windows buckets
     $ansibleTargets   = @($Targets | Where-Object { $_.OS -eq 'linux' -and $_.TargetType -ne 'container' })
-    $windowsTargets   = @($Targets | Where-Object { $_.OS -ne 'linux' -or $_.TargetType -eq 'container' })
+    $containerTargets = @($Targets | Where-Object { $_.TargetType -eq 'container' })
+    $windowsTargets   = @($Targets | Where-Object { $_.OS -ne 'linux' -and $_.TargetType -ne 'container' })
 
     if ($ForceSequential) {
         $tcpkgSshTargets  = @()
@@ -208,7 +210,7 @@ function Invoke-FleetAction {
     # Targets that landed in no bucket (e.g. Linux containers with no package
     # manager assigned) get an immediate Unsupported result so they are never
     # silently dropped.
-    $routedNames     = @($ansibleTargets + $tcpkgSshTargets + $wingetSshTargets + $pushTargets |
+    $routedNames     = @($ansibleTargets + $containerTargets + $tcpkgSshTargets + $wingetSshTargets + $pushTargets |
                          ForEach-Object { $_.Name })
     $unroutedTargets = @($Targets | Where-Object { $_.Name -notin $routedNames })
     foreach ($t in $unroutedTargets) {
@@ -254,6 +256,37 @@ function Invoke-FleetAction {
         }
     }
 
+    # ── Container bucket (docker exec / lifecycle) ───────────────────────────
+    if ($containerTargets.Count -gt 0) {
+        if ($Script:FltReadOnly) {
+            foreach ($t in $containerTargets) {
+                $r = [BatchResult]::new()
+                $r.TargetName     = $t.Name
+                $r.Action         = $Action
+                $r.PackageSpec    = $PackageSpec
+                $r.PackageManager = 'docker-exec'
+                $r.Status         = "[read-only] would run docker exec: $Action $PackageSpec"
+                $r.DurationSec    = 0
+                $r.TimedOut       = $false
+                $r.Note           = $t.ContainerName
+                $allResults.Add($r)
+            }
+        } else {
+            foreach ($t in $containerTargets) {
+                Update-FltBatchRow $t.Name 'Running (docker exec)' 0 ''
+            }
+            $containerResults = Invoke-FltDockerExecBatch `
+                -Targets     $containerTargets `
+                -Action      $Action `
+                -PackageSpec $PackageSpec `
+                -Credential  $Credential `
+                -KeyFile     $KeyFile `
+                -OnProgress  $OnProgress `
+                -ReadOnly    $false
+            foreach ($r in $containerResults) { $allResults.Add($r) }
+        }
+    }
+
     # ── tcpkg SSH bucket ──────────────────────────────────────────────────────
     if ($tcpkgSshTargets.Count -gt 0 -and -not $Script:FltReadOnly) {
         if (Ensure-FltPoshSsh) {
@@ -288,6 +321,7 @@ function Invoke-FleetAction {
         foreach ($t in $tcpkgSshTargets) {
             $r = [BatchResult]::new()
             $r.TargetName = $t.Name; $r.Action = $Action; $r.PackageSpec = $PackageSpec
+            $r.PackageManager = 'tcpkg'
             $r.Status = '[read-only] would SSH (tcpkg)'; $r.DurationSec = 0
             $allResults.Add($r)
         }
@@ -330,6 +364,7 @@ function Invoke-FleetAction {
         foreach ($t in $wingetSshTargets) {
             $r = [BatchResult]::new()
             $r.TargetName = $t.Name; $r.Action = $Action; $r.PackageSpec = $PackageSpec
+            $r.PackageManager = 'winget'
             $r.Status = '[read-only] would SSH (winget)'; $r.DurationSec = 0
             $allResults.Add($r)
         }
@@ -343,6 +378,7 @@ function Invoke-FleetAction {
         $r.PackageSpec = $PackageSpec
 
         if ($Script:FltReadOnly) {
+            $r.PackageManager = 'tcpkg'
             $r.Status = "[read-only] would push: tcpkg $Action $PackageSpec -r $($t.Name) -y"
             $allResults.Add($r)
             continue

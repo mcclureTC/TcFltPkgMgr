@@ -1060,6 +1060,16 @@ function Get-IT_Suites {
             PerTarget   = $false   # fully offline — credential store and temp file only
             Function    = 'Invoke-IT_AnsibleVault'
             CheckCount  = 8
+        },
+        [pscustomobject]@{
+            Id          = 28
+            Name        = 'Container executor'
+            Description = 'Invoke-FltDockerExecBatch / Lifecycle / Test-FltDockerHostReachable: read-only, routing, result shape'
+            NeedsTarget = $false
+            NeedsSSH    = $false
+            PerTarget   = $false   # offline — live docker exec tested when container targets exist
+            Function    = 'Invoke-IT_ContainerExecutor'
+            CheckCount  = 13
         }
     )
 }
@@ -2851,6 +2861,254 @@ function Invoke-IT_AnsibleVault {
     $null = Remove-FltStoredPassword -CredentialName $credName
     if ($tempFile  -and (Test-Path $tempFile))  { Remove-Item $tempFile  -Force -ErrorAction SilentlyContinue }
     if ($tempFile2 -and (Test-Path $tempFile2)) { Remove-Item $tempFile2 -Force -ErrorAction SilentlyContinue }
+
+    return $r
+}
+
+# ── Suite 28 — Container executor ─────────────────────────────────────────────
+
+# Tests Invoke-FltDockerExecBatch, Invoke-FltDockerLifecycleBatch, and
+# _Get-FltContainerPkgCmd. Fully offline — read-only mode and direct function
+# calls only; no SSH or Docker connections are made.
+function Invoke-IT_ContainerExecutor {
+    $r = _IT_NewResult
+
+    _IT_Section 'Container executor'
+
+    # Helper: build a synthetic container FleetTarget
+    function _MkCT {
+        param([string]$Name, [string]$DockerHost, [string]$ContainerName,
+              [string]$PM = 'apt')
+        $t = [FleetTarget]::new($Name, '', 22, 'admin', $false)
+        $t.OS            = 'linux'
+        $t.TargetType    = 'container'
+        $t.DockerHost    = $DockerHost
+        $t.ContainerName = $ContainerName
+        $t.PackageManager = $PM
+        $t
+    }
+
+    # ------------------------------------------------------------------
+    # 28a — _Get-FltContainerPkgCmd: apt install
+    # ------------------------------------------------------------------
+    try {
+        $cmd = _Get-FltContainerPkgCmd -PackageManager 'apt' -Action 'install' -PackageName 'curl'
+        if ($cmd -eq 'apt-get install -y curl') {
+            _IT_Pass $r '28a  _Get-FltContainerPkgCmd: apt install → apt-get install -y'
+        } else {
+            _IT_Fail $r '28a  _Get-FltContainerPkgCmd: apt install → apt-get install -y' "Got: $cmd"
+        }
+    } catch { _IT_Fail $r '28a  _Get-FltContainerPkgCmd apt install' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 28b — _Get-FltContainerPkgCmd: apk remove
+    # ------------------------------------------------------------------
+    try {
+        $cmd = _Get-FltContainerPkgCmd -PackageManager 'apk' -Action 'remove' -PackageName 'curl'
+        if ($cmd -eq 'apk del curl') {
+            _IT_Pass $r '28b  _Get-FltContainerPkgCmd: apk remove → apk del'
+        } else {
+            _IT_Fail $r '28b  _Get-FltContainerPkgCmd: apk remove → apk del' "Got: $cmd"
+        }
+    } catch { _IT_Fail $r '28b  _Get-FltContainerPkgCmd apk remove' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 28c — _Get-FltContainerPkgCmd: yum upgrade
+    # ------------------------------------------------------------------
+    try {
+        $cmd = _Get-FltContainerPkgCmd -PackageManager 'yum' -Action 'upgrade' -PackageName 'curl'
+        if ($cmd -eq 'yum update -y curl') {
+            _IT_Pass $r '28c  _Get-FltContainerPkgCmd: yum upgrade → yum update -y'
+        } else {
+            _IT_Fail $r '28c  _Get-FltContainerPkgCmd: yum upgrade → yum update -y' "Got: $cmd"
+        }
+    } catch { _IT_Fail $r '28c  _Get-FltContainerPkgCmd yum upgrade' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 28d — DockerExecBatch read-only: returns Skipped
+    # ------------------------------------------------------------------
+    try {
+        $targets = @(_MkCT 'web-1' 'docker-host' 'web_app')
+        $results = Invoke-FltDockerExecBatch -Targets $targets `
+                       -Action 'install' -PackageSpec 'curl' -ReadOnly $true
+        if ($results.Count -eq 1 -and $results[0].Status -eq 'Skipped') {
+            _IT_Pass $r '28d  DockerExecBatch read-only: returns Skipped'
+        } else {
+            _IT_Fail $r '28d  DockerExecBatch read-only: returns Skipped' `
+                "Count=$($results.Count) Status=$($results[0].Status)"
+        }
+    } catch { _IT_Fail $r '28d  DockerExecBatch read-only' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 28e — DockerExecBatch read-only: PackageManager = 'docker-exec'
+    # ------------------------------------------------------------------
+    try {
+        $targets = @(_MkCT 'web-1' 'docker-host' 'web_app')
+        $results = Invoke-FltDockerExecBatch -Targets $targets `
+                       -Action 'install' -PackageSpec 'curl' -ReadOnly $true
+        if ($results[0].PackageManager -eq 'docker-exec') {
+            _IT_Pass $r '28e  DockerExecBatch: PackageManager = ''docker-exec'''
+        } else {
+            _IT_Fail $r '28e  DockerExecBatch: PackageManager = ''docker-exec''' `
+                "Got: $($results[0].PackageManager)"
+        }
+    } catch { _IT_Fail $r '28e  DockerExecBatch PackageManager' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 28f — DockerExecBatch read-only: Note contains container name
+    # ------------------------------------------------------------------
+    try {
+        $targets = @(_MkCT 'web-1' 'docker-host' 'web_app')
+        $results = Invoke-FltDockerExecBatch -Targets $targets `
+                       -Action 'install' -PackageSpec 'curl' -ReadOnly $true
+        if ($results[0].Note -eq 'Read-only mode') {
+            _IT_Pass $r '28f  DockerExecBatch read-only: Note = ''Read-only mode'''
+        } else {
+            _IT_Fail $r '28f  DockerExecBatch read-only: Note = ''Read-only mode''' `
+                "Got: $($results[0].Note)"
+        }
+    } catch { _IT_Fail $r '28f  DockerExecBatch Note' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 28g — DockerExecBatch read-only: multiple targets all Skipped
+    # ------------------------------------------------------------------
+    try {
+        $targets = @(
+            (_MkCT 'web-1' 'host-1' 'web_app')
+            (_MkCT 'web-2' 'host-1' 'web_app_2')
+            (_MkCT 'db-1'  'host-2' 'postgres')
+        )
+        $results = Invoke-FltDockerExecBatch -Targets $targets `
+                       -Action 'install' -PackageSpec 'curl' -ReadOnly $true
+        $allSkipped = ($results | Where-Object { $_.Status -ne 'Skipped' }).Count -eq 0
+        if ($results.Count -eq 3 -and $allSkipped) {
+            _IT_Pass $r '28g  DockerExecBatch read-only: all 3 targets Skipped'
+        } else {
+            _IT_Fail $r '28g  DockerExecBatch read-only: all 3 targets Skipped' `
+                "Count=$($results.Count) NotSkipped=$(($results | Where-Object { $_.Status -ne 'Skipped' }).Count)"
+        }
+    } catch { _IT_Fail $r '28g  DockerExecBatch multi-target' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 28h — LifecycleBatch read-only: returns Skipped
+    # ------------------------------------------------------------------
+    try {
+        $targets = @(_MkCT 'web-1' 'docker-host' 'web_app')
+        $results = Invoke-FltDockerLifecycleBatch -Targets $targets `
+                       -Action 'stop' -PackageSpec 'web_app' -ReadOnly $true
+        if ($results.Count -eq 1 -and $results[0].Status -eq 'Skipped') {
+            _IT_Pass $r '28h  DockerLifecycleBatch read-only: returns Skipped'
+        } else {
+            _IT_Fail $r '28h  DockerLifecycleBatch read-only: returns Skipped' `
+                "Count=$($results.Count) Status=$($results[0].Status)"
+        }
+    } catch { _IT_Fail $r '28h  DockerLifecycleBatch read-only' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 28i — LifecycleBatch read-only: PackageManager = 'docker-lifecycle'
+    # ------------------------------------------------------------------
+    try {
+        $targets = @(_MkCT 'web-1' 'docker-host' 'web_app')
+        $results = Invoke-FltDockerLifecycleBatch -Targets $targets `
+                       -Action 'start' -PackageSpec 'web_app' -ReadOnly $true
+        if ($results[0].PackageManager -eq 'docker-lifecycle') {
+            _IT_Pass $r '28i  DockerLifecycleBatch: PackageManager = ''docker-lifecycle'''
+        } else {
+            _IT_Fail $r '28i  DockerLifecycleBatch: PackageManager = ''docker-lifecycle''' `
+                "Got: $($results[0].PackageManager)"
+        }
+    } catch { _IT_Fail $r '28i  DockerLifecycleBatch PackageManager' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 28j — FleetExecutor routing: container target → docker-exec bucket
+    # ------------------------------------------------------------------
+    try {
+        $savedReadOnly    = $Script:FltReadOnly
+        $savedBatchStatus = $Script:FltBatchStatus
+        $Script:FltReadOnly    = $true
+        $Script:FltBatchStatus = @{}
+
+        $targets = @(_MkCT 'web-1' 'docker-host' 'web_app')
+        $results = Invoke-FleetAction -Action 'install' -PackageSpec 'curl' -Targets $targets
+        $r0 = $results | Where-Object { $_.TargetName -eq 'web-1' }
+
+        if ($r0 -and $r0.PackageManager -eq 'docker-exec') {
+            _IT_Pass $r '28j  Fleet routing: container → docker-exec bucket'
+        } else {
+            _IT_Fail $r '28j  Fleet routing: container → docker-exec bucket' `
+                "PackageManager=$($r0.PackageManager) Status=$($r0.Status)"
+        }
+
+        $Script:FltReadOnly    = $savedReadOnly
+        $Script:FltBatchStatus = $savedBatchStatus
+    } catch {
+        $Script:FltReadOnly    = $savedReadOnly
+        $Script:FltBatchStatus = $savedBatchStatus
+        _IT_Fail $r '28j  Fleet routing container' $_.Exception.Message
+    }
+
+    # ------------------------------------------------------------------
+    # 28k — FleetExecutor routing: mixed fleet — container and Windows
+    # ------------------------------------------------------------------
+    try {
+        $savedReadOnly    = $Script:FltReadOnly
+        $savedBatchStatus = $Script:FltBatchStatus
+        $Script:FltReadOnly    = $true
+        $Script:FltBatchStatus = @{}
+
+        $winTarget  = [FleetTarget]::new('win-1', '10.0.0.1', 22, 'admin', $true)
+        $winTarget.OS = 'windows'; $winTarget.TargetType = 'physical'
+        $winTarget.PackageManager = 'tcpkg'
+        $cntrTarget = _MkCT 'web-1' 'docker-host' 'web_app'
+
+        $results = Invoke-FleetAction -Action 'install' -PackageSpec 'curl' `
+                       -Targets @($winTarget, $cntrTarget)
+        $win  = $results | Where-Object { $_.TargetName -eq 'win-1' }
+        $cntr = $results | Where-Object { $_.TargetName -eq 'web-1' }
+
+        if ($win.PackageManager -eq 'tcpkg' -and $cntr.PackageManager -eq 'docker-exec') {
+            _IT_Pass $r '28k  Fleet routing: win→tcpkg, container→docker-exec'
+        } else {
+            _IT_Fail $r '28k  Fleet routing: win→tcpkg, container→docker-exec' `
+                "win=$($win.PackageManager) container=$($cntr.PackageManager)"
+        }
+
+        $Script:FltReadOnly    = $savedReadOnly
+        $Script:FltBatchStatus = $savedBatchStatus
+    } catch {
+        $Script:FltReadOnly    = $savedReadOnly
+        $Script:FltBatchStatus = $savedBatchStatus
+        _IT_Fail $r '28k  Fleet routing mixed' $_.Exception.Message
+    }
+
+    # ------------------------------------------------------------------
+    # 28l — BatchResult shape: has all required fields
+    # ------------------------------------------------------------------
+    try {
+        $targets = @(_MkCT 'web-1' 'docker-host' 'web_app')
+        $results = Invoke-FltDockerExecBatch -Targets $targets `
+                       -Action 'install' -PackageSpec 'curl' -ReadOnly $true
+        $props    = $results[0].PSObject.Properties.Name
+        $required = @('TargetName','Action','PackageSpec','PackageManager','Status','DurationSec','TimedOut','Note')
+        $missing  = $required | Where-Object { $props -notcontains $_ }
+        if ($missing.Count -eq 0) {
+            _IT_Pass $r '28l  BatchResult has all required fields'
+        } else {
+            _IT_Fail $r '28l  BatchResult has all required fields' "Missing: $($missing -join ', ')"
+        }
+    } catch { _IT_Fail $r '28l  BatchResult shape' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 28m — Test-FltDockerHostReachable: returns string result
+    # ------------------------------------------------------------------
+    try {
+        $fn = Get-Command 'Test-FltDockerHostReachable' -ErrorAction SilentlyContinue
+        if ($fn) {
+            _IT_Pass $r '28m  Test-FltDockerHostReachable is defined and callable'
+        } else {
+            _IT_Fail $r '28m  Test-FltDockerHostReachable is defined and callable' 'Function not found'
+        }
+    } catch { _IT_Fail $r '28m  Test-FltDockerHostReachable defined' $_.Exception.Message }
 
     return $r
 }

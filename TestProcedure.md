@@ -435,6 +435,32 @@ Tests `_Get-VaultPasswordFile` and `Invoke-FltVaultSetup` in `execution/AnsibleE
 
 ---
 
+### Suite 28 — Container executor
+
+**Infrastructure required:** None (fully offline — read-only mode and direct function calls)
+**Per target:** No
+**Check count:** 13 (28a–28m)
+
+Tests `Invoke-FltDockerExecBatch`, `Invoke-FltDockerLifecycleBatch`, `_Get-FltContainerPkgCmd`, and `Test-FltDockerHostReachable` in `execution/ContainerExecutor.ps1`, plus container routing in `FleetExecutor.ps1`. No SSH or Docker connections are made.
+
+| # | Test name | What is tested | How verified |
+|---|-----------|----------------|--------------|
+| 28a | `_Get-FltContainerPkgCmd`: apt install | `apt` package manager maps `install` to `apt-get install -y` | Checks exact command string |
+| 28b | `_Get-FltContainerPkgCmd`: apk remove | `apk` package manager maps `remove` to `apk del` | Checks exact command string |
+| 28c | `_Get-FltContainerPkgCmd`: yum upgrade | `yum` package manager maps `upgrade` to `yum update -y` | Checks exact command string |
+| 28d | DockerExecBatch read-only: returns Skipped | `ReadOnly=$true` returns `Status='Skipped'` | Checks status field |
+| 28e | DockerExecBatch: PackageManager='docker-exec' | `PackageManager` field is always `'docker-exec'` | Checks field value |
+| 28f | DockerExecBatch read-only: Note='Read-only mode' | Note field set correctly in read-only path | Checks Note field |
+| 28g | DockerExecBatch read-only: all 3 targets Skipped | Multiple container targets all return Skipped | Passes 3 targets, checks all Skipped |
+| 28h | DockerLifecycleBatch read-only: returns Skipped | `ReadOnly=$true` returns `Status='Skipped'` | Checks status field |
+| 28i | DockerLifecycleBatch: PackageManager='docker-lifecycle' | `PackageManager` field is always `'docker-lifecycle'` | Checks field value |
+| 28j | Fleet routing: container → docker-exec bucket | `TargetType='container'` routes to `Invoke-FltDockerExecBatch` | Checks `PackageManager='docker-exec'` on result |
+| 28k | Fleet routing: win→tcpkg, container→docker-exec | Mixed fleet routes each target to the correct bucket | Checks both `win.PackageManager='tcpkg'` and `cntr.PackageManager='docker-exec'` |
+| 28l | BatchResult has all required fields | Result object has all 8 required fields | Checks via `PSObject.Properties.Name` |
+| 28m | `Test-FltDockerHostReachable` is defined | Function exists and is callable | `Get-Command` returns a result |
+
+---
+
 ## Adding New Tests
 
 When implementing a new phase, add tests in the appropriate location:
