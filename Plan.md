@@ -4,7 +4,9 @@ A step-by-step implementation checklist. Each section is a logical unit of work
 that can be completed and tested independently before moving to the next.
 
 > **Scale note:** The fleet is expected to grow to ~100 total remote targets,
-> consisting of a mix of physical PCs, virtual machines, and Docker containers.
+> consisting of Windows PCs, Beckhoff IPCs (Windows and RT Linux), VMware Debian
+> VMs, and Docker containers. A Beckhoff IPC running Windows is managed
+> identically to a Windows PC (tcpkg/WinGet via SSH) - no distinct code path.
 > Several design decisions below are informed by this scale requirement.
 
 ---
@@ -751,6 +753,15 @@ Containers are reached via a two-hop model: SSH to the Docker host, then
 - [x] `Write-FltBatchEntry` with `PackageManager = 'docker-exec'` or
       `'docker-lifecycle'`
 
+> **TwinCAT XAR containers:** Package management inside a TwinCAT XAR container
+> uses `apt` pointed at `deb.beckhoff.com` (not tcpkg). The image is built on
+> the Beckhoff RT Linux IPC using myBeckhoff credentials. Setting
+> `PackageManager='apt'` on an XAR container target is correct.
+> XAR containers are documented as requiring the Beckhoff RT Linux kernel.
+> Whether they start on a standard Debian VM or Docker Desktop (WSL2) is
+> untested - they may start but fail to achieve real-time performance, or
+> fail at runtime when accessing RT hardware. Treat as unverified.
+
 ### 7.2 — Route container targets in `Invoke-FleetAction` (`execution/FleetExecutor.ps1`) ✅
 
 - [x] `$containerTargets` bucket: `TargetType -eq 'container'`; separated before Windows buckets — `TargetType -eq 'container'`
@@ -986,30 +997,21 @@ be captured before passing to the scriptblock. Apply the same pattern in
 
 ## Phase 9 — Setup menu updates
 
-### 9.1 — Add target: full type/OS flow (`ui/menus/TargetMenu.ps1`)
+### 9.1 — Add target: OS/PackageManager prompts (physical and VM targets)
 
-> **Current state:** `Invoke-TargetMenu` has no OS/TargetType/PackageManager/Docker
-> prompts — all fields default silently. This is the #1 usability gap before
-> Phase 7 container targets can be added via the UI.
-> Consider pulling Phase 9.1 forward to implement alongside Phase 7.4.
+> **Already completed in earlier phases:**
+> - TargetType prompt (Physical/VM/Container) - done in Phase 7.4
+> - Container branch (DockerHost, ContainerName, compose flow) - done in Phase 8.9
+>
+> **Active bug:** Adding a Debian VMware VM today silently sets OS='windows',
+> routing it to tcpkg/WinGet buckets instead of Ansible. This must be fixed.
 
-### 9.1 — Add target: full type/OS flow (`ui/menus/TargetMenu.ps1`) _(continued)_
-
-> Also satisfies Phase 4.3 (Windows OS/PackageManager prompts) and
-> Phase 7.4 (container target Add flow). Implement all together here.
-> Currently `Invoke-TargetMenu` only asks Name/Host/Port/User/Password/
-> InternetAccess — all OS/Type/PackageManager fields default to 'windows'/
-> 'physical'/'' and are not editable via the menu yet.
-
-- [ ] `TargetType: 1. Physical  2. VM  3. Container  (default 1):`
-- [ ] `OS: 1. Windows  2. Linux  (default 1):` (skip for containers)
-- [ ] If Windows: `Package manager: 1. tcpkg  2. WinGet  3. Both`
-- [ ] If Linux/VM: skip Internet Access prompt
-- [ ] If Container: prompt Docker host (must match existing target name) and
-      container name; skip Address/Port/User (inherited from Docker host)
-- [ ] Edit flow: show current OS/Type/PackageManager, allow changes
+- [ ] `OS: 1. Windows  2. Linux  (default = Windows):` prompt for Physical/VM
+      targets after TargetType; skip for containers (always Linux)
+- [ ] If Windows: `Package manager: 1. tcpkg  2. WinGet  3. Both  (default 1):`
+- [ ] If Linux or VM: skip Internet Access prompt
+- [ ] Edit flow: show current OS/TargetType/PackageManager, allow changes
 - [ ] Add `OS`, `Type`, `PackageManager` columns to Setup dashboard
-      (also satisfies Phase 2.1, 2.2 for Setup view)
 
 ### 9.2 — Prerequisites check (`ui/menus/TargetMenu.ps1`)
 
@@ -1133,6 +1135,43 @@ be captured before passing to the scriptblock. Apply the same pattern in
 - [ ] View last 50 log lines
 - [ ] Health check across 10+ containers on 2+ hosts
 - [ ] Batch operation across 50 containers — all complete, dashboard paginated
+
+### TwinCAT XAR container kernel compatibility (unverified — needs testing)
+
+> The Beckhoff documentation states XAR requires the Beckhoff RT Linux kernel,
+> but whether the container image starts on other kernels is untested.
+> Real-time performance will not be achievable without the RT kernel regardless.
+> Run these tests in order — stop at first failure and record the error.
+
+**Test 1 — VMware Debian VM (standard Linux kernel)**
+- [ ] Install Docker Engine on the Debian VM
+- [ ] Clone `https://github.com/Beckhoff/TC_XAR_Container_Sample` on the VM
+- [ ] Add myBeckhoff credentials to `tc31-xar-base/apt-config/bhf.conf`
+- [ ] Build: `docker build --secret id=apt,src=./apt-config/bhf.conf --network host -t tc31-xar-base .`
+- [ ] Record: does the build succeed?
+- [ ] If build OK: `docker run --privileged tc31-xar-base` — does it start?
+- [ ] If started: record any error output, then test via TcFltPkgMgr deploy flow
+- [ ] Record kernel version (`uname -r`) alongside result
+
+**Test 2 — Windows PC with Docker Desktop (WSL2 kernel)**
+- [ ] Prerequisite: Test 1 build succeeded (use same image or rebuild on Windows)
+- [ ] On operator PC: `docker run --privileged tc31-xar-base`
+- [ ] Record: does it start, and what errors appear?
+- [ ] Check if `/dev/hugepages` is available in WSL2: `docker run --rm alpine ls /dev/hugepages`
+- [ ] Record WSL2 kernel version (`wsl --status` or `uname -r` inside WSL2)
+
+**Test 3 — Beckhoff RT Linux IPC (reference/expected-good)**
+- [ ] Prerequisite: DCC-4 or DCC-5 converted to Beckhoff RT Linux
+- [ ] Build and run using Beckhoff sample Makefile
+- [ ] Confirm TwinCAT XAR appears as a target in TwinCAT XAE via ADS-over-MQTT
+- [ ] Deploy and manage via TcFltPkgMgr (Add Target -> template -> twincat-xar)
+
+**Expected outcomes to record for each test:**
+- Build result (success / error message)
+- Container start result (success / error message)
+- Kernel version of the host
+- Whether `/dev/hugepages` was accessible
+- Whether TwinCAT XAR appeared in TwinCAT XAE
 
 ### Mixed fleet (full integration)
 - [ ] Fleet with Windows/tcpkg, Windows/WinGet, Linux/Ansible, and

@@ -15,6 +15,78 @@ Linux (Ansible), and Docker container targets from a single operator interface.
 
 ---
 
+## Fleet topology
+
+TcFltPkgMgr manages four categories of target from a single Windows operator machine.
+The diagram shows what runs on each target type and how TcFltPkgMgr reaches it.
+
+```mermaid
+graph TD
+
+    OP["TcFltPkgMgr\nWindows operator PC\nPowerShell 7 + SSH"]
+
+    OP --> W1
+    OP --> W2
+    OP --> L1
+    OP --> VM
+
+    subgraph WIN ["Windows targets  (tcpkg / WinGet via SSH)"]
+        W1["Windows PC\ntcpkg  WinGet\nDocker Desktop optional"]
+        W2["Beckhoff IPC  Windows\ntcpkg  WinGet\nDocker Desktop optional"]
+    end
+
+    subgraph LINUX ["Beckhoff IPC  RT Linux  (Ansible + Docker Engine)"]
+        L1["Beckhoff RT Linux IPC\nAnsible  Docker Engine"]
+        L1 --> XAR["TwinCAT XAR container\ntc31-xar-base\napt via deb.beckhoff.com\nRT kernel recommended*"]
+        L1 --> DSSH1["Debian SSH container\nAnsible target\napt packages"]
+    end
+
+    subgraph VMNET ["VMware VM  Debian 12  (Ansible + Docker Engine)"]
+        VM["Debian 12 VM\nAnsible  Docker Engine\nPS7 Phase 12"]
+        VM --> DSSH2["Debian SSH container\nAnsible target\napt packages"]
+        VM --> MQTT["Mosquitto container\nMQTT broker"]
+    end
+
+    subgraph LOCAL ["Windows operator  Docker Desktop  WSL2"]
+        W1 --> DSSH3["Debian SSH container\nAnsible target\napt packages"]
+        W1 --> MQTT2["Mosquitto container\nMQTT broker"]
+    end
+
+    style OP fill:#888,color:#fff
+    style XAR fill:#c0533a,color:#fff
+    style W1 fill:#2a6db5,color:#fff
+    style W2 fill:#2a6db5,color:#fff
+    style L1 fill:#1a7a5e,color:#fff
+    style VM fill:#6b4aaa,color:#fff
+    style DSSH1 fill:#1a7a5e,color:#fff
+    style DSSH2 fill:#6b4aaa,color:#fff
+    style DSSH3 fill:#2a6db5,color:#fff
+    style MQTT fill:#6b4aaa,color:#fff
+    style MQTT2 fill:#2a6db5,color:#fff
+```
+
+> \* TwinCAT XAR on a standard Linux kernel (Debian VM or Docker Desktop/WSL2) is
+> untested. The RT kernel is required for real-time performance; whether the
+> container starts at all without it is unverified. See Phase 11 testing checklist.
+
+**Target types and management paths:**
+
+| Target | OS | Reached via | Package management |
+|--------|----|-------------|-------------------|
+| Windows PC | Windows | SSH | tcpkg, WinGet, or both |
+| Beckhoff IPC (Windows) | Windows | SSH | tcpkg, WinGet, or both |
+| Beckhoff IPC (RT Linux) | Beckhoff RT Linux | SSH | Ansible (apt) |
+| VMware Debian VM | Debian 12 | SSH | Ansible (apt) |
+| Docker container (Debian SSH) | Linux | SSH to host + docker exec | apt via Ansible |
+| Docker container (Mosquitto) | Linux | SSH to host + docker exec | n/a |
+| Docker container (TwinCAT XAR) | Beckhoff RT Linux | SSH to IPC + docker exec | apt via deb.beckhoff.com |
+
+A Beckhoff IPC running Windows is managed identically to a Windows PC.
+The VMware Debian VM is the closest substitute for a Beckhoff RT Linux IPC
+for Ansible and Docker testing without physical hardware.
+
+---
+
 ## Requirements
 
 ### All targets
