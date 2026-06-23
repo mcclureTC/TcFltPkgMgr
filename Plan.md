@@ -141,7 +141,7 @@ every subsequent phase builds on a scalable foundation.
 - [x] Feed check parallel block uses `$using:throttle` not hardcoded 10
 - [x] Throttle bounds test added to diagnostics (catches values outside 1-50)
 - [x] `Start-FltReachJob` callability tested in diagnostics
-- [ ] `ansible.forks` — deferred to Phase 5 (Ansible executor)
+- [x] `ansible.forks` — completed in Phase 5.0
 
 ### 0.3 — Target store: move from tcpkg to local JSON ✅
 
@@ -219,8 +219,8 @@ every subsequent phase builds on a scalable foundation.
 - [x] Linux/container targets skip `tcpkg remote add` — JSON store only
 - [x] Windows/tcpkg targets sync to tcpkg after JSON write
 - [x] `Add-FleetTarget` upserts — updates if already in JSON, adds if new
-- [ ] Validate `DockerHost` references an existing target — deferred to Phase 7
-      (containers not yet implemented)
+- [x] Validate `DockerHost` references an existing target — deferred to Phase 7
+      (containers not yet implemented) — completed in Phase 7.4
 
 ---
 
@@ -444,7 +444,7 @@ Mode priority: `native` → `wsl` → `docker` → `''`
       `ansible.posix` collections; mounts `/ansible` volume for inventory/playbooks
 - [x] Build: `docker build -f docker/Dockerfile.ansible -t tcflt-ansible .`
 - [x] Run: `docker run -d --name tcflt-ansible --restart unless-stopped -v \${PWD}/ansible:/ansible tcflt-ansible`
-- [ ] Suite 21 checks 11f/11g WARN until container is built — instructions shown inline
+- [x] Suite 21 checks 11f/11g now 7/7 ✅ — container built and running — instructions shown inline
 
 ### 5.1.6 — Docker operator repository (`data/DockerRepository.ps1`) ✅
 
@@ -629,7 +629,7 @@ remote management, and hosting the Ansible operator container.
 - [x] No tests required — pure UI wiring; `Invoke-LinuxAdminMenu` implemented in Phase 6.2
 - [x] `README.md`: Phase 6.1 noted in menu structure section
 
-### 6.2 — Linux Admin menu (`ui/menus/LinuxMenu.ps1`) — new file
+### 6.2 — Linux Admin menu (`ui/menus/LinuxMenu.ps1`) — new file ✅ (implemented, untested pending Linux target)
 
 ```
  TcFlt Package Manager  |  Linux Admin                           [LIVE]
@@ -644,18 +644,18 @@ remote management, and hosting the Ansible operator container.
   Choice:
 ```
 
-- [ ] `Invoke-LinuxAdminMenu` — filters to `OS -eq 'linux'` AND
+- [x] `Invoke-LinuxAdminMenu` — filters to `OS -eq 'linux'` AND
       `TargetType -ne 'container'`; shows message if none configured
-- [ ] Dashboard paginated if >20 Linux targets
+- [x] Dashboard paginated if >20 Linux targets
 
-### 6.3 — Package sub-menu (choices 1/2/3)
+### 6.3 — Package sub-menu (choices 1/2/3) ✅ (implemented, untested pending Linux target)
 
-- [ ] `Invoke-LinuxInstallMenu` — name prompt → target selection → batch
-- [ ] `Invoke-LinuxUpgradeMenu`
-- [ ] `Invoke-LinuxRemoveMenu`
-- [ ] All route through `_Invoke-AnsibleBatchAction`
+- [x] `Invoke-LinuxInstallMenu` — name prompt → target selection → batch
+- [x] `Invoke-LinuxUpgradeMenu`
+- [x] `Invoke-LinuxRemoveMenu`
+- [x] All route through `_Invoke-AnsibleBatchAction`
 
-### 6.4 — User management sub-menu (choice 4)
+### 6.4 — User management sub-menu (choice 4) ✅ (implemented, untested pending Linux target)
 
 ```
   1. Add user
@@ -665,10 +665,10 @@ remote management, and hosting the Ansible operator container.
   0. Back
 ```
 
-- [ ] Each option prompts for fields then calls `Invoke-FltAnsibleBatch`
+- [x] Each option prompts for fields then calls `Invoke-FltAnsibleBatch`
       with the `user` playbook template
 
-### 6.5 — Service management sub-menu (choice 5)
+### 6.5 — Service management sub-menu (choice 5) ✅ (implemented, untested pending Linux target)
 
 ```
   1. Start service
@@ -679,12 +679,29 @@ remote management, and hosting the Ansible operator container.
   0. Back
 ```
 
-- [ ] Prompts for service name; runs `systemd` playbook template
+- [x] Prompts for service name; runs `systemd` playbook template
 
-### 6.6 — Run playbook (choice 6)
+### 6.6 — Run playbook (choice 6) ✅ (implemented, untested pending Linux target)
 
-- [ ] Prompt for `.yml` file path; validate exists; run via
+- [x] Prompt for `.yml` file path; validate exists; run via
       `ansible-playbook` against selected targets; show batch dashboard
+
+---
+
+
+### 6.7 — Live testing (pending Linux target)
+
+> **Blocked on:** DCC-4 or DCC-5 being online with SSH + Python 3 + the `tcflt-ansible`
+> container able to reach it.
+
+- [ ] Install a package on one Linux target via Linux Admin > Install package
+- [ ] Upgrade a package on one Linux target
+- [ ] Remove a package on one Linux target
+- [ ] Add a user (with groups) to one Linux target
+- [ ] Start/stop a service on one Linux target
+- [ ] Run a custom playbook file against a Linux target
+- [ ] Run install across 3+ Linux targets simultaneously (batch dashboard pagination)
+- [ ] Write Suite 31 (Linux Admin live) integration tests once the above pass
 
 ---
 
@@ -775,9 +792,30 @@ Containers are reached via a two-hop model: SSH to the Docker host, then
 
 ## Phase 8 — Container Admin UI
 
+### 8.0 — Pre-work before ContainerMenu
+
+Three items are unblocked by Phase 7 and should be done before writing ContainerMenu.
+
+**Lesson from Phase 6:** `$PlaybookBuilder` scriptblock closures capture variables
+from outer scope by reference in PS7. In `_Invoke-AnsibleBatchAction`, `$pkg` must
+be captured before passing to the scriptblock. Apply the same pattern in
+`ContainerMenu.ps1` for all `$PlaybookBuilder` and `$DockerArgs` captures.
+
+
+- [ ] **`-`/`+` key wiring in batch menus** — `WinGetMenu`, `LinuxMenu`, and `ContainerMenu`
+      need a non-blocking key poll loop during batch runs so `Move-FltBatchPage` is
+      actually reachable. Currently `Invoke-FleetMenu` polls but batch menu callers do not.
+      Add a lightweight polling helper to `_Invoke-AnsibleBatchAction` and the
+      WinGet equivalent.
+- [ ] **`TargetType` in `CommandLog.ps1`** — Phase 7 is done; this item is now unblocked.
+      Add `targetType` field to `Write-FltBatchEntry` output, derived from `$Results`.
+- [ ] **`Type` column in batch dashboard rows** — Phase 2.3 deferred item; add
+      `TypeDisplay()` / `Get-FltTypeDisplay` to the `_Ansi_UpdateBatchRow` line format.
+      Requires narrowing the target name column slightly (22 → 18 chars).
+
 ### 8.1 — Fleet menu (`ui/menus/FleetMenu.ps1`)
 
-> Current menu (after Phase 6): `1. tcpkg  2. WinGet  3. Linux Admin  4. Profiles  5. UI Config  6. Setup`
+> Current menu: `1. tcpkg  2. WinGet  3. Linux Admin  4. Profiles  5. UI Config  6. Setup  0. Exit`
 > After Phase 8: `1. tcpkg  2. WinGet  3. Linux Admin  4. Containers  5. Profiles  6. UI Config  7. Setup`
 
 - [ ] Add `4. Containers`; Profiles→5, UI Config→6, Setup→7
@@ -916,7 +954,7 @@ Containers are reached via a two-hop model: SSH to the Docker host, then
 > add `TargetType` when Phase 7 lands.
 
 - [x] `PackageManager` field — implement in Phase 4.4 bug fixes (Phase 3 is done)
-- [ ] Add `TargetType` field per result row — implement when Phase 7 (Docker) is done
+- [ ] Add `TargetType` field per result row — Phase 7 done; implement in Phase 8.0
 
 ### 10.2 — Log viewer
 
@@ -956,10 +994,10 @@ Containers are reached via a two-hop model: SSH to the Docker host, then
 
 ### 10.5.3 — Future integration suites (add as phases complete)
 
-- [ ] Phase 3: WinGet install via SSH (I7)
-- [ ] Phase 5: Ansible playbook execution (I8)
-- [ ] Phase 7: Docker exec batch (I9)
-- [ ] Phase 7: Docker container reachability check (I10)
+- [x] Phase 3: WinGet install via SSH (I7)
+- [x] Phase 5: Ansible playbook execution (I8)
+- [x] Phase 7: Docker exec batch (I9)
+- [x] Phase 7: Docker container reachability check (I10)
 
 ---
 
@@ -1017,12 +1055,12 @@ Containers are reached via a two-hop model: SSH to the Docker host, then
 | `ui/menus/UiConfigMenu.ps1` | ✅ exists | Runtime UI settings (page size, display backend) |
 | `diagnostics/Diagnostics.ps1` | ✅ exists | 29-check self-test suite (Setup > 10) |
 | `data/WinGetRepository.ps1` | ✅ done | WinGet package search, version listing, remote install |
-| `data/AnsibleRepository.ps1` | phase 5 | Ansible availability and collection checks |
+| `data/AnsibleRepository.ps1` | ✅ done | Ansible availability and collection checks |
 | `execution/WinGetExecutor.ps1` | ✅ done | SSH batch executor using winget |
-| `execution/AnsibleExecutor.ps1` | phase 5 | Inventory/playbook builder and Ansible runner |
-| `execution/ContainerExecutor.ps1` | phase 7 | Docker exec and lifecycle batch executor |
+| `execution/AnsibleExecutor.ps1` | ✅ done | Inventory/playbook builder and Ansible runner |
+| `execution/ContainerExecutor.ps1` | ✅ done | Docker exec and lifecycle batch executor |
 | `ui/menus/WinGetMenu.ps1` | ✅ done | WinGet install / upgrade / uninstall / status |
-| `ui/menus/LinuxMenu.ps1` | phase 6 | Linux Admin: packages, users, services, playbooks |
+| `ui/menus/LinuxMenu.ps1` | ✅ done | Linux Admin: packages, users, services, playbooks |
 | `ui/menus/ContainerMenu.ps1` | phase 8 | Container Admin: packages, lifecycle, logs, health |
 
 ## Modified files summary
@@ -1032,11 +1070,11 @@ Containers are reached via a two-hop model: SSH to the Docker host, then
 | `classes/Models.ps1` | ✅ done | `FleetTarget` extended with OS/Type/PackageManager/Docker fields |
 | `data/TargetRepository.ps1` | ✅ done | JSON store; migration; CSV; Add/Edit/Remove |
 | `data/CredentialRepository.ps1` | ✅ done | Refactored into adapter + Windows/file backends |
-| `execution/FleetExecutor.ps1` | partial | tcpkg + WinGet + push buckets done; Ansible/Docker pending |
-| `execution/CommandLog.ps1` | partial | `PackageManager` field — Phase 4.4; `TargetType` — Phase 7 |
-| `ui/DashboardAnsi.ps1` | partial | Pagination/sort/filter done; OS/Type columns pending (phase 9) |
-| `ui/menus/FleetMenu.ps1` | partial | Current: 1-5 (tcpkg, WinGet, Profiles, UIConfig, Setup); Linux→Phase 6, Containers→Phase 8 |
-| `ui/menus/TargetMenu.ps1` | partial | Add/Edit/Remove done; OS/Type prompts pending (phase 9.1) |
+| `execution/FleetExecutor.ps1` | ✅ done | Five buckets: tcpkg + WinGet + push + Ansible + Docker/container |
+| `execution/CommandLog.ps1` | partial | `PackageManager` done; `TargetType` — Phase 8.0 |
+| `ui/DashboardAnsi.ps1` | partial | Pagination/sort/filter/batch-pagination done; Type in batch rows pending (8.0) |
+| `ui/menus/FleetMenu.ps1` | partial | Current: 1-6 (tcpkg, WinGet, Linux Admin, Profiles, UIConfig, Setup); Containers→Phase 8 |
+| `ui/menus/TargetMenu.ps1` | partial | Add/Edit/Remove done; container type done (7.4); full OS prompt pending (9.1) |
 | `config/settings.default.json` | partial | docker/ui done; winget/ansible sections pending (phases 3/5) |
 | `config/settings.default.jsonc` | pending | Add when winget/ansible sections added |
 | `TcFltPkgMgr.ps1` | partial | OS detection done; Linux config paths pending (phase 12.1) |
