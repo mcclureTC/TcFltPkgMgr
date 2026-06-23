@@ -526,6 +526,29 @@ Tests `Invoke-ContainerAdminMenu` and supporting functions in `ui/menus/Containe
 
 ---
 
+### Suite 33 — Compose repository
+
+**Infrastructure required:** None (fully offline — no Docker calls)
+**Per target:** No
+**Check count:** 10 (33a–33j)
+
+Tests `data/ComposeRepository.ps1`. All checks run against a temp directory with real templates (or stubs if templates not yet placed). No `docker` CLI is invoked.
+
+| # | Test name | What is tested | How verified |
+|---|-----------|----------------|--------------|
+| 33a | Template discovery: finds 3 templates | `Get-FltComposeTemplates` returns ≥3 results | Checks `Count ≥ 3` |
+| 33b | Template discovery: correct names | All three built-in names present | Checks `twincat-xar`, `mosquitto`, `debian-ssh` in Names |
+| 33c | Service parsing: 3 services from YAML | `Get-FltComposeServices` correctly parses service names | Writes test YAML, checks Count=3 and service names |
+| 33d | Template generation: file created | `New-FltComposeFromTemplate` writes a compose file | Checks `Ok=$true` and `Test-Path` |
+| 33e | Template generation: variables substituted | All `{{VARIABLE}}` placeholders replaced | Checks container name, AMS NetID, IP present; no unreplaced `{{}}` |
+| 33f | Template generation: service list returned | Result includes parsed service names | Checks `Services.Count > 0` |
+| 33g | CSV batch import: 3-service compose file | `Import-FltContainerCsv` generates multi-service file from 3-row CSV | Checks `Ok=$true` and `Services.Count=3` |
+| 33h | CSV batch import: all services in file | Generated file contains all three container names | Checks file content for each container_name |
+| 33i | Network definition: inline IPAM block | `_Get-FltNetworkDefinition` with `External=$false` has subnet and gateway | Checks YAML output |
+| 33j | Network definition: external | `_Get-FltNetworkDefinition` with `External=$true` returns `external: true` | Checks exact string |
+
+---
+
 ## Adding New Tests
 
 When implementing a new phase, add tests in the appropriate location:

@@ -907,6 +907,42 @@ be captured before passing to the scriptblock. Apply the same pattern in
 - [x] `.gitignore`: no new entries needed
 - [x] `README.md`: Phase 8 Container Admin section added
 
+### 8.8 — Compose infrastructure ✅
+
+- [x] `FleetTarget` — 3 new fields: `ComposeFile`, `ComposeService`, `ComposeProject`
+- [x] `settings.default.json` — new `compose` section: dir, network, subnet, gateway
+- [x] `.gitignore` — `compose/*.yml`, `compose/*.yaml`, `compose/*.csv` gitignored;
+      `compose/templates/` committed source
+- [x] `docker/Dockerfile.debian-ssh` — debian:bookworm-slim + openssh-server + python3;
+      root login enabled; ROOT_PASSWORD via --build-arg stored in credential store
+- [x] Three templates in `compose/templates/` with `{{VARIABLE}}` substitution:
+      `twincat-xar.yml.template` · `mosquitto.yml.template` · `debian-ssh.yml.template`
+- [x] `data/ComposeRepository.ps1` — 13 functions covering template discovery,
+      service parsing, single-file generation, CSV batch import/export,
+      and docker compose execution (pull, up, stop)
+- [x] Suite 33 (Compose repository) — 10 checks (33a–33j), fully offline:
+      33a–33b template discovery · 33c service parsing · 33d–33f template generation ·
+      33g–33h CSV batch import · 33i–33j network definition helper
+- [x] Security: no hardcoded secrets
+- [x] `README.md`: Phase 8.8 compose infrastructure section added
+
+### 8.9 — Updated Add Target flow (compose-aware container branch)
+
+- [ ] Container Add flow prompts: `1. From existing compose file`  `2. Create from template`  `3. Import from CSV`
+- [ ] Template path: pick template → prompt variables → generate `compose/<name>.yml` → pick services
+- [ ] Existing file path: browse `compose/` → pick `.yml` → pick service
+- [ ] CSV path: import CSV → generate compose file → register all services
+- [ ] After registration: pull images then `docker compose up -d`
+- [ ] `ComposeFile`, `ComposeService`, `ComposeProject` set on each registered target
+
+### 8.10 — Updated Container Admin menu (compose-aware)
+
+- [ ] Pull (3) → `docker compose pull <service>` (when ComposeFile set)
+- [ ] Start/Stop/Restart (4/5/6) → `docker compose start/stop/restart <service>`
+- [ ] Recreate (7) → `docker compose up -d --force-recreate <service>`
+- [ ] New: Deploy (choice 10) → `docker compose up -d <service>` (first-time creation)
+- [ ] Fallback to direct docker CLI when `ComposeFile` is empty
+
 ---
 
 ## Phase 9 — Setup menu updates

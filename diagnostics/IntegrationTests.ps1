@@ -1110,6 +1110,16 @@ function Get-IT_Suites {
             PerTarget   = $false   # offline — live docker exec tested when container targets exist
             Function    = 'Invoke-IT_ContainerAdminMenu'
             CheckCount  = 10
+        },
+        [pscustomobject]@{
+            Id          = 33
+            Name        = 'Compose repository'
+            Description = 'ComposeRepository: templates, service parsing, variable substitution, CSV import/export'
+            NeedsTarget = $false
+            NeedsSSH    = $false
+            PerTarget   = $false   # fully offline — no docker calls
+            Function    = 'Invoke-IT_ComposeRepository'
+            CheckCount  = 10
         }
     )
 }
@@ -3859,5 +3869,244 @@ function Invoke-IT_ContainerAdminMenu {
     }
 
     $Script:FleetTargets = $savedTargets
+    return $r
+}
+
+# ── Suite 33 — Compose repository ─────────────────────────────────────────────
+
+function Invoke-IT_ComposeRepository {
+    $r = _IT_NewResult
+
+    _IT_Section 'Compose repository'
+
+    $savedRoot    = $Script:FltScriptRoot
+    $tmpDir       = Join-Path ([System.IO.Path]::GetTempPath()) "tcflt_it33_$(Get-Random)"
+    New-Item -ItemType Directory -Path $tmpDir | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $tmpDir 'compose\templates') -Force | Out-Null
+
+    # Copy real templates into temp dir BEFORE redirecting script root
+    $realTemplateDir = Join-Path $savedRoot 'compose\templates'
+    $tmpTemplateDir  = Join-Path $tmpDir 'compose\templates'
+    if (Test-Path $realTemplateDir) {
+        Get-ChildItem "$realTemplateDir\*.template" -ErrorAction SilentlyContinue |
+            ForEach-Object { Copy-Item $_.FullName $tmpTemplateDir -Force }
+    } else {
+        # Templates folder not found — create minimal stubs so template tests can run
+        $stubContent = "networks:`n  {{NETWORK_NAME}}:`n    {{NETWORK_DEFINITION}}`n" +
+                       "services:`n  {{CONTAINER_NAME}}:`n    image: stub:latest`n" +
+                       "    container_name: {{CONTAINER_NAME}}`n    hostname: {{CONTAINER_NAME}}`n" +
+                       "    restart: unless-stopped`n    networks:`n      {{NETWORK_NAME}}:`n" +
+                       "        ipv4_address: {{IP_ADDRESS}}`n"
+        foreach ($tname in @('twincat-xar','mosquitto','debian-ssh')) {
+            $stubPath = Join-Path $tmpTemplateDir "$tname.yml.template"
+            [System.IO.File]::WriteAllText($stubPath, $stubContent, [System.Text.Encoding]::UTF8)
+        }
+    }
+
+    # Redirect script root to temp dir so Get-FltComposeDir points there
+    $Script:FltScriptRoot = $tmpDir
+
+    # ------------------------------------------------------------------
+    # 33a — Get-FltComposeTemplates: finds templates in templates/ dir
+    # ------------------------------------------------------------------
+    try {
+        $tmplDir   = Get-FltComposeTemplateDir
+        $tmplFiles = @(Get-ChildItem $tmplDir -Filter '*.template' -ErrorAction SilentlyContinue)
+        $templates = @(Get-FltComposeTemplates)
+        if ($templates.Count -ge 3) {
+            _IT_Pass $r '33a  Get-FltComposeTemplates: finds all 3 built-in templates'
+        } else {
+            _IT_Fail $r '33a  Get-FltComposeTemplates: finds all 3 built-in templates' `
+                "Found: $($templates.Count) (dir=$tmplDir exists=$(Test-Path $tmplDir) files=$($tmplFiles.Count))"
+        }
+    } catch { _IT_Fail $r '33a  Get-FltComposeTemplates' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 33b — Get-FltComposeTemplates: all expected names present
+    # ------------------------------------------------------------------
+    try {
+        $templates = @(Get-FltComposeTemplates)
+        $names = $templates | ForEach-Object { $_.Name }
+        $hasAll = ('twincat-xar' -in $names) -and ('mosquitto' -in $names) -and ('debian-ssh' -in $names)
+        if ($hasAll) {
+            _IT_Pass $r '33b  Get-FltComposeTemplates: twincat-xar, mosquitto, debian-ssh present'
+        } else {
+            _IT_Fail $r '33b  Get-FltComposeTemplates: twincat-xar, mosquitto, debian-ssh present' `
+                "Names: $($names -join ', ')"
+        }
+    } catch { _IT_Fail $r '33b  Template names' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 33c — Get-FltComposeServices: parses service names from YAML
+    # ------------------------------------------------------------------
+    try {
+        $testYml = @"
+networks:
+  container-network:
+    external: true
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:latest
+  tc31-xar-base:
+    image: ghcr.io/beckhoff/tcbsd-twincat-xar:latest
+  debian-test:
+    image: debian:bookworm-slim
+"@
+        $ymlPath = Join-Path $tmpDir 'test.yml'
+        $testYml | Set-Content $ymlPath -Encoding UTF8
+        $services = @(Get-FltComposeServices -Path $ymlPath)
+        if ($services.Count -eq 3 -and 'mosquitto' -in $services -and 'tc31-xar-base' -in $services) {
+            _IT_Pass $r '33c  Get-FltComposeServices: parses 3 services correctly'
+        } else {
+            _IT_Fail $r '33c  Get-FltComposeServices: parses 3 services correctly' `
+                "Count=$($services.Count) Services=$($services -join ',')"
+        }
+    } catch { _IT_Fail $r '33c  Get-FltComposeServices' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 33d — New-FltComposeFromTemplate: generates valid compose file
+    # ------------------------------------------------------------------
+    try {
+        $vars = @{
+            CONTAINER_NAME     = 'test-xar'
+            AMS_NETID          = '15.15.15.15.1.1'
+            IP_ADDRESS         = '192.168.20.3'
+            NETWORK_NAME       = 'container-network'
+            NETWORK_DEFINITION = 'external: true'
+        }
+        $result = New-FltComposeFromTemplate -TemplateName 'twincat-xar' `
+                      -OutputName 'test-xar' -Variables $vars
+        if ($result.Ok -and (Test-Path $result.Path)) {
+            _IT_Pass $r '33d  New-FltComposeFromTemplate: generates compose file'
+        } else {
+            _IT_Fail $r '33d  New-FltComposeFromTemplate: generates compose file' `
+                $result.Message
+        }
+    } catch { _IT_Fail $r '33d  New-FltComposeFromTemplate' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 33e — New-FltComposeFromTemplate: substituted variables correct
+    # ------------------------------------------------------------------
+    try {
+        $outPath = Join-Path $tmpDir 'compose\test-xar.yml'
+        if (Test-Path $outPath) {
+            $content2 = Get-Content $outPath -Raw
+            $hasName   = $content2 -match 'container_name: test-xar'
+            $hasNetId  = $content2 -match '15\.15\.15\.15\.1\.1'
+            $hasIp     = $content2 -match '192\.168\.20\.3'
+            $noPlaceholder = $content2 -notmatch '\{\{[A-Z_]+\}\}'
+            if ($hasName -and $hasNetId -and $hasIp -and $noPlaceholder) {
+                _IT_Pass $r '33e  New-FltComposeFromTemplate: all variables substituted'
+            } else {
+                _IT_Fail $r '33e  New-FltComposeFromTemplate: all variables substituted' `
+                    "name=$hasName netid=$hasNetId ip=$hasIp noplac=$noPlaceholder"
+            }
+        } else {
+            _IT_Fail $r '33e  Variable substitution' 'Compose file not found (33d failed)'
+        }
+    } catch { _IT_Fail $r '33e  Variable substitution' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 33f — New-FltComposeFromTemplate: returns service list
+    # ------------------------------------------------------------------
+    try {
+        $vars = @{
+            CONTAINER_NAME     = 'test-xar'
+            AMS_NETID          = '15.15.15.15.1.1'
+            IP_ADDRESS         = '192.168.20.3'
+            NETWORK_NAME       = 'container-network'
+            NETWORK_DEFINITION = 'external: true'
+        }
+        $result = New-FltComposeFromTemplate -TemplateName 'twincat-xar' `
+                      -OutputName 'test-xar2' -Variables $vars
+        if ($result.Ok -and $result.Services.Count -gt 0) {
+            _IT_Pass $r '33f  New-FltComposeFromTemplate: returns service list'
+        } else {
+            _IT_Fail $r '33f  New-FltComposeFromTemplate: returns service list' `
+                "Services=$($result.Services.Count)"
+        }
+    } catch { _IT_Fail $r '33f  Service list returned' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 33g — Import-FltContainerCsv: generates multi-service compose file
+    # ------------------------------------------------------------------
+    try {
+        $csvContent = @"
+Name,Template,AmsNetId,IpAddress,SshPort,PackageManager
+tc31-node1,twincat-xar,15.15.15.15.1.1,192.168.20.3,,apt
+tc31-node2,twincat-xar,15.15.15.15.1.2,192.168.20.4,,apt
+mqtt-broker,mosquitto,,192.168.20.2,1883,apt
+"@
+        $csvPath = Join-Path $tmpDir 'test-containers.csv'
+        $csvContent | Set-Content $csvPath -Encoding UTF8
+
+        $result = Import-FltContainerCsv -CsvPath $csvPath -OutputName 'test-batch' `
+                      -NetworkName 'container-network' -NetworkExternal $true `
+                      -Subnet '192.168.20.0/24' -Gateway '192.168.20.1'
+
+        if ($result.Ok -and $result.Services.Count -eq 3) {
+            _IT_Pass $r '33g  Import-FltContainerCsv: generates 3-service compose file'
+        } else {
+            _IT_Fail $r '33g  Import-FltContainerCsv: generates 3-service compose file' `
+                "$($result.Message) Services=$($result.Services.Count)"
+        }
+    } catch { _IT_Fail $r '33g  Import-FltContainerCsv' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 33h — Import-FltContainerCsv: generated file contains all services
+    # ------------------------------------------------------------------
+    try {
+        $outPath = Join-Path $tmpDir 'compose\test-batch.yml'
+        if (Test-Path $outPath) {
+            $content2 = Get-Content $outPath -Raw
+            $hasNode1  = $content2 -match 'container_name: tc31-node1'
+            $hasNode2  = $content2 -match 'container_name: tc31-node2'
+            $hasMqtt   = $content2 -match 'container_name: mqtt-broker'
+            if ($hasNode1 -and $hasNode2 -and $hasMqtt) {
+                _IT_Pass $r '33h  Import-FltContainerCsv: all services in generated file'
+            } else {
+                _IT_Fail $r '33h  Import-FltContainerCsv: all services in generated file' `
+                    "node1=$hasNode1 node2=$hasNode2 mqtt=$hasMqtt"
+            }
+        } else {
+            _IT_Fail $r '33h  CSV import file content' 'File not found (33g failed)'
+        }
+    } catch { _IT_Fail $r '33h  CSV import file content' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 33i — _Get-FltNetworkDefinition: inline network YAML correct
+    # ------------------------------------------------------------------
+    try {
+        $def = _Get-FltNetworkDefinition -NetworkName 'mynet' `
+                   -Subnet '10.0.0.0/24' -Gateway '10.0.0.1' -External $false
+        if ($def -match 'subnet: 10\.0\.0\.0/24' -and $def -match '10\.0\.0\.1') {
+            _IT_Pass $r '33i  _Get-FltNetworkDefinition: inline network has subnet and gateway'
+        } else {
+            _IT_Fail $r '33i  _Get-FltNetworkDefinition: inline network has subnet and gateway' `
+                "Got: $def"
+        }
+    } catch { _IT_Fail $r '33i  _Get-FltNetworkDefinition inline' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 33j — _Get-FltNetworkDefinition: external network correct
+    # ------------------------------------------------------------------
+    try {
+        $def = _Get-FltNetworkDefinition -NetworkName 'mynet' `
+                   -Subnet '' -Gateway '' -External $true
+        if ($def -eq 'external: true') {
+            _IT_Pass $r '33j  _Get-FltNetworkDefinition: external network = ''external: true'''
+        } else {
+            _IT_Fail $r '33j  _Get-FltNetworkDefinition: external network = ''external: true''' `
+                "Got: $def"
+        }
+    } catch { _IT_Fail $r '33j  _Get-FltNetworkDefinition external' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # Cleanup
+    # ------------------------------------------------------------------
+    $Script:FltScriptRoot = $savedRoot
+    Remove-Item $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+
     return $r
 }

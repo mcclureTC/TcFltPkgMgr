@@ -749,6 +749,64 @@ colour-coded table: green = healthy, red = unhealthy, yellow = starting, grey = 
 
 ---
 
+## Compose infrastructure (Phase 8.8)
+
+TcFltPkgMgr manages Docker Compose files for container fleet deployment.
+
+### Directory layout
+
+```
+TcFltPkgMgr/
+├── compose/
+│   ├── templates/                  # committed — source files
+│   │   ├── twincat-xar.yml.template
+│   │   ├── mosquitto.yml.template
+│   │   └── debian-ssh.yml.template
+│   └── *.yml                       # gitignored — generated per machine
+├── docker/
+│   ├── Dockerfile.ansible
+│   └── Dockerfile.debian-ssh       # built via docker compose up --build
+```
+
+### Templates
+
+| Template | Image | Prompted variables |
+|----------|-------|-------------------|
+| `twincat-xar.yml.template` | `ghcr.io/beckhoff/tcbsd-twincat-xar:latest` | Container name, AMS NetID, IP address, network name |
+| `mosquitto.yml.template` | `eclipse-mosquitto:latest` | Container name, port, IP address, network name, conf volume |
+| `debian-ssh.yml.template` | Built from `Dockerfile.debian-ssh` | Container name, SSH port, IP address, network name, Dockerfile path |
+
+Templates use `{{VARIABLE}}` placeholders substituted at generation time. `{{NETWORK_DEFINITION}}` is either `external: true` or an inline IPAM block depending on whether the network already exists.
+
+### CSV batch deployment
+
+Multiple containers of the same or mixed types can be deployed from a single CSV file. Each row defines one container; all rows in one batch share a single compose file with multiple services.
+
+CSV columns: `Name`, `Template`, `AmsNetId`, `IpAddress`, `SshPort`, `PackageManager`
+
+Use `Export-FltContainerCsv` to export existing container targets as a starting point, edit in Excel, then re-import with `Import-FltContainerCsv`.
+
+### Network
+
+All containers share one Docker network. Default settings in `settings.default.json`:
+
+```json
+"compose": {
+  "dir":     "compose",
+  "network": "container-network",
+  "subnet":  "192.168.20.0/24",
+  "gateway": "192.168.20.1"
+}
+```
+
+Override in `settings.local.json`. At deploy time TcFltPkgMgr asks whether to define the network inline (TcFltPkgMgr creates it) or mark it external (you created it separately).
+
+### Building the Ansible operator container
+
+See the Ansible section below for `docker build` and `docker run` instructions for the `tcflt-ansible` container used for Linux target management.
+
+---
+
 ## File Layout
 
 ```

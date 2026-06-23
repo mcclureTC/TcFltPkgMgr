@@ -38,3 +38,7 @@ ansible/*.retry
 
 # Docker build cache (not source files)
 docker/.build-cache/
+# Compose files — generated, machine-specific (templates in compose/templates/ ARE committed)
+compose/*.yml
+compose/*.yaml
+compose/*.csv

@@ -17,6 +17,9 @@ class FleetTarget {
     [string] $PackageManager  # 'tcpkg' | 'winget' | 'both' | 'apt' | 'yum' | 'dnf' | 'apk' | ''
     [string] $DockerHost      # name of the FleetTarget that is the Docker host (containers only)
     [string] $ContainerName   # Docker container name or ID (containers only)
+    [string] $ComposeFile     # relative path to compose file from TcFltPkgMgr root (containers only)
+    [string] $ComposeService  # service name within the compose file (containers only)
+    [string] $ComposeProject  # --project-name for docker compose (derived from filename)
 
     FleetTarget() {
         $this.Port          = 22
@@ -26,6 +29,9 @@ class FleetTarget {
         $this.PackageManager = ''
         $this.DockerHost    = ''
         $this.ContainerName = ''
+        $this.ComposeFile   = ''
+        $this.ComposeService = ''
+        $this.ComposeProject = ''
     }
 
     FleetTarget([string]$Name, [string]$Address, [int]$Port,
@@ -41,6 +47,9 @@ class FleetTarget {
         $this.PackageManager = ''
         $this.DockerHost     = ''
         $this.ContainerName  = ''
+        $this.ComposeFile    = ''
+        $this.ComposeService = ''
+        $this.ComposeProject = ''
     }
 
     # Returns the effective package manager — resolves empty string to OS default

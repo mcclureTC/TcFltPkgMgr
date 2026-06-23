@@ -65,31 +65,42 @@ function Invoke-TargetMenu {
         Write-Host '  Add New Target  >  Docker Container' -ForegroundColor Cyan
         Write-Host ''
 
-        # Show existing non-container targets as Docker host candidates
+        # Show Docker host options
+        Write-Host '  Docker host:' -ForegroundColor DarkGray
+        Write-Host '    0. Local (this machine — Docker Desktop or local Docker daemon)' -ForegroundColor DarkGray
         $hostCandidates = @($Script:FleetTargets | Where-Object { $_.TargetType -ne 'container' })
         if ($hostCandidates.Count -gt 0) {
-            Write-Host '  Available Docker hosts:' -ForegroundColor DarkGray
             foreach ($h in $hostCandidates) {
                 Write-Host "    $($h.Name)  ($($h.Address))" -ForegroundColor DarkGray
             }
-            Write-Host ''
         }
+        Write-Host ''
 
-        $dockerHostName = Read-FltValue 'Docker host target name (blank to cancel):' -CancelOnBlank
-        if (-not $dockerHostName) { return }
+        $dockerHostRaw = Read-FltValue 'Docker host (0 = local, name from above, blank to cancel):' -CancelOnBlank
+        if (-not $dockerHostRaw) { return }
 
-        # Validate Docker host exists in fleet
-        $hostTarget = $Script:FleetTargets | Where-Object { $_.Name -eq $dockerHostName } | Select-Object -First 1
-        if (-not $hostTarget) {
-            Write-Host "  Target '$dockerHostName' not found in fleet." -ForegroundColor Red
-            Write-Host '  Add the Docker host target first via Setup > Add target.' -ForegroundColor DarkGray
-            Read-Host '  Press Enter'
-            return
-        }
-        if ($hostTarget.TargetType -eq 'container') {
-            Write-Host "  '$dockerHostName' is itself a container — Docker hosts must be physical or VM targets." -ForegroundColor Red
-            Read-Host '  Press Enter'
-            return
+        $dockerHostName = $null
+        $hostTarget     = $null
+        if ($dockerHostRaw -eq '0') {
+            $dockerHostName = '__local__'
+            # Create a synthetic local host target for field inheritance
+            $hostTarget = [FleetTarget]::new('__local__', 'localhost', 0, '', $false)
+            $hostTarget.OS = if ($IsWindows) { 'windows' } else { 'linux' }
+            $hostTarget.TargetType = 'physical'
+        } else {
+            $dockerHostName = $dockerHostRaw
+            $hostTarget = $Script:FleetTargets | Where-Object { $_.Name -eq $dockerHostName } | Select-Object -First 1
+            if (-not $hostTarget) {
+                Write-Host "  Target '$dockerHostName' not found in fleet." -ForegroundColor Red
+                Write-Host '  Add the Docker host target first via Setup > Add target.' -ForegroundColor DarkGray
+                Read-Host '  Press Enter'
+                return
+            }
+            if ($hostTarget.TargetType -eq 'container') {
+                Write-Host "  '$dockerHostName' is itself a container — Docker hosts must be physical or VM targets." -ForegroundColor Red
+                Read-Host '  Press Enter'
+                return
+            }
         }
 
         $containerName = Read-FltValue 'Container name (e.g. web_app, blank to cancel):' -CancelOnBlank
@@ -110,8 +121,12 @@ function Invoke-TargetMenu {
             default { 'apt' }
         }
 
-        # Container inherits address/port/user from Docker host
-        $t = [FleetTarget]::new($name, $hostTarget.Address, $hostTarget.Port, $hostTarget.User, $false)
+        # Container target construction
+        # For __local__, use placeholder values — all docker ops run via local CLI
+        $tAddr = if ($dockerHostName -eq '__local__') { '__local__' } else { $hostTarget.Address }
+        $tPort = if ($dockerHostName -eq '__local__') { 0 }            else { $hostTarget.Port }
+        $tUser = if ($dockerHostName -eq '__local__') { '' }            else { $hostTarget.User }
+        $t = [FleetTarget]::new($name, $tAddr, $tPort, $tUser, $false)
         $t.OS             = 'linux'
         $t.TargetType     = 'container'
         $t.PackageManager = $pm

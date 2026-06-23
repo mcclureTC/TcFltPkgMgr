@@ -16,6 +16,17 @@ Set-StrictMode -Off
 # Private helpers
 # ---------------------------------------------------------------------------
 
+# Returns SSH credentials, or a no-credential object when all selected targets
+# use __local__ as their Docker host (so no SSH prompt appears for local ops).
+function _Get-ContainerSshCreds {
+    param([object[]]$Targets)
+    $needSsh = @($Targets | Where-Object { $_.DockerHost -ne '__local__' })
+    if ($needSsh.Count -eq 0) {
+        return [pscustomobject]@{ Credential = $null; KeyFile = '' }
+    }
+    return Get-FleetSshCredential -Targets $Targets
+}
+
 function _Get-ContainerTargets {
     @($Script:FleetTargets | Where-Object { $_.TargetType -eq 'container' })
 }
@@ -50,7 +61,7 @@ function _Invoke-DockerExecAction {
         -ForegroundColor Cyan
     if (-not (Read-FltYesNo -Prompt 'Proceed?')) { return }
 
-    $sshCreds = Get-FleetSshCredential -Targets $selected
+    $sshCreds = _Get-ContainerSshCreds -Targets $selected
 
     Show-FleetBatchDashboard -Targets $selected -Action $Action -PackageSpec $PackageSpec `
         -Mode 'docker exec' -TimeoutSecs 300
@@ -126,7 +137,7 @@ function _Invoke-DockerLifecycleAction {
         -ForegroundColor Cyan
     if (-not (Read-FltYesNo -Prompt 'Proceed?')) { return }
 
-    $sshCreds = Get-FleetSshCredential -Targets $selected
+    $sshCreds = _Get-ContainerSshCreds -Targets $selected
 
     Show-FleetBatchDashboard -Targets $selected -Action $Action -PackageSpec $PackageSpec `
         -Mode 'docker lifecycle' -TimeoutSecs $TimeoutSecs
@@ -252,7 +263,7 @@ function Invoke-ContainerLifecycleMenu {
         Write-Host "  Recreating $($selected.Count) container(s)." -ForegroundColor Cyan
         if (-not (Read-FltYesNo -Prompt 'Proceed?')) { return }
 
-        $sshCreds = Get-FleetSshCredential -Targets $selected
+        $sshCreds = _Get-ContainerSshCreds -Targets $selected
         foreach ($step in @('stop','rm')) {
             $capturedStep = $step
             $results = Invoke-FltDockerLifecycleBatch `
@@ -323,8 +334,7 @@ function Invoke-ContainerLogsMenu {
         Read-Host '  Press Enter'; return
     }
 
-    $sshCreds = Get-FleetSshCredential -Targets @($hostTgt)
-    $logCmd   = "docker logs --tail $tailLines $($target.ContainerName) 2>&1"
+    $logArgs = "logs --tail $tailLines $($target.ContainerName)"
 
     Clear-Host
     Write-Host "  Logs: $($target.ContainerName) on $($target.DockerHost) (last $tailLines lines)" `
@@ -333,36 +343,45 @@ function Invoke-ContainerLogsMenu {
     Write-Host ''
 
     try {
-        if (-not (Ensure-FltPoshSsh)) {
-            Write-Host '  Posh-SSH is not available.' -ForegroundColor Red
-            Read-Host '  Press Enter'; return
-        }
-
-        $sshParams = @{
-            ComputerName = $hostTgt.Address
-            Port         = [int]$hostTgt.Port
-            AcceptKey    = $true
-            ErrorAction  = 'Stop'
-        }
-        if ($sshCreds.KeyFile) {
-            $sshParams['Username'] = $hostTgt.User
-            $sshParams['KeyFile']  = $sshCreds.KeyFile
-        } else {
-            $sshParams['Credential'] = $sshCreds.Credential
-        }
-
-        $session = New-SSHSession @sshParams
-        try {
-            $result = Invoke-SSHCommand -SessionId $session.SessionId `
-                          -Command $logCmd -TimeOut 30
+        if ($target.DockerHost -eq '__local__') {
+            $result = _Invoke-FltDockerLocal -DockerArgs $logArgs
             $output = $result.Output -join "`n"
             if ([string]::IsNullOrWhiteSpace($output)) {
                 Write-Host '  (no log output)' -ForegroundColor DarkGray
             } else {
                 Write-Host $output
             }
-        } finally {
-            Remove-SSHSession -SessionId $session.SessionId | Out-Null
+        } else {
+            if (-not (Ensure-FltPoshSsh)) {
+                Write-Host '  Posh-SSH is not available.' -ForegroundColor Red
+                Read-Host '  Press Enter'; return
+            }
+            $sshCreds  = Get-FleetSshCredential -Targets @($hostTgt)
+            $sshParams = @{
+                ComputerName = $hostTgt.Address
+                Port         = [int]$hostTgt.Port
+                AcceptKey    = $true
+                ErrorAction  = 'Stop'
+            }
+            if ($sshCreds.KeyFile) {
+                $sshParams['Username'] = $hostTgt.User
+                $sshParams['KeyFile']  = $sshCreds.KeyFile
+            } else {
+                $sshParams['Credential'] = $sshCreds.Credential
+            }
+            $session = New-SSHSession @sshParams
+            try {
+                $result = Invoke-SSHCommand -SessionId $session.SessionId `
+                              -Command "docker $logArgs" -TimeOut 30
+                $output = $result.Output -join "`n"
+                if ([string]::IsNullOrWhiteSpace($output)) {
+                    Write-Host '  (no log output)' -ForegroundColor DarkGray
+                } else {
+                    Write-Host $output
+                }
+            } finally {
+                Remove-SSHSession -SessionId $session.SessionId | Out-Null
+            }
         }
     } catch {
         Write-Host "  Error: $($_.Exception.Message)" -ForegroundColor Red
@@ -401,7 +420,6 @@ function Invoke-ContainerHealthMenu {
         $byHost[$t.DockerHost].Add($t)
     }
 
-    $sshCreds = Get-FleetSshCredential -Targets $containers
     $results  = [System.Collections.Generic.List[pscustomobject]]::new()
 
     foreach ($hostName in $byHost.Keys) {
@@ -418,7 +436,25 @@ function Invoke-ContainerHealthMenu {
             continue
         }
 
-        $session = $null
+        # Local Docker — run inspect directly without SSH
+        if ($hostName -eq '__local__') {
+            foreach ($t in $hostContainers) {
+                $capturedName = $t.ContainerName
+                try {
+                    $res    = _Invoke-FltDockerLocal -DockerArgs "inspect --format={{.State.Health.Status}} $capturedName"
+                    $health = ($res.Output -join '').Trim()
+                    if ([string]::IsNullOrEmpty($health) -or $res.ExitStatus -ne 0) { $health = 'none' }
+                } catch { $health = 'error' }
+                $results.Add([pscustomobject]@{
+                    Name = $t.Name; Container = $t.ContainerName; Host = $hostName; Health = $health
+                })
+            }
+            continue
+        }
+
+        # Remote Docker host — get creds on demand and SSH
+        $sshCreds = Get-FleetSshCredential -Targets @($hostTgt)
+        $session  = $null
         try {
             $sshParams = @{
                 ComputerName = $hostTgt.Address

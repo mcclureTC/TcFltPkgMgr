@@ -87,7 +87,8 @@ $modules = @(
     'data\PackageRepository.ps1',
     'data\FleetQuery.ps1',
     'data\WinGetRepository.ps1',          # WinGet package search and version listing
-    'data\DockerRepository.ps1',          # Docker operator-machine management (start, status)
+    'data\DockerRepository.ps1',
+    'data\ComposeRepository.ps1',          # Docker operator-machine management (start, status)
     'data\AnsibleRepository.ps1',         # Ansible availability checks
     'execution\WinGetExecutor.ps1',       # WinGet parallel SSH batch executor
     'execution\SshExecutor.ps1',
@@ -153,6 +154,7 @@ $Script:FltReadOnly = -not $Live
 
 # OS detection — used for feature gating and backend selection.
 # $IsWindows / $IsLinux / $IsMacOS are PS7 automatic variables.
+$Script:FltScriptRoot = $PSScriptRoot
 $Script:FltOS = if ($IsWindows) { 'windows' } elseif ($IsLinux) { 'linux' } else { 'macos' }
 
 # Feature availability map — gates OS-specific operations cleanly.

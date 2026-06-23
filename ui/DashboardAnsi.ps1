@@ -469,7 +469,9 @@ function _Ansi_RepaintBatchDashboard {
         "  > winget $Action --id $PackageSpec --silent --accept-package-agreements"
     } elseif ($Mode -like 'Ansible*') {
         "  > ansible-playbook -i inventory/hosts.ini <playbook>"
-    } elseif ($Mode -like 'docker*' -or $Mode -like 'Docker*') {
+    } elseif ($Mode -like '*lifecycle*') {
+        "  > docker $Action <container>"
+    } elseif ($Mode -like '*exec*' -or $Mode -like 'docker*' -or $Mode -like 'Docker*') {
         "  > docker exec -i <container> <pkgcmd>"
     } else {
         "  > `"$remoteTcpkg`" $Action $PackageSpec -y"

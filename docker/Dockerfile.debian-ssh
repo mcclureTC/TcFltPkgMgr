@@ -1,0 +1,42 @@
+# =============================================================================
+#  TcFltPkgMgr — Debian SSH management target
+#  Used as a Linux fleet target for Ansible testing and general management.
+#
+#  Build (via docker compose — password injected as build arg):
+#    docker compose -f compose/<name>.yml up -d --build
+#
+#  SSH access: ssh root@localhost -p <SSH_PORT>
+#  Password:   stored in TcFltPkgMgr credential store (ansible_ssh_<container>)
+# =============================================================================
+
+FROM debian:bookworm-slim
+
+ARG ROOT_PASSWORD
+RUN test -n "$ROOT_PASSWORD" || (echo "ERROR: ROOT_PASSWORD build arg is required" && exit 1)
+
+# ── System packages ───────────────────────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        openssh-server \
+        python3 \
+        python3-apt \
+        sudo \
+        curl \
+        iputils-ping \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── SSH configuration ─────────────────────────────────────────────────────────
+RUN mkdir -p /var/run/sshd && \
+    echo "root:${ROOT_PASSWORD}" | chpasswd && \
+    sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && \
+    sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config && \
+    sed -i 's/UsePAM yes/UsePAM no/' /etc/ssh/sshd_config
+
+# ── Generate host keys ────────────────────────────────────────────────────────
+RUN ssh-keygen -A
+
+# ── Python symlink (Ansible expects python3 at /usr/bin/python3) ─────────────
+RUN ln -sf /usr/bin/python3 /usr/bin/python
+
+EXPOSE 22
+
+CMD ["/usr/sbin/sshd", "-D"]

@@ -14,6 +14,28 @@ Set-StrictMode -Off
 # Private helper: resolve the Docker host FleetTarget for a container target
 # ---------------------------------------------------------------------------
 
+# Sentinel value for the local operator machine — no SSH needed.
+$Script:FltDockerLocalHost = '__local__'
+
+# Private helper: run a docker command locally on the operator machine.
+# Returns [pscustomobject]@{ ExitStatus; Output }
+function _Invoke-FltDockerLocal {
+    param([string]$DockerArgs)
+    try {
+        $output   = & cmd /c "docker $DockerArgs 2>&1"
+        $exitCode = $LASTEXITCODE
+        return [pscustomobject]@{ ExitStatus = $exitCode; Output = @($output) }
+    } catch {
+        return [pscustomobject]@{ ExitStatus = 1; Output = @($_.Exception.Message) }
+    }
+}
+
+# Private helper: returns $true when the container target uses the local Docker host.
+function _Is-FltLocalDockerHost {
+    param([FleetTarget]$ContainerTarget)
+    return $ContainerTarget.DockerHost -eq '__local__'
+}
+
 function _Get-FltDockerHostTarget {
     param([FleetTarget] $ContainerTarget)
     $Script:FleetTargets |
@@ -199,7 +221,43 @@ function Invoke-FltDockerExecBatch {
     # Process each Docker host sequentially (SSH sessions are not thread-safe in Posh-SSH)
     foreach ($hostName in $byHost.Keys) {
         $hostContainers = $byHost[$hostName]
-        $hostTarget     = _Get-FltDockerHostTarget -ContainerTarget $hostContainers[0]
+        $isLocal        = ($hostName -eq '__local__')
+
+        # ── Local execution path (no SSH) ──────────────────────────────────
+        if ($isLocal) {
+            foreach ($t in $hostContainers) {
+                $pm      = Get-FltEffectivePackageManager $t
+                $pkgCmd  = _Get-FltContainerPkgCmd -PackageManager $pm -Action $Action -PackageName $PackageSpec
+                $execCmd = "exec -i $($t.ContainerName) $pkgCmd"
+
+                [void]$statusDict.TryUpdate($t.Name, "Running|0|", $statusDict[$t.Name])
+                if ($OnProgress) { & $OnProgress $statusDict }
+
+                $tStart = [datetime]::UtcNow
+                $r      = [BatchResult]::new()
+                $r.TargetName = $t.Name; $r.Action = $Action; $r.PackageSpec = $PackageSpec
+                $r.PackageManager = 'docker-exec'; $r.Note = $t.ContainerName
+
+                $result        = _Invoke-FltDockerLocal -DockerArgs $execCmd
+                $dur           = ([datetime]::UtcNow - $tStart).TotalSeconds
+                $r.DurationSec = $dur; $r.TimedOut = $false
+                if ($result.ExitStatus -eq 0) {
+                    $r.Status = 'OK'
+                } else {
+                    $r.Status = 'Failed'
+                    $out = ($result.Output -join ' ').Trim()
+                    if ($out.Length -gt 0) { $r.Note = "$($t.ContainerName): $($out.Substring(0, [Math]::Min(120, $out.Length)))" }
+                }
+
+                $allResults.Add($r)
+                [void]$statusDict.TryUpdate($t.Name, "$($r.Status)|$([math]::Round($dur,1))|$($r.Note)", $statusDict[$t.Name])
+                if ($OnProgress) { & $OnProgress $statusDict }
+            }
+            continue
+        }
+
+        # ── Remote SSH execution path ───────────────────────────────────────
+        $hostTarget = _Get-FltDockerHostTarget -ContainerTarget $hostContainers[0]
 
         if ($null -eq $hostTarget) {
             foreach ($t in $hostContainers) {
@@ -215,9 +273,7 @@ function Invoke-FltDockerExecBatch {
             continue
         }
 
-        $sshParams = $null
-        $session   = $null
-
+        $session = $null
         try {
             $sshParams = _Get-FltDockerSshParams -HostTarget $hostTarget `
                              -Credential $Credential -KeyFile $KeyFile
@@ -244,21 +300,16 @@ function Invoke-FltDockerExecBatch {
             [void]$statusDict.TryUpdate($t.Name, "Running|0|", $statusDict[$t.Name])
             if ($OnProgress) { & $OnProgress $statusDict }
 
-            $tStart  = [datetime]::UtcNow
-            $r       = [BatchResult]::new()
-            $r.TargetName     = $t.Name
-            $r.Action         = $Action
-            $r.PackageSpec    = $PackageSpec
-            $r.PackageManager = 'docker-exec'
-            $r.Note           = $t.ContainerName
+            $tStart = [datetime]::UtcNow
+            $r      = [BatchResult]::new()
+            $r.TargetName = $t.Name; $r.Action = $Action; $r.PackageSpec = $PackageSpec
+            $r.PackageManager = 'docker-exec'; $r.Note = $t.ContainerName
 
             try {
-                $result = Invoke-SSHCommand -SessionId $session.SessionId `
-                              -Command $execCmd -TimeOut $TimeoutSecs
-                $dur    = ([datetime]::UtcNow - $tStart).TotalSeconds
-                $r.DurationSec = $dur
-                $r.TimedOut    = $false
-
+                $result        = Invoke-SSHCommand -SessionId $session.SessionId `
+                                     -Command $execCmd -TimeOut $TimeoutSecs
+                $dur           = ([datetime]::UtcNow - $tStart).TotalSeconds
+                $r.DurationSec = $dur; $r.TimedOut = $false
                 if ($result.ExitStatus -eq 0) {
                     $r.Status = 'OK'
                 } else {
@@ -275,14 +326,11 @@ function Invoke-FltDockerExecBatch {
             }
 
             $allResults.Add($r)
-            $entry = "$($r.Status)|$([math]::Round($r.DurationSec,1))|$($r.Note)"
-            [void]$statusDict.TryUpdate($t.Name, $entry, $statusDict[$t.Name])
+            [void]$statusDict.TryUpdate($t.Name, "$($r.Status)|$([math]::Round($r.DurationSec,1))|$($r.Note)", $statusDict[$t.Name])
             if ($OnProgress) { & $OnProgress $statusDict }
         }
 
-        if ($session) {
-            try { Remove-SSHSession -SessionId $session.SessionId | Out-Null } catch {}
-        }
+        if ($session) { try { Remove-SSHSession -SessionId $session.SessionId | Out-Null } catch {} }
     }
 
     Write-FltBatchEntry -Action $Action -PackageSpec $PackageSpec -Results $allResults.ToArray()
@@ -373,7 +421,41 @@ function Invoke-FltDockerLifecycleBatch {
 
     foreach ($hostName in $byHost.Keys) {
         $hostContainers = $byHost[$hostName]
-        $hostTarget     = _Get-FltDockerHostTarget -ContainerTarget $hostContainers[0]
+        $isLocal        = ($hostName -eq '__local__')
+
+        # ── Local execution path (no SSH) ──────────────────────────────────
+        if ($isLocal) {
+            foreach ($t in $hostContainers) {
+                $dockerTarget = if ($Action -eq 'pull') { $PackageSpec } else { $t.ContainerName }
+                $extraArgs    = if ($DockerArgs) { " $DockerArgs" } else { '' }
+                $dockerArgs2  = "$Action $dockerTarget$extraArgs"
+
+                [void]$statusDict.TryUpdate($t.Name, "Running|0|", $statusDict[$t.Name])
+                if ($OnProgress) { & $OnProgress $statusDict }
+
+                $tStart = [datetime]::UtcNow
+                $r      = [BatchResult]::new()
+                $r.TargetName = $t.Name; $r.Action = $Action; $r.PackageSpec = $PackageSpec
+                $r.PackageManager = 'docker-lifecycle'; $r.Note = $t.ContainerName
+
+                $result        = _Invoke-FltDockerLocal -DockerArgs $dockerArgs2
+                $dur           = ([datetime]::UtcNow - $tStart).TotalSeconds
+                $r.DurationSec = $dur; $r.TimedOut = $false
+                $r.Status      = if ($result.ExitStatus -eq 0) { 'OK' } else { 'Failed' }
+                if ($result.ExitStatus -ne 0) {
+                    $out = ($result.Output -join ' ').Trim()
+                    if ($out.Length -gt 0) { $r.Note = "$($t.ContainerName): $($out.Substring(0, [Math]::Min(120, $out.Length)))" }
+                }
+
+                $allResults.Add($r)
+                [void]$statusDict.TryUpdate($t.Name, "$($r.Status)|$([math]::Round($dur,1))|$($r.Note)", $statusDict[$t.Name])
+                if ($OnProgress) { & $OnProgress $statusDict }
+            }
+            continue
+        }
+
+        # ── Remote SSH execution path ───────────────────────────────────────
+        $hostTarget = _Get-FltDockerHostTarget -ContainerTarget $hostContainers[0]
 
         if ($null -eq $hostTarget) {
             foreach ($t in $hostContainers) {
@@ -405,7 +487,6 @@ function Invoke-FltDockerLifecycleBatch {
         }
 
         foreach ($t in $hostContainers) {
-            # Build docker command — pull uses the PackageSpec (image), others use ContainerName
             $dockerTarget = if ($Action -eq 'pull') { $PackageSpec } else { $t.ContainerName }
             $extraArgs    = if ($DockerArgs) { " $DockerArgs" } else { '' }
             $dockerCmd    = "docker $Action $dockerTarget$extraArgs"
@@ -415,24 +496,18 @@ function Invoke-FltDockerLifecycleBatch {
 
             $tStart = [datetime]::UtcNow
             $r      = [BatchResult]::new()
-            $r.TargetName     = $t.Name
-            $r.Action         = $Action
-            $r.PackageSpec    = $PackageSpec
-            $r.PackageManager = 'docker-lifecycle'
-            $r.Note           = $t.ContainerName
+            $r.TargetName = $t.Name; $r.Action = $Action; $r.PackageSpec = $PackageSpec
+            $r.PackageManager = 'docker-lifecycle'; $r.Note = $t.ContainerName
 
             try {
-                $result = Invoke-SSHCommand -SessionId $session.SessionId `
-                              -Command $dockerCmd -TimeOut $TimeoutSecs
+                $result        = Invoke-SSHCommand -SessionId $session.SessionId `
+                                     -Command $dockerCmd -TimeOut $TimeoutSecs
                 $dur           = ([datetime]::UtcNow - $tStart).TotalSeconds
-                $r.DurationSec = $dur
-                $r.TimedOut    = $false
+                $r.DurationSec = $dur; $r.TimedOut = $false
                 $r.Status      = if ($result.ExitStatus -eq 0) { 'OK' } else { 'Failed' }
                 if ($result.ExitStatus -ne 0) {
                     $out = ($result.Output -join ' ').Trim()
-                    if ($out.Length -gt 0) {
-                        $r.Note = "$($t.ContainerName): $($out.Substring(0, [Math]::Min(120, $out.Length)))"
-                    }
+                    if ($out.Length -gt 0) { $r.Note = "$($t.ContainerName): $($out.Substring(0, [Math]::Min(120, $out.Length)))" }
                 }
             } catch {
                 $dur           = ([datetime]::UtcNow - $tStart).TotalSeconds
@@ -443,14 +518,11 @@ function Invoke-FltDockerLifecycleBatch {
             }
 
             $allResults.Add($r)
-            $entry = "$($r.Status)|$([math]::Round($r.DurationSec,1))|$($r.Note)"
-            [void]$statusDict.TryUpdate($t.Name, $entry, $statusDict[$t.Name])
+            [void]$statusDict.TryUpdate($t.Name, "$($r.Status)|$([math]::Round($r.DurationSec,1))|$($r.Note)", $statusDict[$t.Name])
             if ($OnProgress) { & $OnProgress $statusDict }
         }
 
-        if ($session) {
-            try { Remove-SSHSession -SessionId $session.SessionId | Out-Null } catch {}
-        }
+        if ($session) { try { Remove-SSHSession -SessionId $session.SessionId | Out-Null } catch {} }
     }
 
     Write-FltBatchEntry -Action $Action -PackageSpec $PackageSpec -Results $allResults.ToArray()
@@ -483,6 +555,12 @@ function Test-FltDockerHostReachable {
         [System.Management.Automation.PSCredential] $Credential = $null,
         [string] $KeyFile = ''
     )
+
+    # Local machine — run docker info directly, no SSH
+    if ($HostTarget.Name -eq '__local__' -or $HostTarget.Address -eq '__local__') {
+        $result = _Invoke-FltDockerLocal -DockerArgs 'info --format "{{.ServerVersion}}"'
+        return if ($result.ExitStatus -eq 0) { 'online' } else { 'docker-down' }
+    }
 
     if (-not (Ensure-FltPoshSsh)) { return 'offline' }
 
