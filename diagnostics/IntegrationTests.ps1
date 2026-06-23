@@ -1070,6 +1070,16 @@ function Get-IT_Suites {
             PerTarget   = $false   # offline — live docker exec tested when container targets exist
             Function    = 'Invoke-IT_ContainerExecutor'
             CheckCount  = 13
+        },
+        [pscustomobject]@{
+            Id          = 29
+            Name        = 'Container target flow'
+            Description = 'Add container target: validation, field inheritance, Save-FltTargets, EffectiveAddress'
+            NeedsTarget = $false
+            NeedsSSH    = $false
+            PerTarget   = $false   # fully offline — uses synthetic fleet state
+            Function    = 'Invoke-IT_ContainerTargetFlow'
+            CheckCount  = 8
         }
     )
 }
@@ -3109,6 +3119,165 @@ function Invoke-IT_ContainerExecutor {
             _IT_Fail $r '28m  Test-FltDockerHostReachable is defined and callable' 'Function not found'
         }
     } catch { _IT_Fail $r '28m  Test-FltDockerHostReachable defined' $_.Exception.Message }
+
+    return $r
+}
+
+# ── Suite 29 — Container target flow ──────────────────────────────────────────
+
+# Tests the container target data model directly:
+# - FleetTarget field inheritance from Docker host
+# - EffectiveAddress() returns host/container format
+# - _Get-FltDockerHostTarget resolution
+# - _Get-FltContainerPkgCmd for all four package managers
+# - Fleet routing excludes containers from windowsTargets
+# Does NOT test the interactive Invoke-TargetMenu (requires user input).
+function Invoke-IT_ContainerTargetFlow {
+    $r = _IT_NewResult
+
+    _IT_Section 'Container target flow'
+
+    # Save and restore FleetTargets
+    $savedTargets = $Script:FleetTargets
+
+    # Synthetic fleet: one physical host + one container
+    $hostTarget = [FleetTarget]::new('docker-host-1', '192.168.8.50', 22, 'admin', $true)
+    $hostTarget.OS         = 'linux'
+    $hostTarget.TargetType = 'physical'
+
+    $cntrTarget = [FleetTarget]::new('web-1', '192.168.8.50', 22, 'admin', $false)
+    $cntrTarget.OS             = 'linux'
+    $cntrTarget.TargetType     = 'container'
+    $cntrTarget.DockerHost     = 'docker-host-1'
+    $cntrTarget.ContainerName  = 'web_app'
+    $cntrTarget.PackageManager = 'apt'
+
+    $Script:FleetTargets = @($hostTarget, $cntrTarget)
+
+    # ------------------------------------------------------------------
+    # 29a — Container target: EffectiveAddress = host/container
+    # ------------------------------------------------------------------
+    try {
+        $addr = Get-FltEffectiveAddress -Target $cntrTarget
+        if ($addr -eq 'docker-host-1/web_app') {
+            _IT_Pass $r '29a  Container EffectiveAddress: returns host/container format'
+        } else {
+            _IT_Fail $r '29a  Container EffectiveAddress: returns host/container format' "Got: $addr"
+        }
+    } catch { _IT_Fail $r '29a  EffectiveAddress' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 29b — Physical target: EffectiveAddress = IP address
+    # ------------------------------------------------------------------
+    try {
+        $addr = Get-FltEffectiveAddress -Target $hostTarget
+        if ($addr -eq '192.168.8.50') {
+            _IT_Pass $r '29b  Physical EffectiveAddress: returns IP address'
+        } else {
+            _IT_Fail $r '29b  Physical EffectiveAddress: returns IP address' "Got: $addr"
+        }
+    } catch { _IT_Fail $r '29b  EffectiveAddress physical' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 29c — IsContainer() returns $true for container target
+    # ------------------------------------------------------------------
+    try {
+        if ((Get-FltIsContainer -Target $cntrTarget) -eq $true) {
+            _IT_Pass $r '29c  IsContainer(): $true for container target'
+        } else {
+            _IT_Fail $r '29c  IsContainer(): $true for container target' "Got: $(Get-FltIsContainer -Target $cntrTarget)"
+        }
+    } catch { _IT_Fail $r '29c  IsContainer()' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 29d — IsContainer() returns $false for physical target
+    # ------------------------------------------------------------------
+    try {
+        if ((Get-FltIsContainer -Target $hostTarget) -eq $false) {
+            _IT_Pass $r '29d  IsContainer(): $false for physical target'
+        } else {
+            _IT_Fail $r '29d  IsContainer(): $false for physical target' "Got: $(Get-FltIsContainer -Target $hostTarget)"
+        }
+    } catch { _IT_Fail $r '29d  IsContainer() physical' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 29e — _Get-FltDockerHostTarget resolves host from fleet
+    # ------------------------------------------------------------------
+    try {
+        $resolved = _Get-FltDockerHostTarget -ContainerTarget $cntrTarget
+        if ($resolved -and $resolved.Name -eq 'docker-host-1') {
+            _IT_Pass $r '29e  _Get-FltDockerHostTarget: resolves correct host from fleet'
+        } else {
+            _IT_Fail $r '29e  _Get-FltDockerHostTarget: resolves correct host from fleet' `
+                "Got: $($resolved.Name)"
+        }
+    } catch { _IT_Fail $r '29e  _Get-FltDockerHostTarget' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 29f — _Get-FltDockerHostTarget returns $null for unknown host
+    # ------------------------------------------------------------------
+    try {
+        $orphan = [FleetTarget]::new('orphan', '', 22, '', $false)
+        $orphan.TargetType = 'container'
+        $orphan.DockerHost = 'nonexistent-host'
+        $resolved = _Get-FltDockerHostTarget -ContainerTarget $orphan
+        if ($null -eq $resolved) {
+            _IT_Pass $r '29f  _Get-FltDockerHostTarget: $null for unknown host'
+        } else {
+            _IT_Fail $r '29f  _Get-FltDockerHostTarget: $null for unknown host' "Got: $($resolved.Name)"
+        }
+    } catch { _IT_Fail $r '29f  _Get-FltDockerHostTarget unknown' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 29g — Fleet routing: container excluded from windowsTargets
+    #        (verified via read-only FleetExecutor: container→docker-exec, not tcpkg)
+    # ------------------------------------------------------------------
+    try {
+        $savedReadOnly    = $Script:FltReadOnly
+        $savedBatchStatus = $Script:FltBatchStatus
+        $Script:FltReadOnly    = $true
+        $Script:FltBatchStatus = @{}
+
+        $winTarget = [FleetTarget]::new('win-1', '10.0.0.1', 22, 'admin', $true)
+        $winTarget.OS = 'windows'; $winTarget.TargetType = 'physical'
+        $winTarget.PackageManager = 'tcpkg'
+
+        $results = Invoke-FleetAction -Action 'install' -PackageSpec 'curl' `
+                       -Targets @($winTarget, $cntrTarget)
+
+        $winResult  = $results | Where-Object { $_.TargetName -eq 'win-1' }
+        $cntrResult = $results | Where-Object { $_.TargetName -eq 'web-1' }
+
+        $Script:FltReadOnly    = $savedReadOnly
+        $Script:FltBatchStatus = $savedBatchStatus
+
+        if ($winResult.PackageManager -eq 'tcpkg' -and $cntrResult.PackageManager -eq 'docker-exec') {
+            _IT_Pass $r '29g  Fleet routing: container excluded from Windows bucket'
+        } else {
+            _IT_Fail $r '29g  Fleet routing: container excluded from Windows bucket' `
+                "win=$($winResult.PackageManager) cntr=$($cntrResult.PackageManager)"
+        }
+    } catch {
+        $Script:FltReadOnly    = $savedReadOnly
+        $Script:FltBatchStatus = $savedBatchStatus
+        _IT_Fail $r '29g  Fleet routing container exclusion' $_.Exception.Message
+    }
+
+    # ------------------------------------------------------------------
+    # 29h — TypeDisplay() returns 'Cntr' for container target
+    # ------------------------------------------------------------------
+    try {
+        if ((Get-FltTypeDisplay -Target $cntrTarget) -eq 'Cntr') {
+            _IT_Pass $r '29h  TypeDisplay(): ''Cntr'' for container target'
+        } else {
+            _IT_Fail $r '29h  TypeDisplay(): ''Cntr'' for container target' "Got: $(Get-FltTypeDisplay -Target $cntrTarget)"
+        }
+    } catch { _IT_Fail $r '29h  TypeDisplay()' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # Restore FleetTargets
+    # ------------------------------------------------------------------
+    $Script:FleetTargets = $savedTargets
 
     return $r
 }

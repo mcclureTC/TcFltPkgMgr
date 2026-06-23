@@ -739,16 +739,24 @@ Containers are reached via a two-hop model: SSH to the Docker host, then
 - [x] `.gitignore`: no new entries needed
 - [x] `README.md`: Phase 7 section added
 
-### 7.4 — Add container target flow (`ui/menus/TargetMenu.ps1`)
+### 7.4 — Add container target flow (`ui/menus/TargetMenu.ps1`) ✅
 
-- [ ] In Add Target, if `TargetType = 'container'`:
-      - Prompt `Docker host (target name):` — must match an existing target
-      - Prompt `Container name:`
-      - Skip `Address`, `Port`, `User` (inherited from Docker host)
-      - Skip Internet Access
-      - Prompt `Package manager: 1. apt  2. yum  3. apk  (default 1):`
-- [ ] Validate Docker host target exists and is reachable
-- [ ] Display in dashboard as `<host>/<container>` in address column
+- [x] `Invoke-TargetMenu` (Add New Target) now prompts for target type:
+      `1. Physical`, `2. VM`, `3. Docker container`
+- [x] Container branch: prompts Docker host (validated against fleet) +
+      container name + package manager (`apt`/`apk`/`yum`/`dnf`, default `apt`);
+      skips Address/Port/User (inherited from host); skips Internet Access
+- [x] Validation: Docker host must exist in fleet and must not itself be a container
+- [x] `EffectiveAddress()` / `Get-FltEffectiveAddress` returns `<host>/<container>`
+- [x] Physical/VM branch: sets `TargetType` after `Add-FleetTarget`
+- [x] Standalone wrappers added to `classes/Models.ps1`:
+      `Get-FltEffectiveAddress`, `Get-FltIsContainer`, `Get-FltTypeDisplay`, `Get-FltOsDisplay`
+- [x] Suite 29 (Container target flow) — 8 checks (29a–29h), fully offline:
+      29a–29b EffectiveAddress · 29c–29d IsContainer · 29e–29f DockerHostTarget ·
+      29g fleet routing exclusion · 29h TypeDisplay
+- [x] Security: no hardcoded secrets; host validation prevents orphan containers
+- [x] `.gitignore`: no new entries needed
+- [x] `README.md`: Phase 7.4 section added
 
 ---
 

@@ -461,6 +461,27 @@ Tests `Invoke-FltDockerExecBatch`, `Invoke-FltDockerLifecycleBatch`, `_Get-FltCo
 
 ---
 
+### Suite 29 — Container target flow
+
+**Infrastructure required:** None (fully offline — synthetic fleet state)
+**Per target:** No
+**Check count:** 8 (29a–29h)
+
+Tests the `FleetTarget` container data model, `_Get-FltDockerHostTarget`, the new standalone wrapper functions in `Models.ps1`, and fleet routing exclusion. Does not test the interactive `Invoke-TargetMenu` (requires user input).
+
+| # | Test name | What is tested | How verified |
+|---|-----------|----------------|--------------|
+| 29a | Container EffectiveAddress: host/container format | `Get-FltEffectiveAddress` returns `<DockerHost>/<ContainerName>` for container targets | Checks exact string `docker-host-1/web_app` |
+| 29b | Physical EffectiveAddress: IP address | `Get-FltEffectiveAddress` returns `Address` field for non-container targets | Checks exact IP string |
+| 29c | IsContainer(): $true for container | `Get-FltIsContainer` returns `$true` when `TargetType='container'` | Checks boolean result |
+| 29d | IsContainer(): $false for physical | `Get-FltIsContainer` returns `$false` for physical targets | Checks boolean result |
+| 29e | `_Get-FltDockerHostTarget` resolves host | Finds the Docker host target from `$Script:FleetTargets` by `DockerHost` name | Checks `Name -eq 'docker-host-1'` |
+| 29f | `_Get-FltDockerHostTarget` returns $null for unknown host | Returns `$null` when `DockerHost` name doesn't match any fleet target | Checks result is `$null` |
+| 29g | Fleet routing: container excluded from Windows bucket | Container targets route to `docker-exec`, not `tcpkg`, in a mixed fleet | Checks `PackageManager` fields via read-only `Invoke-FleetAction` |
+| 29h | TypeDisplay(): 'Cntr' for container target | `Get-FltTypeDisplay` returns `'Cntr'` for container targets | Checks exact string |
+
+---
+
 ## Adding New Tests
 
 When implementing a new phase, add tests in the appropriate location:

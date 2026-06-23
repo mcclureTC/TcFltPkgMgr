@@ -41,7 +41,104 @@ function Invoke-TargetMenu {
     Clear-Host
     Write-Host '  Add New Target' -ForegroundColor Cyan
     Write-Host ''
+    Write-Host '  Target type:' -ForegroundColor Cyan
+    Write-Host '   1. Physical machine'
+    Write-Host '   2. Virtual machine'
+    Write-Host '   3. Docker container'
+    Write-Host '   0. Cancel'
+    Write-Host ''
+    $typeChoice = (Read-Host '  Type').Trim()
+    if ($typeChoice -eq '0' -or [string]::IsNullOrEmpty($typeChoice)) { return }
+
+    $targetType = switch ($typeChoice) {
+        '1' { 'physical' }
+        '2' { 'vm'       }
+        '3' { 'container' }
+        default { 'physical' }
+    }
+
     $name = Read-FltValue 'Name (blank to cancel):' -CancelOnBlank; if (-not $name) { return }
+
+    # ── Container target flow ──────────────────────────────────────────────────
+    if ($targetType -eq 'container') {
+        Clear-Host
+        Write-Host '  Add New Target  >  Docker Container' -ForegroundColor Cyan
+        Write-Host ''
+
+        # Show existing non-container targets as Docker host candidates
+        $hostCandidates = @($Script:FleetTargets | Where-Object { $_.TargetType -ne 'container' })
+        if ($hostCandidates.Count -gt 0) {
+            Write-Host '  Available Docker hosts:' -ForegroundColor DarkGray
+            foreach ($h in $hostCandidates) {
+                Write-Host "    $($h.Name)  ($($h.Address))" -ForegroundColor DarkGray
+            }
+            Write-Host ''
+        }
+
+        $dockerHostName = Read-FltValue 'Docker host target name (blank to cancel):' -CancelOnBlank
+        if (-not $dockerHostName) { return }
+
+        # Validate Docker host exists in fleet
+        $hostTarget = $Script:FleetTargets | Where-Object { $_.Name -eq $dockerHostName } | Select-Object -First 1
+        if (-not $hostTarget) {
+            Write-Host "  Target '$dockerHostName' not found in fleet." -ForegroundColor Red
+            Write-Host '  Add the Docker host target first via Setup > Add target.' -ForegroundColor DarkGray
+            Read-Host '  Press Enter'
+            return
+        }
+        if ($hostTarget.TargetType -eq 'container') {
+            Write-Host "  '$dockerHostName' is itself a container — Docker hosts must be physical or VM targets." -ForegroundColor Red
+            Read-Host '  Press Enter'
+            return
+        }
+
+        $containerName = Read-FltValue 'Container name (e.g. web_app, blank to cancel):' -CancelOnBlank
+        if (-not $containerName) { return }
+
+        Write-Host ''
+        Write-Host '  Package manager:' -ForegroundColor Cyan
+        Write-Host '   1. apt  (Debian/Ubuntu — default)'
+        Write-Host '   2. apk  (Alpine)'
+        Write-Host '   3. yum  (RHEL/CentOS)'
+        Write-Host '   4. dnf  (Fedora/RHEL 8+)'
+        Write-Host ''
+        $pmChoice = (Read-Host '  Choice (blank = apt)').Trim()
+        $pm = switch ($pmChoice) {
+            '2' { 'apk' }
+            '3' { 'yum' }
+            '4' { 'dnf' }
+            default { 'apt' }
+        }
+
+        # Container inherits address/port/user from Docker host
+        $t = [FleetTarget]::new($name, $hostTarget.Address, $hostTarget.Port, $hostTarget.User, $false)
+        $t.OS             = 'linux'
+        $t.TargetType     = 'container'
+        $t.PackageManager = $pm
+        $t.DockerHost     = $dockerHostName
+        $t.ContainerName  = $containerName
+        $t.InternetAccess = $false   # containers don't get their own internet access flag
+        $t.Reachable      = 'unknown'
+
+        $existing = $Script:FleetTargets | Where-Object { $_.Name -eq $name } | Select-Object -First 1
+        if ($existing) {
+            Write-Host "  A target named '$name' already exists." -ForegroundColor Red
+            Read-Host '  Press Enter'
+            return
+        }
+
+        $Script:FleetTargets += $t
+        $ok = Save-FltTargets -Targets $Script:FleetTargets
+        if ($ok) {
+            Write-Host "  Added container '$name' on '$dockerHostName' ($containerName) using $pm." -ForegroundColor Green
+        } else {
+            Write-Host "  Failed to save target." -ForegroundColor Red
+        }
+        Read-Host '  Press Enter'
+        return
+    }
+
+    # ── Physical / VM target flow ──────────────────────────────────────────────
     $hostAddr = Read-FltValue 'Host address (blank to cancel):' -CancelOnBlank; if (-not $hostAddr) { return }
     $port = Read-FltValue 'Port (blank = 22):' -AllowEmpty
     if (-not $port) { $port = '22' }
@@ -66,8 +163,20 @@ function Invoke-TargetMenu {
 
     $ia = Read-FltYesNo -Prompt 'Does this target have its own Internet Access?'
 
+    # Set OS based on target type
+    $os = if ($targetType -in @('physical','vm')) { 'windows' } else { 'linux' }
+
     $ok = Add-FleetTarget -Name $name -HostAddress $hostAddr -Port ([int]$port) -User $user `
               -PlainPassword $plainPwd -KeyFile $keyFile -InternetAccess $ia
+
+    if ($ok) {
+        # Update OS and TargetType on the newly added target
+        $newTgt = $Script:FleetTargets | Where-Object { $_.Name -eq $name } | Select-Object -First 1
+        if ($newTgt) {
+            $newTgt.TargetType = $targetType
+            Save-FltTargets -Targets $Script:FleetTargets | Out-Null
+        }
+    }
 
     Write-Host $(if ($ok) { "  Added '$name'." } else { "  Add failed (exit $Script:FltLastExit)." }) `
         -ForegroundColor $(if ($ok) { 'Green' } else { 'Red' })

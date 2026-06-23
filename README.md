@@ -614,6 +614,33 @@ The `PackageManager` field on the container target controls which CLI is used in
 
 ---
 
+## Adding container targets (Phase 7.4)
+
+Container targets are added via **Setup → Add target → 3. Docker container**.
+
+The flow prompts for:
+
+1. **Docker host** — must be an existing physical or VM target in the fleet
+2. **Container name** — the Docker container name (e.g. `web_app`)
+3. **Package manager** — `apt` (default), `apk`, `yum`, or `dnf`
+
+`Address`, `Port`, and `User` are inherited from the Docker host — no separate SSH entry is needed. The container appears in the fleet dashboard with `<host>/<container>` in the address column and `Cntr` in the type column.
+
+Container targets route automatically to `Invoke-FltDockerExecBatch` for package operations and are excluded from the Windows tcpkg/winget/push buckets.
+
+### Standalone model helpers (Phase 7.4)
+
+Four new standalone wrapper functions were added to `classes/Models.ps1` following the PS7 class method convention (results must not be assigned from method calls):
+
+| Function | Replaces |
+|----------|----------|
+| `Get-FltEffectiveAddress` | `$t.EffectiveAddress()` |
+| `Get-FltIsContainer` | `$t.IsContainer()` |
+| `Get-FltTypeDisplay` | `$t.TypeDisplay()` |
+| `Get-FltOsDisplay` | `$t.OsDisplay()` |
+
+---
+
 ## File Layout
 
 ```
@@ -661,8 +688,9 @@ TcFltPkgMgr/
     ├── SortFilter.ps1                # Sort/filter helpers
     └── menus/
         ├── FleetMenu.ps1             # Top-level fleet menu
+        ├── LinuxMenu.ps1             # Linux Admin menu (Ansible)
         ├── PackageMenu.ps1           # tcpkg package operations
-        ├── TargetMenu.ps1            # Target management
+        ├── TargetMenu.ps1            # Target management (incl. container targets)
         ├── UiConfigMenu.ps1          # Runtime UI settings
         └── WinGetMenu.ps1            # WinGet install/upgrade/uninstall/status
 ```
