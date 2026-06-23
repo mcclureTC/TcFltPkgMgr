@@ -702,41 +702,42 @@ remote management, and hosting the Ansible operator container.
 - [ ] Page navigation uses `-` / `+` (numpad) consistent with fleet dashboard
 - [ ] Summary row always visible regardless of current page
 
-### 7.1 — Container executor (`execution/ContainerExecutor.ps1`) — new file
+### 7.1 — Container executor (`execution/ContainerExecutor.ps1`) — new file ✅
 
 Containers are reached via a two-hop model: SSH to the Docker host, then
 `docker exec` into the container. This avoids requiring SSH inside containers.
 
-- [ ] `Invoke-FltDockerExecBatch` — parallel SSH to each container's
+- [x] `Invoke-FltDockerExecBatch` — parallel SSH to each container's
       `DockerHost`, wraps every command as
       `docker exec -i <ContainerName> <command>`
-- [ ] `Invoke-FltDockerLifecycleBatch` — runs `docker` commands directly on
+- [x] `Invoke-FltDockerLifecycleBatch` — runs `docker` commands directly on
       the host (not inside the container):
       `docker pull`, `docker stop`, `docker start`, `docker restart`,
       `docker rm`, `docker run`
-- [ ] For package operations inside containers: command becomes
+- [x] For package operations inside containers: command becomes
       `docker exec -i <ContainerName> apt-get install -y <package>` (or
       `apk`, `yum` etc. based on `PackageManager`)
-- [ ] `BatchResult.Note` for containers includes the container name
-- [ ] `Write-FltBatchEntry` with `PackageManager = 'docker-exec'` or
+- [x] `BatchResult.Note` for containers includes the container name
+- [x] `Write-FltBatchEntry` with `PackageManager = 'docker-exec'` or
       `'docker-lifecycle'`
 
-### 7.2 — Route container targets in `Invoke-FleetAction` (`execution/FleetExecutor.ps1`)
+### 7.2 — Route container targets in `Invoke-FleetAction` (`execution/FleetExecutor.ps1`) ✅
 
-- [ ] Add `containerTargets` bucket — `TargetType -eq 'container'`
-- [ ] Package install/upgrade/remove → `Invoke-FltDockerExecBatch`
-- [ ] No feed check for containers
-- [ ] No push bucket for containers
-- [ ] Merge results into `$allResults`
+- [x] `$containerTargets` bucket: `TargetType -eq 'container'`; separated before Windows buckets — `TargetType -eq 'container'`
+- [x] Package install/upgrade/remove → `Invoke-FltDockerExecBatch`
+- [x] No feed check, no push bucket for containers
+- [x] Merge results into `$allResults`
 
-### 7.3 — Docker connection check
+### 7.3 — Docker connection check ✅
 
-- [ ] `Test-FltDockerHostReachable` — SSH to the Docker host and run
-      `docker info` to verify the Docker daemon is running and accessible
-- [ ] Called during the reachability background check for container targets
-      (replaces TCP port check which would check the host not the container)
-- [ ] Reachable result: `'online'` if `docker info` exits 0,
-      `'offline'` if SSH fails, `'docker-down'` if Docker daemon not running
+- [x] `Test-FltDockerHostReachable` — SSHes to Docker host, runs `docker info`
+- [x] Returns `'online'` (exit 0), `'docker-down'` (daemon down), `'offline'` (SSH failed)
+- [x] Suite 28 (Container executor) — 13 checks (28a–28m), fully offline:
+      28a–28c pkg cmd mapping · 28d–28g exec read-only · 28h–28i lifecycle read-only ·
+      28j–28k fleet routing · 28l result shape · 28m function existence
+- [x] Security: no hardcoded secrets; SSH credentials passed through, never stored
+- [x] `.gitignore`: no new entries needed
+- [x] `README.md`: Phase 7 section added
 
 ### 7.4 — Add container target flow (`ui/menus/TargetMenu.ps1`)
 
