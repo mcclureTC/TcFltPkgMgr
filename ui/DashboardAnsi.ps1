@@ -130,7 +130,7 @@ function _Ansi_ShowFleetDashboard {
     $cmdRow    = $sepRow2 + 1
 
     _Ansi_PaintRow $sepRow1   ('-' * $sw) 'Dark'
-    _Ansi_PaintRow $footerRow '  1. tcpkg   2. WinGet   3. Linux Admin   4. Profiles   5. UI Config   6. Setup   0. Exit' 'Dark'
+    _Ansi_PaintRow $footerRow '  1. tcpkg   2. WinGet   3. Linux Admin   4. Containers   5. Profiles   6. UI Config   7. Setup   0. Exit' 'Dark'
 
     # Nav row: pagination info + sort/filter hints
     $navParts = @()

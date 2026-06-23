@@ -1100,6 +1100,16 @@ function Get-IT_Suites {
             PerTarget   = $false   # fully offline
             Function    = 'Invoke-IT_Phase80PreWork'
             CheckCount  = 8
+        },
+        [pscustomobject]@{
+            Id          = 32
+            Name        = 'Container Admin menu'
+            Description = 'Invoke-ContainerAdminMenu: no-targets guard, docker exec/lifecycle routing, function existence'
+            NeedsTarget = $false
+            NeedsSSH    = $false
+            PerTarget   = $false   # offline — live docker exec tested when container targets exist
+            Function    = 'Invoke-IT_ContainerAdminMenu'
+            CheckCount  = 10
         }
     )
 }
@@ -3681,5 +3691,173 @@ function Invoke-IT_Phase80PreWork {
     $Script:FltBatchDashHeight  = $savedHeight
     $Script:FltBatchScrollStart = $savedScroll
 
+    return $r
+}
+
+# ── Suite 32 — Container Admin menu ───────────────────────────────────────────
+
+function Invoke-IT_ContainerAdminMenu {
+    $r = _IT_NewResult
+
+    _IT_Section 'Container Admin menu'
+
+    $savedTargets = $Script:FleetTargets
+
+    function _MkCntr {
+        param([string]$Name, [string]$DockerHostName, [string]$Container, [string]$PM = 'apt')
+        $t = [FleetTarget]::new($Name, '10.0.0.1', 22, 'admin', $false)
+        $t.OS = 'linux'; $t.TargetType = 'container'
+        $t.DockerHost = $DockerHostName; $t.ContainerName = $Container
+        $t.PackageManager = $PM
+        $t
+    }
+
+    # ------------------------------------------------------------------
+    # 32a — Invoke-ContainerAdminMenu is defined
+    # ------------------------------------------------------------------
+    try {
+        $fn = Get-Command 'Invoke-ContainerAdminMenu' -ErrorAction SilentlyContinue
+        if ($fn) { _IT_Pass $r '32a  Invoke-ContainerAdminMenu is defined' }
+        else      { _IT_Fail $r '32a  Invoke-ContainerAdminMenu is defined' 'Function not found' }
+    } catch { _IT_Fail $r '32a  Invoke-ContainerAdminMenu' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 32b — _Get-ContainerTargets filters to TargetType=container only
+    # ------------------------------------------------------------------
+    try {
+        $hostTgt = [FleetTarget]::new('docker-host-1', '10.0.0.1', 22, 'admin', $true)
+        $hostTgt.OS = 'linux'; $hostTgt.TargetType = 'physical'
+        $Script:FleetTargets = @($hostTgt, (_MkCntr 'web-1' 'docker-host-1' 'web_app'))
+        $cntrTargets = @(_Get-ContainerTargets)
+        if ($cntrTargets.Count -eq 1 -and $cntrTargets[0].Name -eq 'web-1') {
+            _IT_Pass $r '32b  _Get-ContainerTargets: returns only container targets'
+        } else {
+            _IT_Fail $r '32b  _Get-ContainerTargets: returns only container targets' `
+                "Count=$($cntrTargets.Count)"
+        }
+    } catch { _IT_Fail $r '32b  _Get-ContainerTargets' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 32c — DockerExecBatch read-only: package install produces Skipped
+    # ------------------------------------------------------------------
+    try {
+        $targets = @(_MkCntr 'web-1' 'docker-host-1' 'web_app')
+        $results = Invoke-FltDockerExecBatch -Targets $targets `
+                       -Action 'install' -PackageSpec 'curl' -ReadOnly $true
+        if ($results[0].Status -eq 'Skipped') {
+            _IT_Pass $r '32c  DockerExecBatch read-only: Status=Skipped'
+        } else {
+            _IT_Fail $r '32c  DockerExecBatch read-only: Status=Skipped' "Got=$($results[0].Status)"
+        }
+    } catch { _IT_Fail $r '32c  DockerExecBatch read-only' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 32d — DockerLifecycleBatch read-only: lifecycle produces Skipped
+    # ------------------------------------------------------------------
+    try {
+        $targets = @(_MkCntr 'web-1' 'docker-host-1' 'web_app')
+        $results = Invoke-FltDockerLifecycleBatch -Targets $targets `
+                       -Action 'stop' -PackageSpec 'web_app' -ReadOnly $true
+        if ($results[0].Status -eq 'Skipped') {
+            _IT_Pass $r '32d  DockerLifecycleBatch read-only: Status=Skipped'
+        } else {
+            _IT_Fail $r '32d  DockerLifecycleBatch read-only: Status=Skipped' "Got=$($results[0].Status)"
+        }
+    } catch { _IT_Fail $r '32d  DockerLifecycleBatch read-only' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 32e — Fleet routing: container targets route to docker-exec
+    # ------------------------------------------------------------------
+    try {
+        $savedReadOnly    = $Script:FltReadOnly
+        $savedBatchStatus = $Script:FltBatchStatus
+        $Script:FltReadOnly    = $true
+        $Script:FltBatchStatus = @{}
+        $targets = @(_MkCntr 'web-1' 'docker-host-1' 'web_app')
+        $results = Invoke-FleetAction -Action 'install' -PackageSpec 'curl' -Targets $targets
+        $Script:FltReadOnly    = $savedReadOnly
+        $Script:FltBatchStatus = $savedBatchStatus
+        if ($results[0].PackageManager -eq 'docker-exec') {
+            _IT_Pass $r '32e  Fleet routing: container → docker-exec'
+        } else {
+            _IT_Fail $r '32e  Fleet routing: container → docker-exec' `
+                "PackageManager=$($results[0].PackageManager)"
+        }
+    } catch {
+        $Script:FltReadOnly    = $savedReadOnly
+        $Script:FltBatchStatus = $savedBatchStatus
+        _IT_Fail $r '32e  Fleet routing container' $_.Exception.Message
+    }
+
+    # ------------------------------------------------------------------
+    # 32f — Invoke-ContainerInstallMenu is defined
+    # ------------------------------------------------------------------
+    try {
+        $fn = Get-Command 'Invoke-ContainerInstallMenu' -ErrorAction SilentlyContinue
+        if ($fn) { _IT_Pass $r '32f  Invoke-ContainerInstallMenu is defined' }
+        else      { _IT_Fail $r '32f  Invoke-ContainerInstallMenu is defined' 'Not found' }
+    } catch { _IT_Fail $r '32f  Invoke-ContainerInstallMenu' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 32g — Invoke-ContainerLifecycleMenu is defined
+    # ------------------------------------------------------------------
+    try {
+        $fn = Get-Command 'Invoke-ContainerLifecycleMenu' -ErrorAction SilentlyContinue
+        if ($fn) { _IT_Pass $r '32g  Invoke-ContainerLifecycleMenu is defined' }
+        else      { _IT_Fail $r '32g  Invoke-ContainerLifecycleMenu is defined' 'Not found' }
+    } catch { _IT_Fail $r '32g  Invoke-ContainerLifecycleMenu' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 32h — Invoke-ContainerLogsMenu is defined
+    # ------------------------------------------------------------------
+    try {
+        $fn = Get-Command 'Invoke-ContainerLogsMenu' -ErrorAction SilentlyContinue
+        if ($fn) { _IT_Pass $r '32h  Invoke-ContainerLogsMenu is defined' }
+        else      { _IT_Fail $r '32h  Invoke-ContainerLogsMenu is defined' 'Not found' }
+    } catch { _IT_Fail $r '32h  Invoke-ContainerLogsMenu' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 32i — Invoke-ContainerHealthMenu is defined
+    # ------------------------------------------------------------------
+    try {
+        $fn = Get-Command 'Invoke-ContainerHealthMenu' -ErrorAction SilentlyContinue
+        if ($fn) { _IT_Pass $r '32i  Invoke-ContainerHealthMenu is defined' }
+        else      { _IT_Fail $r '32i  Invoke-ContainerHealthMenu is defined' 'Not found' }
+    } catch { _IT_Fail $r '32i  Invoke-ContainerHealthMenu' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 32j — Mixed fleet: container→docker-exec, Linux physical→ansible
+    # ------------------------------------------------------------------
+    try {
+        $savedReadOnly    = $Script:FltReadOnly
+        $savedBatchStatus = $Script:FltBatchStatus
+        $Script:FltReadOnly    = $true
+        $Script:FltBatchStatus = @{}
+
+        $linTgt = [FleetTarget]::new('lin-1', '10.0.0.2', 22, 'admin', $false)
+        $linTgt.OS = 'linux'; $linTgt.TargetType = 'physical'
+        $cntrTgt = _MkCntr 'web-1' 'docker-host-1' 'web_app'
+
+        $results = Invoke-FleetAction -Action 'install' -PackageSpec 'curl' `
+                       -Targets @($linTgt, $cntrTgt)
+        $lin  = $results | Where-Object { $_.TargetName -eq 'lin-1' }
+        $cntr = $results | Where-Object { $_.TargetName -eq 'web-1' }
+
+        $Script:FltReadOnly    = $savedReadOnly
+        $Script:FltBatchStatus = $savedBatchStatus
+
+        if ($lin.PackageManager -eq 'ansible' -and $cntr.PackageManager -eq 'docker-exec') {
+            _IT_Pass $r '32j  Mixed fleet: lin-1→ansible, web-1→docker-exec'
+        } else {
+            _IT_Fail $r '32j  Mixed fleet: lin-1→ansible, web-1→docker-exec' `
+                "lin=$($lin.PackageManager) cntr=$($cntr.PackageManager)"
+        }
+    } catch {
+        $Script:FltReadOnly    = $savedReadOnly
+        $Script:FltBatchStatus = $savedBatchStatus
+        _IT_Fail $r '32j  Mixed fleet routing' $_.Exception.Message
+    }
+
+    $Script:FleetTargets = $savedTargets
     return $r
 }

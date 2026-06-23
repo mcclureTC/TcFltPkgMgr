@@ -826,20 +826,20 @@ be captured before passing to the scriptblock. Apply the same pattern in
 - [x] `.gitignore`: no new entries needed
 - [x] `README.md`: Phase 8.0 section added
 
-### 8.1 — Fleet menu (`ui/menus/FleetMenu.ps1`)
+### 8.1 — Fleet menu (`ui/menus/FleetMenu.ps1`) ✅
 
 > Current menu: `1. tcpkg  2. WinGet  3. Linux Admin  4. Profiles  5. UI Config  6. Setup  0. Exit`
 > After Phase 8: `1. tcpkg  2. WinGet  3. Linux Admin  4. Containers  5. Profiles  6. UI Config  7. Setup`
 
-- [ ] Add `4. Containers`; Profiles→5, UI Config→6, Setup→7
-- [ ] Final menu layout:
+- [x] Add `4. Containers`; Profiles→5, UI Config→6, Setup→7
+- [x] Final menu layout:
       ```
        1. tcpkg        3. Linux Admin   5. Profiles
        2. WinGet       4. Containers    6. UI Config    7. Setup    0. Exit
       ```
 - [ ] Footer fits single line at 119 cols
 
-### 8.2 — Container Admin menu (`ui/menus/ContainerMenu.ps1`) — new file
+### 8.2 — Container Admin menu (`ui/menus/ContainerMenu.ps1`) — new file ✅
 
 ```
  TcFlt Package Manager  |  Containers                            [LIVE]
@@ -863,39 +863,49 @@ be captured before passing to the scriptblock. Apply the same pattern in
       (ContainerName), `Status`
 - [ ] Status reflects Docker container state, not TCP reachability
 
-### 8.3 — Package operations (choices 1/2)
+### 8.3 — Package operations (choices 1/2) ✅
 
-- [ ] `Invoke-ContainerInstallMenu` — package name → target selection →
+- [x] `Invoke-ContainerInstallMenu` — package name → target selection →
       `Invoke-FltDockerExecBatch` with `apt-get install -y <package>`
-- [ ] `Invoke-ContainerRemoveMenu` — same with `apt-get remove -y`
-- [ ] Target selection filtered to containers only; base-11 on dashboard
+- [x] `Invoke-ContainerRemoveMenu` — same with `apt-get remove -y`
+- [x] Target selection filtered to containers only; base-11 on dashboard
 
-### 8.4 — Image management (choice 3)
+### 8.4 — Image management (choice 3) ✅
 
-- [ ] `Invoke-ContainerPullMenu` — prompts for image name/tag → runs
+- [x] `Invoke-ContainerPullMenu` — prompts for image name/tag → runs
       `docker pull <image>` on the Docker host (not inside container) →
       batch dashboard showing per-host results
 
-### 8.5 — Lifecycle operations (choices 4-7)
+### 8.5 — Lifecycle operations (choices 4-7) ✅
 
-- [ ] Start, Stop, Restart — single prompt for target selection, then
+- [x] Start, Stop, Restart — single prompt for target selection, then
       `docker start/stop/restart <ContainerName>` on the host
-- [ ] Recreate — stop + remove + run with stored `docker run` parameters.
+- [x] Recreate — stop + remove + run with stored `docker run` parameters.
       For now: prompt for the full `docker run` command to re-use.
       Future: store run parameters in `targets.local.json`.
 
-### 8.6 — Logs (choice 8)
+### 8.6 — Logs (choice 8) ✅
 
-- [ ] `Invoke-ContainerLogsMenu` — single target selection (one container at
+- [x] `Invoke-ContainerLogsMenu` — single target selection (one container at
       a time), then SSH to host and run `docker logs --tail 50 <container>`;
       display in scrollable output below the dashboard
 
-### 8.7 — Health check (choice 9)
+### 8.7 — Health check (choice 9) ✅
 
-- [ ] `Invoke-ContainerHealthMenu` — batch SSH to all Docker hosts, runs
+- [x] `Invoke-ContainerHealthMenu` — batch SSH to all Docker hosts, runs
       `docker inspect --format='{{.State.Health.Status}}' <container>` for
       each container; shows results in dashboard (healthy / unhealthy /
       starting / none)
+
+- [x] Suite 32 (Container Admin menu) — 10 checks (32a–32j), fully offline:
+      32a admin menu defined · 32b target filter · 32c–32d read-only ·
+      32e fleet routing · 32f–32i function existence · 32j mixed fleet routing
+- [x] `Read-FltBatchNav` wired into `ContainerMenu.ps1`
+- [x] Closure variable capture applied: `$capturedPkg`, `$capturedArgs`,
+      `$capturedAction` all captured before scriptblock use
+- [x] Security: no hardcoded secrets; SSH credentials never stored
+- [x] `.gitignore`: no new entries needed
+- [x] `README.md`: Phase 8 Container Admin section added
 
 ---
 
@@ -1074,7 +1084,7 @@ be captured before passing to the scriptblock. Apply the same pattern in
 | `execution/ContainerExecutor.ps1` | ✅ done | Docker exec and lifecycle batch executor |
 | `ui/menus/WinGetMenu.ps1` | ✅ done | WinGet install / upgrade / uninstall / status |
 | `ui/menus/LinuxMenu.ps1` | ✅ done | Linux Admin: packages, users, services, playbooks |
-| `ui/menus/ContainerMenu.ps1` | phase 8 | Container Admin: packages, lifecycle, logs, health |
+| `ui/menus/ContainerMenu.ps1` | ✅ done | Container Admin: packages, lifecycle, logs, health |
 
 ## Modified files summary
 

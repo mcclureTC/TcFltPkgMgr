@@ -503,6 +503,29 @@ Tests the pagination state machine in `Show-FleetBatchDashboard` and `Move-FltBa
 
 ---
 
+### Suite 32 — Container Admin menu
+
+**Infrastructure required:** None (fully offline — read-only mode and function existence checks)
+**Per target:** No
+**Check count:** 10 (32a–32j)
+
+Tests `Invoke-ContainerAdminMenu` and supporting functions in `ui/menus/ContainerMenu.ps1`. No SSH or Docker connections are made — uses read-only mode and function existence checks.
+
+| # | Test name | What is tested | How verified |
+|---|-----------|----------------|--------------|
+| 32a | `Invoke-ContainerAdminMenu` is defined | Function exists in loaded modules | `Get-Command` returns a result |
+| 32b | `_Get-ContainerTargets`: container-only filter | Returns only `TargetType='container'` targets | Seeds mixed fleet, checks count=1 and name='web-1' |
+| 32c | DockerExecBatch read-only: Skipped | `ReadOnly=$true` returns `Status='Skipped'` | Checks status field |
+| 32d | DockerLifecycleBatch read-only: Skipped | `ReadOnly=$true` returns `Status='Skipped'` | Checks status field |
+| 32e | Fleet routing: container → docker-exec | `TargetType='container'` routes to `Invoke-FltDockerExecBatch` | Checks `PackageManager='docker-exec'` via read-only `Invoke-FleetAction` |
+| 32f | `Invoke-ContainerInstallMenu` is defined | Function exists | `Get-Command` returns a result |
+| 32g | `Invoke-ContainerLifecycleMenu` is defined | Function exists | `Get-Command` returns a result |
+| 32h | `Invoke-ContainerLogsMenu` is defined | Function exists | `Get-Command` returns a result |
+| 32i | `Invoke-ContainerHealthMenu` is defined | Function exists | `Get-Command` returns a result |
+| 32j | Mixed fleet: Linux→ansible, container→docker-exec | Both target types route to the correct bucket in one call | Checks `lin.PackageManager='ansible'` and `cntr.PackageManager='docker-exec'` |
+
+---
+
 ## Adding New Tests
 
 When implementing a new phase, add tests in the appropriate location:

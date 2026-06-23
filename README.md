@@ -1,6 +1,15 @@
 # TcFltPkgMgr
 
-A fleet management wrapper around `tcpkg` (TwinCAT Package Manager) that simplifies installing, upgrading, and uninstalling packages across multiple remote TwinCAT PCs simultaneously.
+A PowerShell 7 fleet management tool for mixed industrial automation environments.
+Manages packages, users, services, and containers across Windows (TwinCAT/tcpkg and WinGet),
+Linux (Ansible), and Docker container targets from a single operator interface.
+
+| Target type | Package manager | How it runs |
+|-------------|----------------|-------------|
+| Windows / TwinCAT | `tcpkg` | SSH → remote `TcPkg.exe` |
+| Windows / general | `winget` | SSH → remote `winget` |
+| Linux | Ansible (`apt`, `yum`, `dnf`, …) | `docker exec tcflt-ansible ansible-playbook` |
+| Docker container | `apt`, `apk`, `yum`, `dnf` | SSH → `docker exec -i <container>` |
 
 > **Status:** Under active development. Many features are still being tested. Use with care in production environments.
 
@@ -8,12 +17,28 @@ A fleet management wrapper around `tcpkg` (TwinCAT Package Manager) that simplif
 
 ## Requirements
 
+### All targets
 - PowerShell 7 (PS7) — required for parallel SSH execution
 - [Posh-SSH](https://github.com/darkoperator/Posh-SSH) PowerShell module (`Install-Module Posh-SSH`)
-- TwinCAT Package Manager (`tcpkg`) installed on the local machine
-- `tcpkg` installed on each remote target at `C:\ProgramData\Beckhoff\TcPkg\TcPkg.exe` (configurable)
 - SSH enabled on each remote target
 - Administrator privileges on the local machine
+
+### Windows / tcpkg targets
+- TwinCAT Package Manager (`tcpkg`) installed on the local machine
+- `tcpkg` installed on each remote target at `C:\ProgramData\Beckhoff\TcPkg\TcPkg.exe` (configurable)
+
+### Windows / WinGet targets
+- `winget` (App Installer) installed on each remote target
+- Use **Setup → select target → 4. Prepare target** to install WinGet on a remote machine
+
+### Linux targets (Ansible)
+- Docker Desktop running on the operator machine
+- `tcflt-ansible` container built and running (see [Building the Ansible operator container](#building-the-ansible-operator-container))
+- Python 3 and SSH on each Linux target
+
+### Docker container targets
+- SSH access to the Docker host machine
+- Docker CLI available on the Docker host
 
 ---
 
@@ -694,6 +719,36 @@ header arguments.
 
 ---
 
+## Container Admin menu (Phase 8)
+
+Select **4. Containers** from the fleet home screen to open the Container Admin menu.
+
+### Operations
+
+| # | Operation | What it does |
+|---|-----------|-------------|
+| 1 | Install package | `docker exec -i <container> apt-get install -y <pkg>` |
+| 2 | Remove package | `docker exec -i <container> apt-get remove -y <pkg>` |
+| 3 | Pull image | `docker pull <image>` on each container’s Docker host |
+| 4 | Start | `docker start <container>` on the host |
+| 5 | Stop | `docker stop <container>` on the host |
+| 6 | Restart | `docker restart <container>` on the host |
+| 7 | Recreate | stop → rm → run (prompts for `docker run` arguments) |
+| 8 | View logs | `docker logs --tail N <container>` (N from `docker.logTailLines`) |
+| 9 | Health check | `docker inspect --format={{.State.Health.Status}} <container>` for all containers |
+
+### Execution model
+
+Package operations (1–2) and lifecycle operations (3–7) run via SSH to each container’s
+Docker host, one SSH session per host. All use the batch dashboard with
+`Read-FltBatchNav` for post-run page navigation.
+
+Health check (9) groups containers by Docker host and runs `docker inspect` for
+each container in a single SSH session per host. Results are displayed as a
+colour-coded table: green = healthy, red = unhealthy, yellow = starting, grey = none.
+
+---
+
 ## File Layout
 
 ```
@@ -741,6 +796,7 @@ TcFltPkgMgr/
     ├── SortFilter.ps1                # Sort/filter helpers
     └── menus/
         ├── FleetMenu.ps1             # Top-level fleet menu
+        ├── ContainerMenu.ps1         # Container Admin menu (docker exec/lifecycle/logs/health)
         ├── LinuxMenu.ps1             # Linux Admin menu (Ansible)
         ├── PackageMenu.ps1           # tcpkg package operations
         ├── TargetMenu.ps1            # Target management (incl. container targets)
