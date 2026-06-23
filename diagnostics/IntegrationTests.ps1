@@ -20,6 +20,7 @@ function _IT_NewResult {
         Passed  = 0
         Failed  = 0
         Warned  = 0
+        Skipped = 0
         Results = [System.Collections.Generic.List[pscustomobject]]::new()
     }
 }
@@ -53,6 +54,17 @@ function _IT_Warn {
     if ($Detail) { Write-Host "       $Detail" -ForegroundColor DarkGray }
 }
 
+# Record a SKIP result — check not run because a prerequisite was not met.
+# Increments Warned so the suite total reflects the skipped check.
+function _IT_Skip {
+    param($Accum, [string]$Label, [string]$Reason = '')
+    $Accum.Skipped++
+    $Accum.Results.Add([pscustomobject]@{ Status='SKIP'; Label=$Label; Detail=$Reason })
+    Write-Host ("  {0,-62} " -f $Label) -NoNewline
+    Write-Host 'SKIP' -ForegroundColor DarkGray
+    if ($Reason) { Write-Host "       $Reason" -ForegroundColor DarkGray }
+}
+
 # Print a section header within a suite.
 function _IT_Section {
     param([string]$Title)
@@ -75,14 +87,14 @@ function Invoke-IT_FileIO {
         $origCount  = $Script:FleetTargets.Count
 
         if ($origCount -eq 0) {
-            _IT_Warn $r 'CSV round-trip: Export → Remove → Import' 'No targets configured — skipping'
+            _IT_Warn $r '11a  CSV round-trip: Export → Remove → Import' 'No targets configured — skipping'
         } else {
             # Export
             $exported = Export-FleetTargetsCsv -Path $exportPath
             if ($exported -ne $origCount) {
-                _IT_Fail $r 'CSV export: correct target count' "Expected $origCount, got $exported"
+                _IT_Fail $r '11b  CSV export: correct target count' "Expected $origCount, got $exported"
             } else {
-                _IT_Pass $r "CSV export: $exported targets written to file"
+                _IT_Pass $r "11b  CSV export: $exported targets written to file"
             }
 
             # Remove first target from JSON (not from tcpkg — avoids side effects)
@@ -91,13 +103,13 @@ function Invoke-IT_FileIO {
             $remaining   = @($Script:FleetTargets | Where-Object { $_.Name -ne $victimName })
             $saved = Save-FltTargets -Targets $remaining
             if (-not $saved) {
-                _IT_Fail $r "CSV round-trip: temp-remove '$victimName'" 'Save-FltTargets failed'
+                _IT_Fail $r "11c  CSV round-trip: temp-remove '$victimName'" 'Save-FltTargets failed'
             } else {
                 $afterRemove = @(Get-FleetTargets -Silent)
                 if ($afterRemove | Where-Object { $_.Name -eq $victimName }) {
-                    _IT_Fail $r "CSV round-trip: '$victimName' absent after temp-remove" 'Still present in JSON'
+                    _IT_Fail $r "11c  CSV round-trip: '$victimName' absent after temp-remove" 'Still present in JSON'
                 } else {
-                    _IT_Pass $r "CSV round-trip: '$victimName' successfully temp-removed"
+                    _IT_Pass $r "11c  CSV round-trip: '$victimName' successfully temp-removed"
                 }
 
                 # Import CSV — should restore victim (no tcpkg call since we skip password)
@@ -107,9 +119,9 @@ function Invoke-IT_FileIO {
                 Save-FltTargets -Targets $restored | Out-Null
                 $afterRestore = @(Get-FleetTargets -Silent)
                 if ($afterRestore | Where-Object { $_.Name -eq $victimName }) {
-                    _IT_Pass $r "CSV round-trip: '$victimName' restored to JSON store"
+                    _IT_Pass $r "11c  CSV round-trip: '$victimName' restored to JSON store"
                 } else {
-                    _IT_Fail $r "CSV round-trip: '$victimName' not restored" 'Check Save-FltTargets'
+                    _IT_Fail $r "11c  CSV round-trip: '$victimName' not restored" 'Check Save-FltTargets'
                 }
             }
             Remove-Item $exportPath -Force -ErrorAction SilentlyContinue
@@ -117,7 +129,7 @@ function Invoke-IT_FileIO {
             $Script:FleetTargets = @(Get-FleetTargets -Silent)
         }
     } catch {
-        _IT_Fail $r 'CSV round-trip' $_.Exception.Message
+        _IT_Fail $r '11c  CSV round-trip' $_.Exception.Message
         Remove-Item (Join-Path $Script:FltConfigDir 'it-test-export.csv') -Force -ErrorAction SilentlyContinue
         $Script:FleetTargets = @(Get-FleetTargets -Silent)
     }
@@ -137,19 +149,19 @@ function Invoke-IT_FileIO {
             $names1   = $sorted   | ForEach-Object { $_.Name }
             $names2   = $reloaded | ForEach-Object { $_.Name }
             if (($names1 -join ',') -eq ($names2 -join ',')) {
-                _IT_Pass $r 'Sort persists across reload: JSON order matches sort order'
+                _IT_Pass $r '11d  Sort persists across reload: JSON order matches sort order'
             } else {
-                _IT_Fail $r 'Sort persists across reload' "Saved: $($names1 -join ',')  Reloaded: $($names2 -join ',')"
+                _IT_Fail $r '11d  Sort persists across reload' "Saved: $($names1 -join ',')  Reloaded: $($names2 -join ',')"
             }
             $Script:FleetTargets = $reloaded
         } else {
-            _IT_Warn $r 'Sort persistence: requires 2+ targets' 'Only one target configured'
+            _IT_Warn $r '11f  Sort persistence: requires 2+ targets' 'Only one target configured'
         }
         # Restore sort state
         $Script:FltTargetSort.SortColumn = $origSort
         $Script:FltTargetSort.SortDesc   = $origDesc
     } catch {
-        _IT_Fail $r 'Sort persistence' $_.Exception.Message
+        _IT_Fail $r '11g  Sort persistence' $_.Exception.Message
     }
 
     # 1c. Filter reduces visible targets correctly
@@ -163,24 +175,24 @@ function Invoke-IT_FileIO {
             $filtered    = @(Invoke-FltFilter -Items $Script:FleetTargets `
                                 -Column $state.FilterColumn -Value $state.FilterValue)
             if ($filtered.Count -ge 1 -and ($filtered | Where-Object { $_.Name -eq $testName })) {
-                _IT_Pass $r "Filter by Name='$testName': correct result (count=$($filtered.Count))"
+                _IT_Pass $r "11h  Filter by Name='$testName': correct result (count=$($filtered.Count))"
             } else {
-                _IT_Fail $r "Filter by Name='$testName'" "Got $($filtered.Count) results, expected ≥1"
+                _IT_Fail $r "11h  Filter by Name='$testName'" "Got $($filtered.Count) results, expected ≥1"
             }
 
             # Filter for something that doesn't exist
             $noMatch = @(Invoke-FltFilter -Items $Script:FleetTargets `
                             -Column 'Name' -Value 'ZZZNOMATCH999')
             if ($noMatch.Count -eq 0) {
-                _IT_Pass $r 'Filter by non-existent value returns empty set'
+                _IT_Pass $r '11i  Filter by non-existent value returns empty set'
             } else {
-                _IT_Fail $r 'Filter by non-existent value' "Got $($noMatch.Count) results, expected 0"
+                _IT_Fail $r '11i  Filter by non-existent value' "Got $($noMatch.Count) results, expected 0"
             }
         } else {
-            _IT_Warn $r 'Filter correctness: requires at least 1 target' 'No targets configured'
+            _IT_Warn $r '11j  Filter correctness: requires at least 1 target' 'No targets configured'
         }
     } catch {
-        _IT_Fail $r 'Filter correctness' $_.Exception.Message
+        _IT_Fail $r '11k  Filter correctness' $_.Exception.Message
     }
 
     # 1d. UI Config page size persists to settings.local.json
@@ -192,28 +204,28 @@ function Invoke-IT_FileIO {
         $readBack  = Get-FltCfgValue 'ui' 'dashboardPageSize' 20
 
         if ($saved -and $readBack -eq $testSize) {
-            _IT_Pass $r "UI Config page size persists: set=$testSize read=$readBack"
+            _IT_Pass $r "11l  UI Config page size persists: set=$testSize read=$readBack"
         } else {
-            _IT_Fail $r 'UI Config page size persists' "saved=$saved readBack=$readBack"
+            _IT_Fail $r '11l  UI Config page size persists' "saved=$saved readBack=$readBack"
         }
 
         # Verify written to file
         if (Test-Path $localPath) {
             $json = Get-Content $localPath -Raw | ConvertFrom-Json
             if ($json.ui.dashboardPageSize -eq $testSize) {
-                _IT_Pass $r 'UI Config written to settings.local.json'
+                _IT_Pass $r '11m  UI Config written to settings.local.json'
             } else {
-                _IT_Fail $r 'UI Config written to settings.local.json' "File has $($json.ui.dashboardPageSize)"
+                _IT_Fail $r '11m  UI Config written to settings.local.json' "File has $($json.ui.dashboardPageSize)"
             }
         } else {
-            _IT_Fail $r 'UI Config written to settings.local.json' 'File not created'
+            _IT_Fail $r '11m  UI Config written to settings.local.json' 'File not created'
         }
 
         # Restore
         _Save-UiCfgValue -Key 'dashboardPageSize' -Value $origSize | Out-Null
     } catch {
         _Save-UiCfgValue -Key 'dashboardPageSize' -Value 20 -ErrorAction SilentlyContinue | Out-Null
-        _IT_Fail $r 'UI Config persistence' $_.Exception.Message
+        _IT_Fail $r '11n  UI Config persistence' $_.Exception.Message
     }
 
     # 1e. Merge-Hashtable — base wins on missing keys, override wins on present keys
@@ -227,9 +239,9 @@ function Invoke-IT_FileIO {
         if ($merged.b.x -ne 10)      { $errors += "b.x=$($merged.b.x) expected 10" }
         if ($merged.b.y -ne 99)      { $errors += "b.y=$($merged.b.y) expected 99 (override)" }
         if ($merged.b.z -ne 30)      { $errors += "b.z=$($merged.b.z) expected 30 (new key)" }
-        if ($errors.Count -eq 0) { _IT_Pass $r 'Merge-Hashtable: deep merge correct' }
-        else { _IT_Fail $r 'Merge-Hashtable' ($errors -join '; ') }
-    } catch { _IT_Fail $r 'Merge-Hashtable' $_.Exception.Message }
+        if ($errors.Count -eq 0) { _IT_Pass $r '11o  Merge-Hashtable: deep merge correct' }
+        else { _IT_Fail $r '11p  Merge-Hashtable' ($errors -join '; ') }
+    } catch { _IT_Fail $r '11p  Merge-Hashtable' $_.Exception.Message }
 
     # 1f. ConvertTo-Hashtable — PSCustomObject graph → nested hashtable
     try {
@@ -241,9 +253,9 @@ function Invoke-IT_FileIO {
         if ($ht.b -isnot [hashtable])       { $errors += 'b not hashtable' }
         if ($ht.b.x -ne 10)                 { $errors += "b.x=$($ht.b.x)" }
         if ($ht.c.Count -ne 3)              { $errors += "c.Count=$($ht.c.Count)" }
-        if ($errors.Count -eq 0) { _IT_Pass $r 'ConvertTo-Hashtable: nested object and array correct' }
-        else { _IT_Fail $r 'ConvertTo-Hashtable' ($errors -join '; ') }
-    } catch { _IT_Fail $r 'ConvertTo-Hashtable' $_.Exception.Message }
+        if ($errors.Count -eq 0) { _IT_Pass $r '11q  ConvertTo-Hashtable: nested object and array correct' }
+        else { _IT_Fail $r '11r  ConvertTo-Hashtable' ($errors -join '; ') }
+    } catch { _IT_Fail $r '11r  ConvertTo-Hashtable' $_.Exception.Message }
 
     # 1g. Read-FltJsonConfig — default + local override merge
     try {
@@ -256,10 +268,10 @@ function Invoke-IT_FileIO {
         if ($cfg.section.key1 -ne 'overridden')  { $errors += "key1='$($cfg.section.key1)' expected 'overridden'" }
         if ($cfg.section.key2 -ne 'default2')    { $errors += "key2='$($cfg.section.key2)' expected 'default2'" }
         if ($cfg.section.key3 -ne 'local-only')  { $errors += "key3='$($cfg.section.key3)' expected 'local-only'" }
-        if ($errors.Count -eq 0) { _IT_Pass $r 'Read-FltJsonConfig: default+local merge correct' }
-        else { _IT_Fail $r 'Read-FltJsonConfig merge' ($errors -join '; ') }
+        if ($errors.Count -eq 0) { _IT_Pass $r '11s  Read-FltJsonConfig: default+local merge correct' }
+        else { _IT_Fail $r '11t  Read-FltJsonConfig merge' ($errors -join '; ') }
         Remove-Item $tmpDefault,$tmpLocal -Force -ErrorAction SilentlyContinue
-    } catch { _IT_Fail $r 'Read-FltJsonConfig' $_.Exception.Message }
+    } catch { _IT_Fail $r '11u  Read-FltJsonConfig' $_.Exception.Message }
 
     # 1h. Get-FltFilterStatus — returns correct string for active filter
     try {
@@ -268,19 +280,19 @@ function Invoke-IT_FileIO {
         $state.FilterValue  = 'online'
         $status = Get-FltFilterStatus -State $state -TotalCount 7 -FilteredCount 4
         if ($status -match 'Reachable' -and $status -match 'online' -and $status -match '7' -and $status -match '4') {
-            _IT_Pass $r "Get-FltFilterStatus: correct string for active filter"
+            _IT_Pass $r "11v  Get-FltFilterStatus: correct string for active filter"
         } else {
-            _IT_Fail $r 'Get-FltFilterStatus: active filter string' "Got: '$status'"
+            _IT_Fail $r '11v  Get-FltFilterStatus: active filter string' "Got: '$status'"
         }
         # Empty when no filter active
         $emptyState = New-FltSortFilterState
         $empty = Get-FltFilterStatus -State $emptyState -TotalCount 7 -FilteredCount 7
         if ([string]::IsNullOrEmpty($empty)) {
-            _IT_Pass $r 'Get-FltFilterStatus: empty string when no filter active'
+            _IT_Pass $r '11w  Get-FltFilterStatus: empty string when no filter active'
         } else {
-            _IT_Fail $r 'Get-FltFilterStatus: empty when no filter' "Got: '$empty'"
+            _IT_Fail $r '11x  Get-FltFilterStatus: empty when no filter' "Got: '$empty'"
         }
-    } catch { _IT_Fail $r 'Get-FltFilterStatus' $_.Exception.Message }
+    } catch { _IT_Fail $r '11y  Get-FltFilterStatus' $_.Exception.Message }
 
     # 1i. Profile save/load round-trip
     try {
@@ -298,15 +310,15 @@ function Invoke-IT_FileIO {
         $loaded = @(Read-FltProfiles)
         $found  = $loaded | Where-Object { $_.Name -eq 'IT-Test-Profile' }
         if ($found -and $found.TargetNames.Count -eq 2 -and $found.ExpectedPackages.Count -eq 1) {
-            _IT_Pass $r 'Profile save/load round-trip (Save-FltProfiles / Read-FltProfiles)'
+            _IT_Pass $r '11z  Profile save/load round-trip'
         } else {
-            _IT_Fail $r 'Profile save/load round-trip' "found=$($null -ne $found)"
+            _IT_Fail $r '11z  Profile save/load round-trip' "found=$($null -ne $found)"
         }
 
         # Restore original profiles
         Save-FltProfiles -Profiles $origProfiles
     } catch {
-        _IT_Fail $r 'Profile save/load round-trip' $_.Exception.Message
+        _IT_Fail $r '11z  Profile save/load round-trip' $_.Exception.Message
         try { Save-FltProfiles -Profiles @() } catch {}
     }
 
@@ -327,26 +339,30 @@ function Invoke-IT_Pagination {
         $totalPages = [Math]::Max(1, [Math]::Ceiling($n / $PageSize))
 
         if ($n -lt 2) {
-            _IT_Warn $r 'Pagination: requires 2+ targets' "Only $n target(s) configured"
+            _IT_Warn $r '12a  Pagination: requires 2+ targets' "Only $n target(s) configured"
             _Save-UiCfgValue -Key 'dashboardPageSize' -Value $origSize | Out-Null
+            _IT_Skip $r '12b  Page 0 slice count'          'Skipped — fewer than 2 targets'
+            _IT_Skip $r '12c  Target 11 mapping'           'Skipped — fewer than 2 targets'
+            _IT_Skip $r '12d  Sort changes target 11'      'Skipped — fewer than 2 targets'
+            _IT_Skip $r '12e  Total pages calculation'     'Skipped — fewer than 2 targets'
             return $r
         }
 
         # Page 0 slice
         $p0 = @($Script:FleetTargets | Select-Object -Skip 0 -First $PageSize)
         if ($p0.Count -eq [Math]::Min($PageSize, $n)) {
-            _IT_Pass $r "Page 0 slice: $($p0.Count) target(s) correct"
+            _IT_Pass $r "12b  Page 0 slice: $($p0.Count) target(s) correct"
         } else {
-            _IT_Fail $r 'Page 0 slice count' "Got $($p0.Count), expected $([Math]::Min($PageSize, $n))"
+            _IT_Fail $r '12b  Page 0 slice count' "Got $($p0.Count), expected $([Math]::Min($PageSize, $n))"
         }
 
         # Target 11 = first target in display order (page 0, index 0)
         $expectedFirst = $Script:FleetTargets[0].Name
         $selectedName  = $Script:FleetTargets[11 - 11].Name
         if ($selectedName -eq $expectedFirst) {
-            _IT_Pass $r "Target 11 always maps to first target ('$expectedFirst')"
+            _IT_Pass $r "12c  Target 11 always maps to first target ('$expectedFirst')"
         } else {
-            _IT_Fail $r 'Target 11 mapping' "Got '$selectedName', expected '$expectedFirst'"
+            _IT_Fail $r '12c  Target 11 mapping' "Got '$selectedName', expected '$expectedFirst'"
         }
 
         # After sort — target 11 should be new first target
@@ -354,23 +370,23 @@ function Invoke-IT_Pagination {
             $sorted = @(Invoke-FltSort -Items $Script:FleetTargets -Column 'Name' -Descending $true)
             $expectedAfterSort = $sorted[0].Name
             if ($expectedAfterSort -ne $expectedFirst) {
-                _IT_Pass $r "Sort changes target 11: '$expectedFirst' → '$expectedAfterSort'"
+                _IT_Pass $r "12d  Sort changes target 11: '$expectedFirst' → '$expectedAfterSort'"
             } else {
-                _IT_Warn $r 'Sort changes target 11' 'All names may be equal — sort order unchanged'
+                _IT_Warn $r '12d  Sort changes target 11' 'All names may be equal — sort order unchanged'
             }
         }
 
         # Total pages calculation
         if ($totalPages -eq [Math]::Ceiling($n / $PageSize)) {
-            _IT_Pass $r "Total pages: $totalPages (n=$n pageSize=$PageSize)"
+            _IT_Pass $r "12e  Total pages: $totalPages (n=$n pageSize=$PageSize)"
         } else {
-            _IT_Fail $r 'Total pages calculation' "Got $totalPages"
+            _IT_Fail $r '12e  Total pages calculation' "Got $totalPages"
         }
 
         _Save-UiCfgValue -Key 'dashboardPageSize' -Value $origSize | Out-Null
     } catch {
         _Save-UiCfgValue -Key 'dashboardPageSize' -Value 20 -ErrorAction SilentlyContinue | Out-Null
-        _IT_Fail $r 'Pagination' $_.Exception.Message
+        _IT_Fail $r '12f  Pagination' $_.Exception.Message
     }
 
     return $r
@@ -390,7 +406,12 @@ function Invoke-IT_SSH {
     _IT_Section "SSH connectivity — $($Target.Name) ($($Target.Address))"
 
     if (-not (Ensure-FltPoshSsh)) {
-        _IT_Fail $r 'Posh-SSH available' 'Run: Install-Module Posh-SSH -Scope CurrentUser'
+        _IT_Fail $r '13a  Posh-SSH available' 'Run: Install-Module Posh-SSH -Scope CurrentUser'
+        _IT_Skip $r '13a  TCP port reachable'            'Skipped — Posh-SSH not available'
+        _IT_Skip $r '13b  SSH session opened'            'Skipped — Posh-SSH not available'
+        _IT_Skip $r '13c  SSH command executes'          'Skipped — Posh-SSH not available'
+        _IT_Skip $r '13d  Remote tcpkg executable found' 'Skipped — Posh-SSH not available'
+        _IT_Skip $r '13e  Remote tcpkg check'            'Skipped — Posh-SSH not available'
         return $r
     }
 
@@ -401,13 +422,21 @@ function Invoke-IT_SSH {
         $ok  = $ar.AsyncWaitHandle.WaitOne(3000, $false)
         $tcp.Close()
         if ($ok) {
-            _IT_Pass $r "TCP port $($Target.Port) reachable on $($Target.Address)"
+            _IT_Pass $r "13a  TCP port $($Target.Port) reachable on $($Target.Address)"
         } else {
-            _IT_Fail $r "TCP port $($Target.Port) reachable" 'Connection timed out — is the target online?'
+            _IT_Fail $r "13a  TCP port $($Target.Port) reachable" 'Connection timed out — is the target online?'
+            _IT_Skip $r '13b  SSH session opened'            'Skipped — target not reachable'
+            _IT_Skip $r '13c  SSH command executes'          'Skipped — target not reachable'
+            _IT_Skip $r '13d  Remote tcpkg executable found' 'Skipped — target not reachable'
+            _IT_Skip $r '13e  Remote tcpkg check'            'Skipped — target not reachable'
             return $r
         }
     } catch {
-        _IT_Fail $r "TCP port $($Target.Port) reachable" $_.Exception.Message
+        _IT_Fail $r "13a  TCP port $($Target.Port) reachable" $_.Exception.Message
+        _IT_Skip $r '13b  SSH session opened'            'Skipped — TCP check threw exception'
+        _IT_Skip $r '13c  SSH command executes'          'Skipped — TCP check threw exception'
+        _IT_Skip $r '13d  Remote tcpkg executable found' 'Skipped — TCP check threw exception'
+        _IT_Skip $r '13e  Remote tcpkg check'            'Skipped — TCP check threw exception'
         return $r
     }
 
@@ -426,13 +455,19 @@ function Invoke-IT_SSH {
 
         $session = New-SSHSession @params
         if ($session) {
-            _IT_Pass $r "SSH session opened (SessionId=$($session.SessionId))"
+            _IT_Pass $r "13b  SSH session opened (SessionId=$($session.SessionId))"
         } else {
-            _IT_Fail $r 'SSH session opened' 'New-SSHSession returned null'
+            _IT_Fail $r '13b  SSH session opened' 'New-SSHSession returned null'
+            _IT_Skip $r '13c  SSH command executes'          'Skipped — SSH session failed'
+            _IT_Skip $r '13d  Remote tcpkg executable found' 'Skipped — SSH session failed'
+            _IT_Skip $r '13e  Remote tcpkg check'            'Skipped — SSH session failed'
             return $r
         }
     } catch {
-        _IT_Fail $r 'SSH session opened' $_.Exception.Message
+        _IT_Fail $r '13b  SSH session opened' $_.Exception.Message
+        _IT_Skip $r '13c  SSH command executes'          'Skipped — SSH session threw exception'
+        _IT_Skip $r '13d  Remote tcpkg executable found' 'Skipped — SSH session threw exception'
+        _IT_Skip $r '13e  Remote tcpkg check'            'Skipped — SSH session threw exception'
         return $r
     }
 
@@ -441,12 +476,12 @@ function Invoke-IT_SSH {
         $result = Invoke-SSHCommand -SessionId $session.SessionId -Command 'echo IT_SSH_OK' -TimeOut 10
         $output = ($result.Output -join '').Trim()
         if ($output -eq 'IT_SSH_OK' -and $result.ExitStatus -eq 0) {
-            _IT_Pass $r "SSH command executes and returns output correctly"
+            _IT_Pass $r "13c  SSH command executes and returns output correctly"
         } else {
-            _IT_Fail $r 'SSH command executes' "exit=$($result.ExitStatus) output='$output'"
+            _IT_Fail $r '13c  SSH command executes' "exit=$($result.ExitStatus) output='$output'"
         }
     } catch {
-        _IT_Fail $r 'SSH command executes' $_.Exception.Message
+        _IT_Fail $r '13c  SSH command executes' $_.Exception.Message
     }
 
     # 3d. tcpkg is accessible on remote target
@@ -456,12 +491,12 @@ function Invoke-IT_SSH {
         $result2     = Invoke-SSHCommand -SessionId $session.SessionId -Command $testCmd -TimeOut 10
         $out2        = ($result2.Output -join '').Trim()
         if ($out2 -match 'FOUND') {
-            _IT_Pass $r "Remote tcpkg executable found at configured path"
+            _IT_Pass $r "13d  Remote tcpkg executable found at configured path"
         } else {
-            _IT_Warn $r 'Remote tcpkg executable found' "Got: '$out2' — path may differ on target"
+            _IT_Warn $r '13d  Remote tcpkg executable found' "Got: '$out2' — path may differ on target"
         }
     } catch {
-        _IT_Warn $r 'Remote tcpkg check' $_.Exception.Message
+        _IT_Warn $r '13e  Remote tcpkg check' $_.Exception.Message
     } finally {
         if ($session) { Remove-SSHSession -SessionId $session.SessionId | Out-Null }
     }
@@ -484,9 +519,9 @@ function Invoke-IT_ReadOnly {
         # tcpkg call should return null and set last exit to 0 (simulated)
         $raw = Invoke-FltTcpkg -ArgList @('remote','list','--as-json') -Silent
         if ($null -eq $raw -and $Script:FltLastExit -eq 0) {
-            _IT_Pass $r 'Read-only: Invoke-FltTcpkg returns null without executing'
+            _IT_Pass $r '14a  Read-only: Invoke-FltTcpkg returns null without executing'
         } else {
-            _IT_Fail $r 'Read-only: Invoke-FltTcpkg blocked' "raw=$($null -ne $raw) exit=$Script:FltLastExit"
+            _IT_Fail $r '14a  Read-only: Invoke-FltTcpkg blocked' "raw=$($null -ne $raw) exit=$Script:FltLastExit"
         }
 
         # Batch action should produce [read-only] status
@@ -495,10 +530,10 @@ function Invoke-IT_ReadOnly {
             # Simulate what Invoke-FleetAction does for SSH targets in read-only
             $status = "[read-only] would SSH"
             if ($status -match 'read-only') {
-                _IT_Pass $r 'Read-only: batch action produces [read-only] status prefix'
+                _IT_Pass $r '14b  Read-only: batch action produces [read-only] status prefix'
             }
         } else {
-            _IT_Warn $r 'Read-only batch status check' 'No targets to test against'
+            _IT_Warn $r '14b  Read-only batch status check' 'No targets to test against'
         }
 
         # Credential writes should still work (credentials are not affected by read-only)
@@ -506,14 +541,14 @@ function Invoke-IT_ReadOnly {
         Set-FltStoredPassword -CredentialName $testKey -PlainPassword 'TestVal' | Out-Null
         $val = Get-FltStoredPassword -CredentialName $testKey
         if ($val -eq 'TestVal') {
-            _IT_Pass $r 'Read-only: credential store still writable (credentials exempt)'
+            _IT_Pass $r '14c  Read-only: credential store still writable'
         } else {
-            _IT_Fail $r 'Read-only: credential store writable' "Got: '$val'"
+            _IT_Fail $r '14c  Read-only: credential store writable' "Got: '$val'"
         }
         Remove-FltStoredPassword -CredentialName $testKey -ErrorAction SilentlyContinue | Out-Null
 
     } catch {
-        _IT_Fail $r 'Read-only mode' $_.Exception.Message
+        _IT_Fail $r '14d  Read-only mode' $_.Exception.Message
     } finally {
         $Script:FltReadOnly = $origReadOnly
     }
@@ -531,9 +566,15 @@ function Invoke-IT_Log {
     try {
         # 5a. Log directory exists and is writable
         if (Test-Path $Script:FltLogDir) {
-            _IT_Pass $r "Log directory exists: $Script:FltLogDir"
+            _IT_Pass $r "15a  Log directory exists: $Script:FltLogDir"
         } else {
-            _IT_Fail $r 'Log directory exists' "Path: $Script:FltLogDir"
+            _IT_Fail $r '15a  Log directory exists' "Path: $Script:FltLogDir"
+            _IT_Skip $r '15b  Log entry written and retrieved'         'Skipped — log directory does not exist'
+            _IT_Skip $r '15c  Log retention preserves current log'    'Skipped — log directory does not exist'
+            _IT_Skip $r '15d  Write-FltFleetQueryEntry'                'Skipped — log directory does not exist'
+            _IT_Skip $r '15e  Write-FltFleetQueryEntry'                'Skipped — log directory does not exist'
+            _IT_Skip $r '15f  Show-FltCommandLog'                      'Skipped — log directory does not exist'
+            _IT_Skip $r '15g  Log system'                              'Skipped — log directory does not exist'
             return $r
         }
 
@@ -546,26 +587,26 @@ function Invoke-IT_Log {
         $history = @(Get-FltCommandHistory -LastDays 1 -CmdVerb 'IT_LOG_TEST')
         $found   = $history | Where-Object { $_.cmd -like "*$testCmd*" }
         if ($found) {
-            _IT_Pass $r 'Log entry written and retrieved by Get-FltCommandHistory'
+            _IT_Pass $r '15b  Log entry written and retrieved'
         } else {
-            _IT_Fail $r 'Log entry written and retrieved' 'Command not found in today log'
+            _IT_Fail $r '15b  Log entry written and retrieved' 'Command not found in today log'
         }
 
         # 5c. Log file exists for today
         $logPath = Get-FltLogPath
         if (Test-Path $logPath) {
             $lineCount = (Get-Content $logPath | Measure-Object -Line).Lines
-            _IT_Pass $r "Today's log file exists with $lineCount entries: $(Split-Path $logPath -Leaf)"
+            _IT_Pass $r "15b  Today's log file exists with $lineCount entries: $(Split-Path $logPath -Leaf)"
         } else {
-            _IT_Fail $r "Today's log file exists" "Expected: $logPath"
+            _IT_Fail $r "15b  Today's log file exists" "Expected: $logPath"
         }
 
         # 5d. Log retention doesn't delete today's file
         Invoke-FltLogRetention
         if (Test-Path $logPath) {
-            _IT_Pass $r 'Log retention preserves current log file'
+            _IT_Pass $r '15c  Log retention preserves current log file'
         } else {
-            _IT_Fail $r 'Log retention preserves current log' 'File was deleted!'
+            _IT_Fail $r '15c  Log retention preserves current log' 'File was deleted!'
         }
 
         # 5e. Write-FltFleetQueryEntry writes a fleet_query event
@@ -581,21 +622,21 @@ function Invoke-IT_Log {
             $raw = Get-Content (Get-FltLogPath) -ErrorAction SilentlyContinue |
                    Where-Object { $_ -match 'fleet_query' -and $_ -match 'IT\.TestPackage' }
             if ($raw) {
-                _IT_Pass $r 'Write-FltFleetQueryEntry: fleet_query event written to log'
+                _IT_Pass $r '15d  Write-FltFleetQueryEntry: fleet_query event written'
             } else {
-                _IT_Fail $r 'Write-FltFleetQueryEntry: event in log' 'fleet_query entry not found'
+                _IT_Fail $r '15d  Write-FltFleetQueryEntry: event in log' 'fleet_query entry not found'
             }
-        } catch { _IT_Fail $r 'Write-FltFleetQueryEntry' $_.Exception.Message }
+        } catch { _IT_Fail $r '15e  Write-FltFleetQueryEntry' $_.Exception.Message }
 
         # 5f. Show-FltCommandLog renders without throwing
         try {
             # Redirect output to suppress console noise during test
             Show-FltCommandLog -LastDays 1 | Out-Null
-            _IT_Pass $r 'Show-FltCommandLog: renders without error'
-        } catch { _IT_Fail $r 'Show-FltCommandLog' $_.Exception.Message }
+            _IT_Pass $r '15f  Show-FltCommandLog: renders without error'
+        } catch { _IT_Fail $r '15f  Show-FltCommandLog' $_.Exception.Message }
 
     } catch {
-        _IT_Fail $r 'Log system' $_.Exception.Message
+        _IT_Fail $r '15g  Log system' $_.Exception.Message
     }
 
     return $r
@@ -615,9 +656,9 @@ function Invoke-IT_ReachCache {
         # 6a. Cache starts empty after reset
         $Script:FltReachCache = @{}
         if ($Script:FltReachCache.Count -eq 0) {
-            _IT_Pass $r 'Reachability cache initialized empty'
+            _IT_Pass $r '16a  Reachability cache initialized empty'
         } else {
-            _IT_Fail $r 'Reachability cache initialized empty' "Has $($Script:FltReachCache.Count) entries"
+            _IT_Fail $r '16a  Reachability cache initialized empty' "Has $($Script:FltReachCache.Count) entries"
         }
 
         # 6b. Cached online target is skipped within the cache window
@@ -629,9 +670,9 @@ function Invoke-IT_ReachCache {
 
         $job = Start-FltReachJob -Targets @($t)   # no -IgnoreCache
         if ($null -eq $job) {
-            _IT_Pass $r "Cached online target skipped (within ${cacheSecs}s window)"
+            _IT_Pass $r "16b  Cached online target skipped (within ${cacheSecs}s window)"
         } else {
-            _IT_Fail $r 'Cached online target skipped' 'Job was created — cache not respected'
+            _IT_Fail $r '16b  Cached online target skipped' 'Job was created — cache not respected'
             Stop-Job $job -ErrorAction SilentlyContinue
             Remove-Job $job -Force -ErrorAction SilentlyContinue
         }
@@ -640,11 +681,11 @@ function Invoke-IT_ReachCache {
         $Script:FltReachCache[$testName] = [DateTime]::UtcNow.AddSeconds(-($cacheSecs + 5))
         $job2 = Start-FltReachJob -Targets @($t)
         if ($null -ne $job2) {
-            _IT_Pass $r 'Expired cache entry triggers recheck'
+            _IT_Pass $r '16c  Expired cache entry triggers recheck'
             Stop-Job $job2 -ErrorAction SilentlyContinue
             Remove-Job $job2 -Force -ErrorAction SilentlyContinue
         } else {
-            _IT_Fail $r 'Expired cache entry triggers recheck' 'Job was null'
+            _IT_Fail $r '16c  Expired cache entry triggers recheck' 'Job was null'
         }
 
         $Script:FltReachCache = $saved
@@ -663,22 +704,22 @@ function Invoke-IT_ReachCache {
                 if ($job3.State -eq 'Completed') {
                     Receive-FltReachJob $job3
                     if ($Script:FltReachCache.ContainsKey($Target.Name)) {
-                        _IT_Pass $r "Live cache populated for '$($Target.Name)'"
+                        _IT_Pass $r "16d  Live cache populated for '$($Target.Name)'"
                     } else {
-                        _IT_Warn $r "Live cache populated for '$($Target.Name)'" 'Target offline — offline targets not cached (expected)'
+                        _IT_Warn $r "16d  Live cache populated for '$($Target.Name)'" 'Target offline — offline targets not cached (expected)'
                     }
                 } else {
-                    _IT_Fail $r "Reachability job completed for '$($Target.Name)'" "State: $($job3.State)"
+                    _IT_Fail $r "16d  Reachability job completed for '$($Target.Name)'" "State: $($job3.State)"
                     Remove-Job $job3 -Force -ErrorAction SilentlyContinue
                 }
             } else {
-                _IT_Warn $r "Live reachability job for '$($Target.Name)'" 'Start-FltReachJob returned null'
+                _IT_Warn $r "16d  Live reachability job for '$($Target.Name)'" 'Start-FltReachJob returned null'
             }
             $Script:FltReachCache = $preSaved
         }
     } catch {
         $Script:FltReachCache = $saved
-        _IT_Fail $r 'Reachability cache' $_.Exception.Message
+        _IT_Fail $r '16d  Reachability cache' $_.Exception.Message
     }
 
     return $r
@@ -697,17 +738,17 @@ function Invoke-IT_TcpkgLocal {
     try {
         $exe = Get-FltTcpkgExe
         if (-not $exe) {
-            _IT_Fail $r 'tcpkg executable configured' 'Get-FltTcpkgExe returned empty'
+            _IT_Fail $r '17a  tcpkg executable configured' 'Get-FltTcpkgExe returned empty'
         } else {
             # Test-Path only works for absolute paths — for PATH-resolved names use Get-Command
             $found = (Test-Path $exe) -or ($null -ne (Get-Command $exe -ErrorAction SilentlyContinue))
             if ($found) {
-                _IT_Pass $r "tcpkg executable found: $exe"
+                _IT_Pass $r "17a  tcpkg executable found: $exe"
             } else {
-                _IT_Warn $r "tcpkg executable '$exe' not found" 'Install tcpkg or update tcpkg.executablePath in settings'
+                _IT_Warn $r "17a  tcpkg executable '$exe' not found" 'Install tcpkg or update tcpkg.executablePath in settings'
             }
         }
-    } catch { _IT_Fail $r 'Get-FltTcpkgExe' $_.Exception.Message }
+    } catch { _IT_Fail $r '17b  Get-FltTcpkgExe' $_.Exception.Message }
 
     # 7b. Export config archive creates a zip file
     try {
@@ -716,14 +757,14 @@ function Invoke-IT_TcpkgLocal {
         $ok = Export-FltConfig -DestinationPath $exportPath
         if ($ok -and (Test-Path $exportPath)) {
             $size = (Get-Item $exportPath).Length
-            _IT_Pass $r "Export-FltConfig: archive created ($size bytes)"
+            _IT_Pass $r "17c  Export-FltConfig: archive created ($size bytes)"
         } elseif (Test-Path $exportPath) {
-            _IT_Pass $r 'Export-FltConfig: archive file exists'
+            _IT_Pass $r '17c  Export-FltConfig: archive file exists'
         } else {
-            _IT_Fail $r 'Export-FltConfig: archive created' 'File not found after export'
+            _IT_Fail $r '17c  Export-FltConfig: archive created' 'File not found after export'
         }
         Remove-Item $exportPath -Force -ErrorAction SilentlyContinue
-    } catch { _IT_Fail $r 'Export-FltConfig' $_.Exception.Message }
+    } catch { _IT_Fail $r '17d  Export-FltConfig' $_.Exception.Message }
 
     # 7c. Test-FleetTargetVerify — verify a target against tcpkg config
     if ($Target) {
@@ -731,11 +772,11 @@ function Invoke-IT_TcpkgLocal {
             $ok = Test-FleetTargetVerify -Name $Target.Name
             # We can't know if it will pass, but it should not throw
             if ($ok) {
-                _IT_Pass $r "Test-FleetTargetVerify: '$($Target.Name)' verified OK in tcpkg config"
+                _IT_Pass $r "17f  Test-FleetTargetVerify: '$($Target.Name)' verified OK in tcpkg config"
             } else {
-                _IT_Warn $r "Test-FleetTargetVerify: '$($Target.Name)' not verified" 'Target may not be registered in tcpkg — use Setup to add it'
+                _IT_Warn $r "17f  Test-FleetTargetVerify: '$($Target.Name)' not verified" 'Target may not be registered in tcpkg — use Setup to add it'
             }
-        } catch { _IT_Fail $r "Test-FleetTargetVerify: '$($Target.Name)'" $_.Exception.Message }
+        } catch { _IT_Fail $r "17f  Test-FleetTargetVerify: '$($Target.Name)'" $_.Exception.Message }
 
         # 7d. Set-FleetTargetInternetAccess — toggle and restore
         try {
@@ -747,23 +788,23 @@ function Invoke-IT_TcpkgLocal {
                 # Verify JSON updated
                 $reloaded = @(Get-FleetTargets -Silent) | Where-Object { $_.Name -eq $Target.Name } | Select-Object -First 1
                 if ($reloaded -and $reloaded.InternetAccess -eq $newIA) {
-                    _IT_Pass $r "Set-FleetTargetInternetAccess: JSON updated to $newIA"
+                    _IT_Pass $r "17e  Set-FleetTargetInternetAccess: JSON updated to $newIA"
                 } else {
-                    _IT_Fail $r 'Set-FleetTargetInternetAccess: JSON updated' "Got $($reloaded.InternetAccess), expected $newIA"
+                    _IT_Fail $r '17e  Set-FleetTargetInternetAccess: JSON updated' "Got $($reloaded.InternetAccess), expected $newIA"
                 }
                 # Restore
                 Set-FleetTargetInternetAccess -Name $Target.Name -Value $origIA | Out-Null
-                _IT_Pass $r "Set-FleetTargetInternetAccess: restored to $origIA"
+                _IT_Pass $r "17e  Set-FleetTargetInternetAccess: restored to $origIA"
             } else {
-                _IT_Warn $r "Set-FleetTargetInternetAccess: '$($Target.Name)'" 'tcpkg edit failed — target may not be in tcpkg'
+                _IT_Warn $r "17e  Set-FleetTargetInternetAccess: '$($Target.Name)'" 'tcpkg edit failed — target may not be in tcpkg'
             }
         } catch {
             # Always try to restore
             try { Set-FleetTargetInternetAccess -Name $Target.Name -Value $Target.InternetAccess | Out-Null } catch {}
-            _IT_Fail $r "Set-FleetTargetInternetAccess: '$($Target.Name)'" $_.Exception.Message
+            _IT_Fail $r "17e  Set-FleetTargetInternetAccess: '$($Target.Name)'" $_.Exception.Message
         }
     } else {
-        _IT_Warn $r 'Target-specific tcpkg tests' 'No target selected — toggle one with 21+'
+        _IT_Warn $r '17f  Target-specific tcpkg tests' 'No target selected — toggle one with 21+'
     }
 
     # 7k. BatchResult.PackageManager field — verify the class has the field
@@ -771,17 +812,17 @@ function Invoke-IT_TcpkgLocal {
     try {
         $br = [BatchResult]::new()
         if ($null -ne $br.PSObject.Properties['PackageManager']) {
-            _IT_Pass $r 'BatchResult class has PackageManager field'
+            _IT_Pass $r '17g  BatchResult class has PackageManager field'
             $br.PackageManager = 'tcpkg'
             if ($br.PackageManager -eq 'tcpkg') {
-                _IT_Pass $r 'BatchResult.PackageManager: field is assignable and readable'
+                _IT_Pass $r '17h  BatchResult.PackageManager: field is assignable and readable'
             } else {
-                _IT_Fail $r 'BatchResult.PackageManager: assignable' "Got '$($br.PackageManager)'"
+                _IT_Fail $r '17h  BatchResult.PackageManager: assignable' "Got '$($br.PackageManager)'"
             }
         } else {
-            _IT_Fail $r 'BatchResult class has PackageManager field' 'Field not found on class'
+            _IT_Fail $r '17g  BatchResult class has PackageManager field' 'Field not found on class'
         }
-    } catch { _IT_Fail $r 'BatchResult.PackageManager field' $_.Exception.Message }
+    } catch { _IT_Fail $r '17i  BatchResult.PackageManager field' $_.Exception.Message }
 
     return $r
 }
@@ -799,23 +840,23 @@ function Invoke-IT_PackageQueries {
     try {
         $res = Get-FltPackageList -ListArgs @('list','twincat.standard')
         if ($res.Ok -and $res.Items.Count -gt 0) {
-            _IT_Pass $r "Get-FltPackageList: found $($res.Items.Count) package(s) matching 'twincat.standard'"
+            _IT_Pass $r "18a  Get-FltPackageList: found $($res.Items.Count) package(s) matching 'twincat.standard'"
         } elseif ($res.Ok) {
-            _IT_Warn $r 'Get-FltPackageList: no results for twincat.standard' 'Check feed configuration'
+            _IT_Warn $r '18a  Get-FltPackageList: no results for twincat.standard' 'Check feed configuration'
         } else {
-            _IT_Fail $r 'Get-FltPackageList' "tcpkg list failed — check tcpkg installation"
+            _IT_Fail $r '18a  Get-FltPackageList' "tcpkg list failed — check tcpkg installation"
         }
-    } catch { _IT_Fail $r 'Get-FltPackageList' $_.Exception.Message }
+    } catch { _IT_Fail $r '18a  Get-FltPackageList' $_.Exception.Message }
 
     # 8b. Get-FltPackageVersions — list versions of a known package
     try {
         $versions = @(Get-FltPackageVersions -PackageName 'twincat.standard.xae')
         if ($versions.Count -gt 0) {
-            _IT_Pass $r "Get-FltPackageVersions: $($versions.Count) version(s) of twincat.standard.xae"
+            _IT_Pass $r "18b  Get-FltPackageVersions: $($versions.Count) version(s) of twincat.standard.xae"
         } else {
-            _IT_Warn $r 'Get-FltPackageVersions: no versions found' 'Package may not be in any configured feed'
+            _IT_Warn $r '18b  Get-FltPackageVersions: no versions found' 'Package may not be in any configured feed'
         }
-    } catch { _IT_Fail $r 'Get-FltPackageVersions' $_.Exception.Message }
+    } catch { _IT_Fail $r '18b  Get-FltPackageVersions' $_.Exception.Message }
 
     # 8c. Get-FltInstalledIndex and Get-FltPackageStatus — build index then query
     if ($Target) {
@@ -823,22 +864,22 @@ function Invoke-IT_PackageQueries {
             # Get-FltInstalledIndex calls tcpkg list -i -r <name> to get installed packages
             $idx = Get-FltInstalledIndex -RemoteName $Target.Name
             if ($idx -is [hashtable]) {
-                _IT_Pass $r "Get-FltInstalledIndex: built index for '$($Target.Name)' ($($idx.Count) packages)"
+                _IT_Pass $r "18c  Get-FltInstalledIndex: built index for '$($Target.Name)' ($($idx.Count) packages)"
 
                 # Get-FltPackageStatus compares installed version against a feed version
                 $testPkg = 'twincat.standard.xae'
                 $status  = Get-FltPackageStatus -PackageName $testPkg -InstalledIndex $idx
                 if ($status -in @('not-installed','up-to-date','upgradable','newer-than-feed')) {
-                    _IT_Pass $r "Get-FltPackageStatus '$testPkg' on '$($Target.Name)': $status"
+                    _IT_Pass $r "18c  Get-FltPackageStatus '$testPkg' on '$($Target.Name)': $status"
                 } else {
-                    _IT_Fail $r "Get-FltPackageStatus '$testPkg'" "Unexpected status: '$status'"
+                    _IT_Fail $r "18c  Get-FltPackageStatus '$testPkg'" "Unexpected status: '$status'"
                 }
             } else {
-                _IT_Fail $r "Get-FltInstalledIndex: '$($Target.Name)'" "Got type: $($idx.GetType().Name)"
+                _IT_Fail $r "18c  Get-FltInstalledIndex: '$($Target.Name)'" "Got type: $($idx.GetType().Name)"
             }
-        } catch { _IT_Fail $r "Get-FltInstalledIndex/Status: '$($Target.Name)'" $_.Exception.Message }
+        } catch { _IT_Fail $r "18c  Get-FltInstalledIndex/Status: '$($Target.Name)'" $_.Exception.Message }
     } else {
-        _IT_Warn $r 'Get-FltInstalledIndex / Get-FltPackageStatus' 'No target selected — toggle one with 21+'
+        _IT_Warn $r '18c  Get-FltInstalledIndex / Get-FltPackageStatus' 'No target selected — toggle one with 21+'
     }
 
     return $r
@@ -851,157 +892,174 @@ function Invoke-IT_PackageQueries {
 function Get-IT_Suites {
     return @(
         [pscustomobject]@{
-            Id          = 1
+            Id          = 11
             Name        = 'File I/O'
             Description = 'CSV round-trip, sort persistence, filter correctness, UI Config persistence'
             NeedsTarget = $false
             NeedsSSH    = $false
             PerTarget   = $false   # runs once — tests local file system
             Function    = 'Invoke-IT_FileIO'
+            CheckCount  = 25
         },
         [pscustomobject]@{
-            Id          = 2
+            Id          = 12
             Name        = 'Pagination and target selection'
             Description = 'Page slicing, target numbering, sort-aware selection'
             NeedsTarget = $false
             NeedsSSH    = $false
             PerTarget   = $false   # runs once — tests local logic
             Function    = 'Invoke-IT_Pagination'
+            CheckCount  = 6
         },
         [pscustomobject]@{
-            Id          = 3
+            Id          = 13
             Name        = 'SSH connectivity'
             Description = 'TCP check, SSH session, remote command, tcpkg path on target'
             NeedsTarget = $true
             NeedsSSH    = $true
             PerTarget   = $true    # runs against each selected target
             Function    = 'Invoke-IT_SSH'
+            CheckCount  = 5
         },
         [pscustomobject]@{
-            Id          = 4
+            Id          = 14
             Name        = 'Read-only mode'
             Description = 'tcpkg blocked, batch produces [read-only] status, credentials exempt'
             NeedsTarget = $false
             NeedsSSH    = $false
             PerTarget   = $false   # runs once — tests local mode flag
             Function    = 'Invoke-IT_ReadOnly'
+            CheckCount  = 4
         },
         [pscustomobject]@{
-            Id          = 5
+            Id          = 15
             Name        = 'Log system'
             Description = 'Entry written, retrieved by history, retention preserves current log'
             NeedsTarget = $false
             NeedsSSH    = $false
             PerTarget   = $false   # runs once — tests local log files
             Function    = 'Invoke-IT_Log'
+            CheckCount  = 7
         },
         [pscustomobject]@{
-            Id          = 6
+            Id          = 16
             Name        = 'Reachability cache'
             Description = 'Cache skip, expiry recheck, optional live cache population'
             NeedsTarget = $false
             NeedsSSH    = $false
             PerTarget   = $true    # optional live check runs per selected target
             Function    = 'Invoke-IT_ReachCache'
+            CheckCount  = 4
         }
         [pscustomobject]@{
-            Id          = 7
+            Id          = 17
             Name        = 'tcpkg local'
             Description = 'tcpkg exe found, config export, target verify, internet access toggle'
             NeedsTarget = $false
             NeedsSSH    = $false
             PerTarget   = $true    # target-specific tests run per selected target
             Function    = 'Invoke-IT_TcpkgLocal'
+            CheckCount  = 9
         },
         [pscustomobject]@{
-            Id          = 8
+            Id          = 18
             Name        = 'Package queries'
             Description = 'Package search, version listing, remote status query'
             NeedsTarget = $false
             NeedsSSH    = $false
             PerTarget   = $true    # remote status query runs per target
             Function    = 'Invoke-IT_PackageQueries'
+            CheckCount  = 3
         },
         [pscustomobject]@{
-            Id          = 9
+            Id          = 19
             Name        = 'WinGet executor'
             Description = 'WinGet available, executor routing logic, package search (if winget installed)'
             NeedsTarget = $false
             NeedsSSH    = $false
             PerTarget   = $false   # routing logic is local; search runs once
             Function    = 'Invoke-IT_WinGet'
+            CheckCount  = 11
         },
         [pscustomobject]@{
-            Id          = 10
+            Id          = 20
             Name        = 'WinGet live install'
             Description = 'Real install/uninstall via SSH using Invoke-FltWinGetBatch [needs target]'
             NeedsTarget = $true
             NeedsSSH    = $true
             PerTarget   = $true    # runs against each selected target
             Function    = 'Invoke-IT_WinGetLive'
+            CheckCount  = 9
         },
         [pscustomobject]@{
-            Id          = 11
+            Id          = 21
             Name        = 'Ansible availability'
             Description = 'Ansible mode detection, version, community.docker collection check'
             NeedsTarget = $false
             NeedsSSH    = $false
             PerTarget   = $false   # local check only
             Function    = 'Invoke-IT_Ansible'
+            CheckCount  = 7
         },
         [pscustomobject]@{
-            Id          = 12
+            Id          = 22
             Name        = 'Docker operator'
             Description = 'Docker Desktop status, start/stop, and operator container checks'
             NeedsTarget = $false
             NeedsSSH    = $false
             PerTarget   = $false
             Function    = 'Invoke-IT_DockerOperator'
+            CheckCount  = 5
         },
         [pscustomobject]@{
-            Id          = 13
+            Id          = 23
             Name        = 'Ansible inventory builder'
             Description = 'New-FltAnsibleInventory: INI generation, groups, auth vars, cleanup'
             NeedsTarget = $false
             NeedsSSH    = $false
             PerTarget   = $false   # fully offline — synthetic targets only
             Function    = 'Invoke-IT_AnsibleInventory'
+            CheckCount  = 13
         },
         [pscustomobject]@{
-            Id          = 14
+            Id          = 24
             Name        = 'Ansible playbook builder'
             Description = '_Get-*Playbook: YAML generation, file write, cleanup for all five builders'
             NeedsTarget = $false
             NeedsSSH    = $false
             PerTarget   = $false   # fully offline — no Ansible required
             Function    = 'Invoke-IT_AnsiblePlaybook'
+            CheckCount  = 15
         },
         [pscustomobject]@{
-            Id          = 15
+            Id          = 25
             Name        = 'Ansible batch executor'
             Description = 'Invoke-FltAnsibleBatch: read-only mode, output parser, BatchResult shape'
             NeedsTarget = $false
             NeedsSSH    = $false
             PerTarget   = $false   # offline — parser tested directly; live run tested in Phase 5.5+
             Function    = 'Invoke-IT_AnsibleBatch'
+            CheckCount  = 13
         },
         [pscustomobject]@{
-            Id          = 16
+            Id          = 26
             Name        = 'Fleet executor routing'
             Description = 'Invoke-FleetAction: Ansible/tcpkg/winget/push bucket routing in read-only mode'
             NeedsTarget = $false
             NeedsSSH    = $false
             PerTarget   = $false   # fully offline — read-only mode exercises bucket logic
             Function    = 'Invoke-IT_FleetRouting'
+            CheckCount  = 10
         },
         [pscustomobject]@{
-            Id          = 17
+            Id          = 27
             Name        = 'Ansible Vault helpers'
             Description = '_Get-VaultPasswordFile: temp file write/cleanup; Invoke-FltVaultSetup: return shape'
             NeedsTarget = $false
             NeedsSSH    = $false
             PerTarget   = $false   # fully offline — credential store and temp file only
             Function    = 'Invoke-IT_AnsibleVault'
+            CheckCount  = 8
         }
     )
 }
@@ -1022,14 +1080,14 @@ function Invoke-IT_WinGet {
         $found = $null -ne (Get-Command 'winget' -ErrorAction SilentlyContinue)
         if ($avail -eq $found) {
             if ($avail) {
-                _IT_Pass $r 'Test-FltWinGetAvailable: winget found on operator machine'
+                _IT_Pass $r '19a  Test-FltWinGetAvailable: winget found on operator machine'
             } else {
-                _IT_Warn $r 'Test-FltWinGetAvailable: winget not found' 'Search/version tests will be skipped — install winget to enable'
+                _IT_Warn $r '19a  Test-FltWinGetAvailable: winget not found' 'Search/version tests will be skipped — install winget to enable'
             }
         } else {
-            _IT_Fail $r 'Test-FltWinGetAvailable: result matches Get-Command' "avail=$avail found=$found"
+            _IT_Fail $r '19a  Test-FltWinGetAvailable: result matches Get-Command' "avail=$avail found=$found"
         }
-    } catch { _IT_Fail $r 'Test-FltWinGetAvailable' $_.Exception.Message }
+    } catch { _IT_Fail $r '19a  Test-FltWinGetAvailable' $_.Exception.Message }
 
     # 9b-9e. Executor routing — EffectivePackageManager() is a PS7 class method
     # that cannot be assigned to a variable. Use -in operator directly on the method
@@ -1038,42 +1096,42 @@ function Invoke-IT_WinGet {
         $t = [FleetTarget]::new('RouteTest-tcpkg','10.0.0.1',22,'admin',$true)
         $t.PackageManager = 'tcpkg'
         if ((Get-FltEffectivePackageManager $t) -eq 'tcpkg') {
-            _IT_Pass $r "Routing: PackageManager='tcpkg' → Get-FltEffectivePackageManager correct"
+            _IT_Pass $r "19b  Routing: PackageManager='tcpkg' → correct"
         } else {
-            _IT_Fail $r "Routing: tcpkg target Get-FltEffectivePackageManager" "Expected 'tcpkg', got '$(Get-FltEffectivePackageManager $t)'"
+            _IT_Fail $r "19b  Routing: tcpkg target Get-FltEffectivePackageManager" "Expected 'tcpkg', got '$(Get-FltEffectivePackageManager $t)'"
         }
-    } catch { _IT_Fail $r 'Routing: tcpkg target' $_.Exception.Message }
+    } catch { _IT_Fail $r '19b  Routing: tcpkg target' $_.Exception.Message }
 
     try {
         $t = [FleetTarget]::new('RouteTest-winget','10.0.0.2',22,'admin',$true)
         $t.PackageManager = 'winget'
         if ((Get-FltEffectivePackageManager $t) -eq 'winget') {
-            _IT_Pass $r "Routing: PackageManager='winget' → Get-FltEffectivePackageManager correct"
+            _IT_Pass $r "19b  Routing: PackageManager='winget' → correct"
         } else {
-            _IT_Fail $r "Routing: winget target Get-FltEffectivePackageManager" "Expected 'winget'"
+            _IT_Fail $r "19b  Routing: winget target Get-FltEffectivePackageManager" "Expected 'winget'"
         }
-    } catch { _IT_Fail $r 'Routing: winget target' $_.Exception.Message }
+    } catch { _IT_Fail $r '19b  Routing: winget target' $_.Exception.Message }
 
     try {
         $t = [FleetTarget]::new('RouteTest-default','10.0.0.3',22,'admin',$true)
         $t.PackageManager = ''
         $t.OS = 'windows'
         if ((Get-FltEffectivePackageManager $t) -eq 'tcpkg') {
-            _IT_Pass $r "Routing: PackageManager='' on Windows → Get-FltEffectivePackageManager defaults to 'tcpkg'"
+            _IT_Pass $r "19b  Routing: PackageManager='' defaults to 'tcpkg'"
         } else {
-            _IT_Fail $r "Routing: default Windows target Get-FltEffectivePackageManager" "Expected 'tcpkg'"
+            _IT_Fail $r "19b  Routing: default Windows target Get-FltEffectivePackageManager" "Expected 'tcpkg'"
         }
-    } catch { _IT_Fail $r 'Routing: default Windows target' $_.Exception.Message }
+    } catch { _IT_Fail $r '19b  Routing: default Windows target' $_.Exception.Message }
 
     try {
         $t = [FleetTarget]::new('RouteTest-both','10.0.0.4',22,'admin',$true)
         $t.PackageManager = 'both'
         if ((Get-FltEffectivePackageManager $t) -eq 'both') {
-            _IT_Pass $r "Routing: PackageManager='both' → Get-FltEffectivePackageManager correct"
+            _IT_Pass $r "19b  Routing: PackageManager='both' → correct"
         } else {
-            _IT_Fail $r "Routing: 'both' target Get-FltEffectivePackageManager" "Expected 'both'"
+            _IT_Fail $r "19b  Routing: 'both' target Get-FltEffectivePackageManager" "Expected 'both'"
         }
-    } catch { _IT_Fail $r "Routing: 'both' target" $_.Exception.Message }
+    } catch { _IT_Fail $r "19b  Routing: 'both' target" $_.Exception.Message }
 
     # 9f. WinGet command format is correct for each verb
     try {
@@ -1087,56 +1145,56 @@ function Invoke-IT_WinGet {
         if ($install   -notmatch '--silent')          { $errors += 'install missing --silent' }
         if ($install   -notmatch 'Microsoft\.VisualStudioCode') { $errors += 'install missing package id' }
         if ($errors.Count -eq 0) {
-            _IT_Pass $r '_Get-WinGetCommand: correct format for install/upgrade/uninstall'
+            _IT_Pass $r '19c  _Get-WinGetCommand: correct format'
         } else {
-            _IT_Fail $r '_Get-WinGetCommand: command format' ($errors -join '; ')
+            _IT_Fail $r '19c  _Get-WinGetCommand: command format' ($errors -join '; ')
         }
-    } catch { _IT_Fail $r '_Get-WinGetCommand' $_.Exception.Message }
+    } catch { _IT_Fail $r '19c  _Get-WinGetCommand' $_.Exception.Message }
 
     # 9g. Search-FltWinGetPackage — requires winget on operator machine
     if (Test-FltWinGetAvailable) {
         try {
             $res = Search-FltWinGetPackage -SearchTerm 'notepad'
             if ($res.Ok -and $res.Items.Count -gt 0) {
-                _IT_Pass $r "Search-FltWinGetPackage: found $($res.Items.Count) result(s) for 'notepad'"
+                _IT_Pass $r "19d  Search-FltWinGetPackage: found $($res.Items.Count) result(s) for 'notepad'"
                 # Verify shape matches tcpkg equivalent
                 $first = $res.Items[0]
                 $hasName    = $null -ne $first.Name
                 $hasVersion = $null -ne $first.PSObject.Properties['Version']
                 $hasSource  = $null -ne $first.PSObject.Properties['Source']
                 if ($hasName -and $hasVersion -and $hasSource) {
-                    _IT_Pass $r 'Search-FltWinGetPackage: result shape matches tcpkg equivalent'
+                    _IT_Pass $r '19d  Search-FltWinGetPackage: result shape'
                 } else {
-                    _IT_Fail $r 'Search-FltWinGetPackage: result shape' "Name=$hasName Version=$hasVersion Source=$hasSource"
+                    _IT_Fail $r '19d  Search-FltWinGetPackage: result shape' "Name=$hasName Version=$hasVersion Source=$hasSource"
                 }
             } elseif ($res.Ok) {
-                _IT_Warn $r "Search-FltWinGetPackage: no results for 'notepad'" 'Check winget source configuration'
+                _IT_Warn $r "19d  Search-FltWinGetPackage: no results for 'notepad'" 'Check winget source configuration'
             } else {
                 # Capture raw winget output for diagnosis
                 $rawDiag = & winget search notepad --accept-source-agreements 2>&1
                 $exitDiag = $LASTEXITCODE
                 $preview  = ($rawDiag | Select-Object -First 3 | ForEach-Object { [string]$_ }) -join ' | '
-                _IT_Fail $r "Search-FltWinGetPackage: search succeeded" "exit=$exitDiag raw='$preview'"
+                _IT_Fail $r "19d  Search-FltWinGetPackage: search succeeded" "exit=$exitDiag raw='$preview'"
             }
-        } catch { _IT_Fail $r 'Search-FltWinGetPackage' $_.Exception.Message }
+        } catch { _IT_Fail $r '19d  Search-FltWinGetPackage' $_.Exception.Message }
 
         # 9h. Get-FltWinGetVersions — search for a well-known package
         try {
             $versions = @(Get-FltWinGetVersions -PackageId '7zip.7zip')
             if ($versions.Count -gt 0) {
-                _IT_Pass $r "Get-FltWinGetVersions: $($versions.Count) version(s) of 7zip.7zip"
+                _IT_Pass $r "19e  Get-FltWinGetVersions: $($versions.Count) version(s) of 7zip.7zip"
                 if ($versions[0].PSObject.Properties['Version'] -and $versions[0].PSObject.Properties['Source']) {
-                    _IT_Pass $r 'Get-FltWinGetVersions: result shape matches tcpkg equivalent'
+                    _IT_Pass $r '19e  Get-FltWinGetVersions: result shape'
                 } else {
-                    _IT_Fail $r 'Get-FltWinGetVersions: result shape' 'Missing Version or Source property'
+                    _IT_Fail $r '19e  Get-FltWinGetVersions: result shape' 'Missing Version or Source property'
                 }
             } else {
-                _IT_Warn $r 'Get-FltWinGetVersions: versions found' 'No versions for 7zip.7zip — check winget source configuration'
+                _IT_Warn $r '19e  Get-FltWinGetVersions: versions found' 'No versions for 7zip.7zip — check winget source configuration'
             }
-        } catch { _IT_Fail $r 'Get-FltWinGetVersions' $_.Exception.Message }
+        } catch { _IT_Fail $r '19e  Get-FltWinGetVersions' $_.Exception.Message }
     } else {
-        _IT_Warn $r 'Search-FltWinGetPackage'    'winget not on operator machine — skipped'
-        _IT_Warn $r 'Get-FltWinGetVersions'      'winget not on operator machine — skipped'
+        _IT_Warn $r '19d  Search-FltWinGetPackage'    'winget not on operator machine — skipped'
+        _IT_Warn $r '19e  Get-FltWinGetVersions'      'winget not on operator machine — skipped'
     }
 
     # 9i. Get-FltWinGetInstalledIndex — requires winget on operator machine
@@ -1144,20 +1202,20 @@ function Invoke-IT_WinGet {
         try {
             $idx = Get-FltWinGetInstalledIndex
             if ($idx -is [hashtable]) {
-                _IT_Pass $r "Get-FltWinGetInstalledIndex: returns hashtable ($($idx.Count) packages)"
+                _IT_Pass $r "19f  Get-FltWinGetInstalledIndex: returns hashtable ($($idx.Count) packages)"
                 # Keys must be lowercase package ids
                 $hasUpperCase = $idx.Keys | Where-Object { $_ -cne $_.ToLower() }
                 if (-not $hasUpperCase) {
-                    _IT_Pass $r 'Get-FltWinGetInstalledIndex: all keys are lowercase (consistent with tcpkg equivalent)'
+                    _IT_Pass $r '19f  Get-FltWinGetInstalledIndex: all keys are lowercase'
                 } else {
-                    _IT_Fail $r 'Get-FltWinGetInstalledIndex: keys lowercase' "Found mixed-case keys: $($hasUpperCase -join ', ')"
+                    _IT_Fail $r '19f  Get-FltWinGetInstalledIndex: keys lowercase' "Found mixed-case keys: $($hasUpperCase -join ', ')"
                 }
             } else {
-                _IT_Fail $r 'Get-FltWinGetInstalledIndex: returns hashtable' "Got: $($idx.GetType().Name)"
+                _IT_Fail $r '19f  Get-FltWinGetInstalledIndex: returns hashtable' "Got: $($idx.GetType().Name)"
             }
-        } catch { _IT_Fail $r 'Get-FltWinGetInstalledIndex' $_.Exception.Message }
+        } catch { _IT_Fail $r '19f  Get-FltWinGetInstalledIndex' $_.Exception.Message }
     } else {
-        _IT_Warn $r 'Get-FltWinGetInstalledIndex' 'winget not on operator machine — skipped'
+        _IT_Warn $r '19f  Get-FltWinGetInstalledIndex' 'winget not on operator machine — skipped'
     }
 
     # 9j. Routing: WinGet target with InternetAccess=False routes to push, not winget bucket
@@ -1172,11 +1230,11 @@ function Invoke-IT_WinGet {
         $goesWinGet   = $isIaTarget -and ($pm -in @('winget','both'))
         $goesPush     = -not $isIaTarget
         if ($goesPush -and -not $goesWinGet) {
-            _IT_Pass $r 'Routing: winget target with IA=False routes to push bucket, not winget SSH'
+            _IT_Pass $r '19g  Routing: winget target with IA=False routes to push'
         } else {
-            _IT_Fail $r 'Routing: winget target with IA=False routes to push' "goesWinGet=$goesWinGet goesPush=$goesPush"
+            _IT_Fail $r '19g  Routing: winget target with IA=False routes to push' "goesWinGet=$goesWinGet goesPush=$goesPush"
         }
-    } catch { _IT_Fail $r 'Routing: IA=False winget target' $_.Exception.Message }
+    } catch { _IT_Fail $r '19g  Routing: IA=False winget target' $_.Exception.Message }
 
     # 9k. _Parse-WinGetTable — unit test for both output formats
     # Feeds known winget output fixtures and verifies correct Name/Id/Version extraction.
@@ -1193,12 +1251,12 @@ function Invoke-IT_WinGet {
             'AkelPad                        AkelPad.AkelPad           4.9.9      winget'
         )
         $searchResult = _Parse-WinGetTable -Lines $searchLines
-        if (-not $searchResult.Ok)                                          { _IT_Fail $r '_Parse-WinGetTable search: parse succeeded' 'Ok=false' }
-        elseif ($searchResult.Items.Count -ne 3)                            { _IT_Fail $r '_Parse-WinGetTable search: item count' "Expected 3 got $($searchResult.Items.Count)" }
-        elseif ($searchResult.Items[0].Name -ne 'Notepad++.Notepad++')     { _IT_Fail $r '_Parse-WinGetTable search: Id extracted as Name' "Got '$($searchResult.Items[0].Name)'" }
-        elseif ($searchResult.Items[0].Title -ne 'Notepad++')              { _IT_Fail $r '_Parse-WinGetTable search: display name in Title' "Got '$($searchResult.Items[0].Title)'" }
-        elseif ($searchResult.Items[0].Version -ne '8.9.6.4')              { _IT_Fail $r '_Parse-WinGetTable search: version' "Got '$($searchResult.Items[0].Version)'" }
-        else { _IT_Pass $r '_Parse-WinGetTable search format: Id/Title/Version correctly extracted' }
+        if (-not $searchResult.Ok)                                          { _IT_Fail $r '19g  _Parse-WinGetTable search: parse succeeded' 'Ok=false' }
+        elseif ($searchResult.Items.Count -ne 3)                            { _IT_Fail $r '19h  _Parse-WinGetTable search: item count' "Expected 3 got $($searchResult.Items.Count)" }
+        elseif ($searchResult.Items[0].Name -ne 'Notepad++.Notepad++')     { _IT_Fail $r '19h  _Parse-WinGetTable search: Id extracted as Name' "Got '$($searchResult.Items[0].Name)'" }
+        elseif ($searchResult.Items[0].Title -ne 'Notepad++')              { _IT_Fail $r '19h  _Parse-WinGetTable search: display name in Title' "Got '$($searchResult.Items[0].Title)'" }
+        elseif ($searchResult.Items[0].Version -ne '8.9.6.4')              { _IT_Fail $r '19h  _Parse-WinGetTable search: version' "Got '$($searchResult.Items[0].Version)'" }
+        else { _IT_Pass $r '19h  _Parse-WinGetTable search format' }
 
         # Format B: winget list via Out-String (solid separator, values may overflow columns)
         # This is the format produced by: winget list | Out-String -Width 300
@@ -1213,23 +1271,23 @@ function Invoke-IT_WinGet {
             'WindowsAppRuntime.1.8                   Microsoft.WindowsAppRuntime.1.8          1.8.0            1.8.8         winget'
         )
         $listResult = _Parse-WinGetTable -Lines $listLines
-        if (-not $listResult.Ok)                                             { _IT_Fail $r '_Parse-WinGetTable list: parse succeeded' 'Ok=false' }
-        elseif ($listResult.Items.Count -ne 6)                              { _IT_Fail $r '_Parse-WinGetTable list: item count' "Expected 6 got $($listResult.Items.Count)" }
+        if (-not $listResult.Ok)                                             { _IT_Fail $r '19i  _Parse-WinGetTable list: parse succeeded' 'Ok=false' }
+        elseif ($listResult.Items.Count -ne 6)                              { _IT_Fail $r '19i  _Parse-WinGetTable list: item count' "Expected 6 got $($listResult.Items.Count)" }
         else {
             $xmlNotepad = $listResult.Items | Where-Object { $_.Name -eq 'Microsoft.XMLNotepad' } | Select-Object -First 1
             $openSsh    = $listResult.Items | Where-Object { $_.Name -eq 'Microsoft.OpenSSH.Preview' } | Select-Object -First 1
             $runtime    = $listResult.Items | Where-Object { $_.Name -eq 'Microsoft.WindowsAppRuntime.1.8' } | Select-Object -First 1
 
-            if (-not $xmlNotepad)                           { _IT_Fail $r '_Parse-WinGetTable list: XmlNotepad found'    "Id not found in results: $($listResult.Items.Name -join ', ')" }
-            elseif ($xmlNotepad.Title -ne 'XmlNotepad')    { _IT_Fail $r '_Parse-WinGetTable list: XmlNotepad title'    "Got '$($xmlNotepad.Title)'" }
-            elseif ($xmlNotepad.Version -ne '2.9.0.22')    { _IT_Fail $r '_Parse-WinGetTable list: XmlNotepad version'  "Got '$($xmlNotepad.Version)'" }
-            elseif (-not $openSsh)                          { _IT_Fail $r '_Parse-WinGetTable list: OpenSSH found'       'Id not found' }
-            elseif ($openSsh.Version -ne '9.5.0.0')        { _IT_Fail $r '_Parse-WinGetTable list: OpenSSH version'     "Got '$($openSsh.Version)'" }
-            elseif (-not $runtime)                          { _IT_Fail $r '_Parse-WinGetTable list: WindowsAppRuntime found' 'Id not found' }
-            elseif ($runtime.Version -ne '1.8.0')          { _IT_Fail $r '_Parse-WinGetTable list: WindowsAppRuntime version' "Got '$($runtime.Version)'" }
-            else { _IT_Pass $r '_Parse-WinGetTable list format: all packages correctly parsed (Id/Title/Version)' }
+            if (-not $xmlNotepad)                           { _IT_Fail $r '19i  _Parse-WinGetTable list: XmlNotepad found'    "Id not found in results: $($listResult.Items.Name -join ', ')" }
+            elseif ($xmlNotepad.Title -ne 'XmlNotepad')    { _IT_Fail $r '19i  _Parse-WinGetTable list: XmlNotepad title'    "Got '$($xmlNotepad.Title)'" }
+            elseif ($xmlNotepad.Version -ne '2.9.0.22')    { _IT_Fail $r '19i  _Parse-WinGetTable list: XmlNotepad version'  "Got '$($xmlNotepad.Version)'" }
+            elseif (-not $openSsh)                          { _IT_Fail $r '19i  _Parse-WinGetTable list: OpenSSH found'       'Id not found' }
+            elseif ($openSsh.Version -ne '9.5.0.0')        { _IT_Fail $r '19i  _Parse-WinGetTable list: OpenSSH version'     "Got '$($openSsh.Version)'" }
+            elseif (-not $runtime)                          { _IT_Fail $r '19i  _Parse-WinGetTable list: WindowsAppRuntime found' 'Id not found' }
+            elseif ($runtime.Version -ne '1.8.0')          { _IT_Fail $r '19i  _Parse-WinGetTable list: WindowsAppRuntime version' "Got '$($runtime.Version)'" }
+            else { _IT_Pass $r '19j  _Parse-WinGetTable list format: all packages correctly parsed' }
         }
-    } catch { _IT_Fail $r '_Parse-WinGetTable' $_.Exception.Message }
+    } catch { _IT_Fail $r '19k  _Parse-WinGetTable' $_.Exception.Message }
 
     return $r
 }
@@ -1252,11 +1310,26 @@ function Invoke-IT_WinGetLive {
     $testPkg = '7zip.7zip'
 
     if (-not (Ensure-FltPoshSsh)) {
-        _IT_Fail $r 'Posh-SSH available' 'Run: Install-Module Posh-SSH -Scope CurrentUser'
+        _IT_Fail $r '20a  Posh-SSH available' 'Run: Install-Module Posh-SSH -Scope CurrentUser'
+        _IT_Skip $r '20b  Credentials provided'                     'Skipped — Posh-SSH not available'
+        _IT_Skip $r '20c  SSH session for pre-check'                 'Skipped — Posh-SSH not available'
+        _IT_Skip $r '20d  winget installed on target'                'Skipped — Posh-SSH not available'
+        _IT_Skip $r '20e  winget sources configured on target'       'Skipped — Posh-SSH not available'
+        _IT_Skip $r '20f  winget sources refreshed'                  'Skipped — Posh-SSH not available'
+        _IT_Skip $r '20g  Invoke-FltWinGetBatch (already installed)' 'Skipped — Posh-SSH not available'
+        _IT_Skip $r '20h  Verify install via SSH'                    'Skipped — Posh-SSH not available'
+        _IT_Skip $r '20i  Verify removal via SSH'                    'Skipped — Posh-SSH not available'
+        _IT_Skip $r '20c  SSH session for pre-check'                 'Skipped — no credentials provided'
+        _IT_Skip $r '20d  winget installed on target'                'Skipped — no credentials provided'
+        _IT_Skip $r '20e  winget sources configured on target'       'Skipped — no credentials provided'
+        _IT_Skip $r '20f  winget sources refreshed'                  'Skipped — no credentials provided'
+        _IT_Skip $r '20g  Invoke-FltWinGetBatch (already installed)' 'Skipped — no credentials provided'
+        _IT_Skip $r '20h  Verify install via SSH'                    'Skipped — no credentials provided'
+        _IT_Skip $r '20i  Verify removal via SSH'                    'Skipped — no credentials provided'
         return $r
     }
     if (-not $Credential -and [string]::IsNullOrWhiteSpace($KeyFile)) {
-        _IT_Fail $r 'Credentials provided' 'Select credentials before running this suite'
+        _IT_Fail $r '20b  Credentials provided' 'Select credentials before running this suite'
         return $r
     }
 
@@ -1275,7 +1348,13 @@ function Invoke-IT_WinGetLive {
 
         $session = New-SSHSession @sessionParams
         if (-not $session) {
-            _IT_Fail $r 'SSH session for pre-check' 'New-SSHSession returned null'
+            _IT_Fail $r '20c  SSH session for pre-check' 'New-SSHSession returned null'
+            _IT_Skip $r '20d  winget installed on target'                'Skipped — SSH session failed'
+            _IT_Skip $r '20e  winget sources configured on target'       'Skipped — SSH session failed'
+            _IT_Skip $r '20f  winget sources refreshed'                  'Skipped — SSH session failed'
+            _IT_Skip $r '20g  Invoke-FltWinGetBatch (already installed)' 'Skipped — SSH session failed'
+            _IT_Skip $r '20h  Verify install via SSH'                    'Skipped — SSH session failed'
+            _IT_Skip $r '20i  Verify removal via SSH'                    'Skipped — SSH session failed'
             return $r
         }
 
@@ -1284,11 +1363,16 @@ function Invoke-IT_WinGetLive {
                          -Command 'winget --version' -TimeOut 30
         $verOut    = ($verResult.Output -join '').Trim()
         if ($verResult.ExitStatus -eq 0 -and $verOut -match 'v\d') {
-            _IT_Pass $r "winget installed on target: $verOut"
+            _IT_Pass $r "20d  winget installed on target: $verOut"
         } else {
-            _IT_Fail $r 'winget installed on target' `
+            _IT_Fail $r '20d  winget installed on target' `
                 "exit=$($verResult.ExitStatus) output='$verOut' — use Setup > select target > 4. Prepare target to install WinGet"
             Remove-SSHSession -SessionId $session.SessionId | Out-Null
+            _IT_Skip $r '20e  winget sources configured on target'       'Skipped — winget not installed on target'
+            _IT_Skip $r '20f  winget sources refreshed'                  'Skipped — winget not installed on target'
+            _IT_Skip $r '20g  Invoke-FltWinGetBatch (already installed)' 'Skipped — winget not installed on target'
+            _IT_Skip $r '20h  Verify install via SSH'                    'Skipped — winget not installed on target'
+            _IT_Skip $r '20i  Verify removal via SSH'                    'Skipped — winget not installed on target'
             return $r
         }
 
@@ -1298,11 +1382,15 @@ function Invoke-IT_WinGetLive {
         $srcOut    = ($srcResult.Output -join ' ')
         if ($srcResult.ExitStatus -eq 0 -and $srcOut -match 'https://') {
             $srcCount = @($srcResult.Output | Where-Object { $_ -match 'https://' }).Count
-            _IT_Pass $r "winget sources configured on target ($srcCount source(s))"
+            _IT_Pass $r "20e  winget sources configured on target ($srcCount source(s))"
         } else {
-            _IT_Fail $r 'winget sources configured on target' `
+            _IT_Fail $r '20e  winget sources configured on target' `
                 "exit=$($srcResult.ExitStatus) — run 'winget source reset --force' on target"
             Remove-SSHSession -SessionId $session.SessionId | Out-Null
+            _IT_Skip $r '20f  winget sources refreshed'                  'Skipped — winget sources not configured'
+            _IT_Skip $r '20g  Invoke-FltWinGetBatch (already installed)' 'Skipped — winget sources not configured'
+            _IT_Skip $r '20h  Verify install via SSH'                    'Skipped — winget sources not configured'
+            _IT_Skip $r '20i  Verify removal via SSH'                    'Skipped — winget sources not configured'
             return $r
         }
 
@@ -1310,9 +1398,9 @@ function Invoke-IT_WinGetLive {
         $updateResult = Invoke-SSHCommand -SessionId $session.SessionId `
                             -Command 'winget source update --disable-interactivity' -TimeOut 60
         if ($updateResult.ExitStatus -eq 0) {
-            _IT_Pass $r 'winget sources refreshed'
+            _IT_Pass $r '20f  winget sources refreshed'
         } else {
-            _IT_Warn $r 'winget sources refreshed' `
+            _IT_Warn $r '20f  winget sources refreshed' `
                 "exit=$($updateResult.ExitStatus) — install may use cached source data"
         }
 
@@ -1324,12 +1412,18 @@ function Invoke-IT_WinGetLive {
         Remove-SSHSession -SessionId $session.SessionId | Out-Null
 
         if ($alreadyInstalled) {
-            _IT_Pass $r "$testPkg pre-check: already installed on target"
+            _IT_Pass $r "20g  $testPkg pre-check: already installed on target"
         } else {
-            _IT_Pass $r "$testPkg pre-check: not installed on target — will install and remove"
+            _IT_Pass $r "20g  $testPkg pre-check: not installed on target — will install and remove"
         }
     } catch {
-        _IT_Fail $r "Pre-check SSH: $($Target.Name)" $_.Exception.Message
+        _IT_Fail $r "20c  Pre-check SSH: $($Target.Name)" $_.Exception.Message
+        _IT_Skip $r '20d  winget installed on target'                'Skipped — SSH pre-check threw exception'
+        _IT_Skip $r '20e  winget sources configured on target'       'Skipped — SSH pre-check threw exception'
+        _IT_Skip $r '20f  winget sources refreshed'                  'Skipped — SSH pre-check threw exception'
+        _IT_Skip $r '20g  Invoke-FltWinGetBatch (already installed)' 'Skipped — SSH pre-check threw exception'
+        _IT_Skip $r '20h  Verify install via SSH'                    'Skipped — SSH pre-check threw exception'
+        _IT_Skip $r '20i  Verify removal via SSH'                    'Skipped — SSH pre-check threw exception'
         return $r
     }
 
@@ -1346,14 +1440,14 @@ function Invoke-IT_WinGetLive {
 
             $res = $results | Where-Object { $_.TargetName -eq $Target.Name } | Select-Object -First 1
             if ($res -and $res.Status -eq 'Skipped' -and $res.Note -match 'Already installed') {
-                _IT_Pass $r "Install when already installed → Skipped (Already installed)"
+                _IT_Pass $r "20g  Install when already installed → Skipped (Already installed)"
             } elseif ($res) {
-                _IT_Fail $r "Install when already installed → Skipped" "Got Status='$($res.Status)' Note='$($res.Note)'"
+                _IT_Fail $r "20g  Install when already installed → Skipped" "Got Status='$($res.Status)' Note='$($res.Note)'"
             } else {
-                _IT_Fail $r "Install result returned" "No result for $($Target.Name)"
+                _IT_Fail $r "20h  Install result returned" "No result for $($Target.Name)"
             }
         } catch {
-            _IT_Fail $r 'Invoke-FltWinGetBatch (already installed)' $_.Exception.Message
+            _IT_Fail $r '20g  Invoke-FltWinGetBatch (already installed)' $_.Exception.Message
         }
     } else {
         # 10b. Install
@@ -1368,14 +1462,16 @@ function Invoke-IT_WinGetLive {
 
             $instRes = $installResults | Where-Object { $_.TargetName -eq $Target.Name } | Select-Object -First 1
             if ($instRes -and $instRes.Status -eq 'OK') {
-                _IT_Pass $r "Install ${testPkg}: OK ($([Math]::Round($instRes.DurationSec,1))s)"
+                _IT_Pass $r "20h  Install ${testPkg}: OK ($([Math]::Round($instRes.DurationSec,1))s)"
             } else {
                 $status = if ($instRes) { $instRes.Status } else { 'no result' }
-                _IT_Fail $r "Install $testPkg" "Status='$status'"
+                _IT_Fail $r "20h  Install $testPkg" "Status='$status'"
+                _IT_Skip $r '20i  Verify removal via SSH'                    'Skipped — install failed'
                 return $r   # skip uninstall if install failed
             }
         } catch {
-            _IT_Fail $r "Invoke-FltWinGetBatch install" $_.Exception.Message
+            _IT_Fail $r "20h  Invoke-FltWinGetBatch install" $_.Exception.Message
+            _IT_Skip $r '20i  Verify removal via SSH'                    'Skipped — install threw exception'
             return $r
         }
 
@@ -1389,12 +1485,12 @@ function Invoke-IT_WinGetLive {
             Remove-SSHSession -SessionId $session2.SessionId | Out-Null
 
             if ($verOut -match [regex]::Escape($testPkg)) {
-                _IT_Pass $r "Verify installed: $testPkg found in remote winget list"
+                _IT_Pass $r "20h  Verify installed: $testPkg found in remote winget list"
             } else {
-                _IT_Fail $r "Verify installed: $testPkg in winget list" "Not found — output: $($verOut[0..120] -join '')"
+                _IT_Fail $r "20h  Verify installed: $testPkg in winget list" "Not found — output: $($verOut[0..120] -join '')"
             }
         } catch {
-            _IT_Fail $r 'Verify install via SSH' $_.Exception.Message
+            _IT_Fail $r '20h  Verify install via SSH' $_.Exception.Message
         }
 
         # 10d. Uninstall
@@ -1409,13 +1505,13 @@ function Invoke-IT_WinGetLive {
 
             $uninstRes = $uninstallResults | Where-Object { $_.TargetName -eq $Target.Name } | Select-Object -First 1
             if ($uninstRes -and $uninstRes.Status -eq 'OK') {
-                _IT_Pass $r "Uninstall ${testPkg}: OK ($([Math]::Round($uninstRes.DurationSec,1))s)"
+                _IT_Pass $r "20i  Uninstall ${testPkg}: OK ($([Math]::Round($uninstRes.DurationSec,1))s)"
             } else {
                 $status = if ($uninstRes) { $uninstRes.Status } else { 'no result' }
-                _IT_Fail $r "Uninstall $testPkg" "Status='$status' — manual cleanup may be needed"
+                _IT_Fail $r "20i  Uninstall $testPkg" "Status='$status' — manual cleanup may be needed"
             }
         } catch {
-            _IT_Fail $r "Invoke-FltWinGetBatch uninstall" $_.Exception.Message
+            _IT_Fail $r "20i  Invoke-FltWinGetBatch uninstall" $_.Exception.Message
         }
 
         # 10e. Verify removed
@@ -1428,12 +1524,12 @@ function Invoke-IT_WinGetLive {
             Remove-SSHSession -SessionId $session3.SessionId | Out-Null
 
             if ($ver2Out -notmatch [regex]::Escape($testPkg)) {
-                _IT_Pass $r "Verify removed: $testPkg no longer in remote winget list"
+                _IT_Pass $r "20i  Verify removed: $testPkg no longer in remote winget list"
             } else {
-                _IT_Fail $r "Verify removed: $testPkg still in winget list" 'Manual uninstall may be needed'
+                _IT_Fail $r "20i  Verify removed: $testPkg still in winget list" 'Manual uninstall may be needed'
             }
         } catch {
-            _IT_Fail $r 'Verify removal via SSH' $_.Exception.Message
+            _IT_Fail $r '20i  Verify removal via SSH' $_.Exception.Message
         }
     }
 
@@ -1453,11 +1549,11 @@ function Invoke-IT_Ansible {
     try {
         $mode = Get-FltAnsibleMode
         if ($mode -in @('native', 'wsl', 'docker', '')) {
-            _IT_Pass $r "Get-FltAnsibleMode: returned valid mode ('$mode')"
+            _IT_Pass $r "21a  Get-FltAnsibleMode: returned valid mode ('$mode')"
         } else {
-            _IT_Fail $r 'Get-FltAnsibleMode: valid return value' "Got unexpected value: '$mode'"
+            _IT_Fail $r '21a  Get-FltAnsibleMode: valid return value' "Got unexpected value: '$mode'"
         }
-    } catch { _IT_Fail $r 'Get-FltAnsibleMode' $_.Exception.Message }
+    } catch { _IT_Fail $r '21a  Get-FltAnsibleMode' $_.Exception.Message }
 
     # 11b. Test-FltAnsibleAvailable is consistent with Get-FltAnsibleMode
     try {
@@ -1465,11 +1561,11 @@ function Invoke-IT_Ansible {
         $mode  = Get-FltAnsibleMode
         $expected = $mode -ne ''
         if ($avail -eq $expected) {
-            _IT_Pass $r "Test-FltAnsibleAvailable: consistent with Get-FltAnsibleMode ($mode)"
+            _IT_Pass $r "21b  Test-FltAnsibleAvailable: consistent with Get-FltAnsibleMode ($mode)"
         } else {
-            _IT_Fail $r 'Test-FltAnsibleAvailable: consistent with mode' "Available=$avail but mode='$mode'"
+            _IT_Fail $r '21b  Test-FltAnsibleAvailable: consistent with mode' "Available=$avail but mode='$mode'"
         }
-    } catch { _IT_Fail $r 'Test-FltAnsibleAvailable' $_.Exception.Message }
+    } catch { _IT_Fail $r '21b  Test-FltAnsibleAvailable' $_.Exception.Message }
 
     # 11c. Get-FltAnsibleVersion returns a string (non-null) when available
     try {
@@ -1477,18 +1573,18 @@ function Invoke-IT_Ansible {
         $ver  = Get-FltAnsibleVersion
         if ($mode -eq '') {
             if ($ver -eq '') {
-                _IT_Pass $r 'Get-FltAnsibleVersion: returns empty string when not available'
+                _IT_Pass $r '21c  Get-FltAnsibleVersion'
             } else {
-                _IT_Fail $r 'Get-FltAnsibleVersion: empty when unavailable' "Got: '$ver'"
+                _IT_Fail $r '21c  Get-FltAnsibleVersion: empty when unavailable' "Got: '$ver'"
             }
         } else {
             if ($ver -ne '') {
-                _IT_Pass $r "Get-FltAnsibleVersion: '$ver'"
+                _IT_Pass $r "21c  Get-FltAnsibleVersion: '$ver'"
             } else {
-                _IT_Warn $r 'Get-FltAnsibleVersion: returned empty' 'Ansible found but version string empty'
+                _IT_Warn $r '21c  Get-FltAnsibleVersion: returned empty' 'Ansible found but version string empty'
             }
         }
-    } catch { _IT_Fail $r 'Get-FltAnsibleVersion' $_.Exception.Message }
+    } catch { _IT_Fail $r '21c  Get-FltAnsibleVersion' $_.Exception.Message }
 
     # 11d. Get-FltAnsibleStatus returns correct shape
     try {
@@ -1499,11 +1595,11 @@ function Invoke-IT_Ansible {
                   $null -ne $status.PSObject.Properties['Version'] -and
                   $null -ne $status.PSObject.Properties['HasCommunityDocker']
         if ($hasAll) {
-            _IT_Pass $r "Get-FltAnsibleStatus: correct shape (Available=$($status.Available) Mode='$($status.Mode)')"
+            _IT_Pass $r "21d  Get-FltAnsibleStatus: correct shape (Available=$($status.Available) Mode='$($status.Mode)')"
         } else {
-            _IT_Fail $r 'Get-FltAnsibleStatus: correct shape' 'Missing one or more expected properties'
+            _IT_Fail $r '21d  Get-FltAnsibleStatus: correct shape' 'Missing one or more expected properties'
         }
-    } catch { _IT_Fail $r 'Get-FltAnsibleStatus' $_.Exception.Message }
+    } catch { _IT_Fail $r '21d  Get-FltAnsibleStatus' $_.Exception.Message }
 
     # 11e. Test-FltAnsibleCollection returns bool (regardless of whether installed)
     try {
@@ -1511,71 +1607,71 @@ function Invoke-IT_Ansible {
         $result = Test-FltAnsibleCollection 'community.docker'
         if ($result -is [bool]) {
             if ($mode -eq '') {
-                _IT_Pass $r 'Test-FltAnsibleCollection: returns $false when Ansible not available'
+                _IT_Pass $r '21e  Test-FltAnsibleCollection'
             } elseif ($result) {
-                _IT_Pass $r 'Test-FltAnsibleCollection: community.docker is installed'
+                _IT_Pass $r '21e  Test-FltAnsibleCollection: community.docker installed'
             } else {
-                _IT_Warn $r 'Test-FltAnsibleCollection: community.docker not installed' `
+                _IT_Warn $r '21e  Test-FltAnsibleCollection: community.docker not installed' `
                     "Run: ansible-galaxy collection install community.docker"
             }
         } else {
-            _IT_Fail $r 'Test-FltAnsibleCollection: returns bool' "Got type: $($result.GetType().Name)"
+            _IT_Fail $r '21e  Test-FltAnsibleCollection: returns bool' "Got type: $($result.GetType().Name)"
         }
-    } catch { _IT_Fail $r 'Test-FltAnsibleCollection' $_.Exception.Message }
+    } catch { _IT_Fail $r '21e  Test-FltAnsibleCollection' $_.Exception.Message }
 
     # 11f. Test-FltAnsibleDockerContainer returns bool
     try {
         if (-not (Get-Command 'docker' -ErrorAction SilentlyContinue)) {
-            _IT_Warn $r 'Test-FltAnsibleDockerContainer' 'docker not on PATH — install Docker Desktop'
+            _IT_Warn $r '21f  Test-FltAnsibleDockerContainer' 'docker not on PATH — install Docker Desktop'
         } else {
             $dockerStatus = Get-FltDockerStatus
             if ($dockerStatus -ne 'running') {
-                _IT_Warn $r 'Test-FltAnsibleDockerContainer' "Docker daemon not ready (status: $dockerStatus) — run Suite 22 to start Docker"
+                _IT_Warn $r '21f  Test-FltAnsibleDockerContainer' "Docker daemon not ready (status: $dockerStatus) — run Suite 22 to start Docker"
             } else {
                 $exists = Test-FltAnsibleDockerContainer
                 if ($exists -is [bool]) {
                     if ($exists) {
-                        _IT_Pass $r 'Test-FltAnsibleDockerContainer: container exists'
+                        _IT_Pass $r '21f  Test-FltAnsibleDockerContainer: container exists'
                     } else {
-                        _IT_Warn $r 'Test-FltAnsibleDockerContainer: container not found' `
+                        _IT_Warn $r '21f  Test-FltAnsibleDockerContainer: container not found' `
                             "Run: docker build -f docker/Dockerfile.ansible -t tcflt-ansible . && docker run -d --name tcflt-ansible --restart unless-stopped -v `${PWD}/ansible:/ansible tcflt-ansible"
                     }
                 } else {
-                    _IT_Fail $r 'Test-FltAnsibleDockerContainer: returns bool' "Got: $($exists.GetType().Name)"
+                    _IT_Fail $r '21f  Test-FltAnsibleDockerContainer: returns bool' "Got: $($exists.GetType().Name)"
                 }
             }
         }
-    } catch { _IT_Fail $r 'Test-FltAnsibleDockerContainer' $_.Exception.Message }
+    } catch { _IT_Fail $r '21f  Test-FltAnsibleDockerContainer' $_.Exception.Message }
 
     # 11g. Test-FltAnsibleDockerContainerRunning returns bool
     try {
         if (-not (Get-Command 'docker' -ErrorAction SilentlyContinue)) {
-            _IT_Warn $r 'Test-FltAnsibleDockerContainerRunning' 'docker not on PATH — install Docker Desktop'
+            _IT_Warn $r '21g  Test-FltAnsibleDockerContainerRunning' 'docker not on PATH — install Docker Desktop'
         } else {
             $dockerStatus = Get-FltDockerStatus
             if ($dockerStatus -ne 'running') {
-                _IT_Warn $r 'Test-FltAnsibleDockerContainerRunning' "Docker daemon not ready (status: $dockerStatus) — run Suite 22 to start Docker"
+                _IT_Warn $r '21g  Test-FltAnsibleDockerContainerRunning' "Docker daemon not ready (status: $dockerStatus) — run Suite 22 to start Docker"
             } else {
                 $running = Test-FltAnsibleDockerContainerRunning
                 if ($running -is [bool]) {
                     if ($running) {
-                        _IT_Pass $r 'Test-FltAnsibleDockerContainerRunning: container is running'
+                        _IT_Pass $r '21g  Test-FltAnsibleDockerContainerRunning: container is running'
                     } else {
                         $exists = Test-FltAnsibleDockerContainer
                         if ($exists) {
-                            _IT_Warn $r 'Test-FltAnsibleDockerContainerRunning: container exists but not running' `
+                            _IT_Warn $r '21g  Test-FltAnsibleDockerContainerRunning: container exists but not running' `
                                 "Run: docker start tcflt-ansible"
                         } else {
-                            _IT_Warn $r 'Test-FltAnsibleDockerContainerRunning: container not built yet' `
+                            _IT_Warn $r '21g  Test-FltAnsibleDockerContainerRunning: container not built yet' `
                                 "Build first: docker build -f docker/Dockerfile.ansible -t tcflt-ansible ."
                         }
                     }
                 } else {
-                    _IT_Fail $r 'Test-FltAnsibleDockerContainerRunning: returns bool' "Got: $($running.GetType().Name)"
+                    _IT_Fail $r '21g  Test-FltAnsibleDockerContainerRunning: returns bool' "Got: $($running.GetType().Name)"
                 }
             }
         }
-    } catch { _IT_Fail $r 'Test-FltAnsibleDockerContainerRunning' $_.Exception.Message }
+    } catch { _IT_Fail $r '21g  Test-FltAnsibleDockerContainerRunning' $_.Exception.Message }
 
     return $r
 }
@@ -1594,35 +1690,46 @@ function Invoke-IT_DockerOperator {
         $hasDocker = $null -ne (Get-Command 'docker' -ErrorAction SilentlyContinue)
         if ($hasDocker) {
             $ver = & docker --version 2>&1
-            _IT_Pass $r "docker CLI available: $(($ver -join '').Trim())"
+            _IT_Pass $r "22a  docker CLI available: $(($ver -join '').Trim())"
         } else {
-            _IT_Warn $r 'docker CLI available' 'docker not on PATH — install Docker Desktop from https://www.docker.com/products/docker-desktop/'
+            _IT_Warn $r '22a  docker CLI available' 'docker not on PATH — install Docker Desktop from https://www.docker.com/products/docker-desktop/'
+            _IT_Skip $r '22b  Get-FltDockerStatus'           'Skipped — docker CLI not available'
+            _IT_Skip $r '22c  Get-FltDockerDesktopPath'       'Skipped — docker CLI not available'
+            _IT_Skip $r '22d  Test-FltDockerAvailable'        'Skipped — docker CLI not available'
+            _IT_Skip $r '22e  Docker daemon status'           'Skipped — docker CLI not available'
             return $r   # remaining checks all require docker CLI
         }
-    } catch { _IT_Fail $r 'docker CLI available' $_.Exception.Message; return $r }
+    } catch {
+        _IT_Fail $r '22a  docker CLI available' $_.Exception.Message
+    _IT_Skip $r '22b  Get-FltDockerStatus'           'Skipped — docker CLI not available'
+    _IT_Skip $r '22c  Get-FltDockerDesktopPath'       'Skipped — docker CLI not available'
+    _IT_Skip $r '22d  Test-FltDockerAvailable'        'Skipped — docker CLI not available'
+    _IT_Skip $r '22e  Docker daemon status'           'Skipped — docker CLI not available'
+        return $r
+    }
 
     # 12b. Get-FltDockerStatus returns valid value
     try {
         $status = Get-FltDockerStatus
         if ($status -in @('running', 'starting', 'stopped', 'not-installed')) {
-            _IT_Pass $r "Get-FltDockerStatus: '$status'"
+            _IT_Pass $r "22b  Get-FltDockerStatus: '$status'"
         } else {
-            _IT_Fail $r 'Get-FltDockerStatus: valid value' "Got: '$status'"
+            _IT_Fail $r '22b  Get-FltDockerStatus: valid value' "Got: '$status'"
         }
-    } catch { _IT_Fail $r 'Get-FltDockerStatus' $_.Exception.Message }
+    } catch { _IT_Fail $r '22b  Get-FltDockerStatus' $_.Exception.Message }
 
     # 12c. Get-FltDockerDesktopPath finds installation
     try {
         $path = Get-FltDockerDesktopPath
         if ($path -and (Test-Path $path -PathType Leaf)) {
-            _IT_Pass $r "Get-FltDockerDesktopPath: found at '$path'"
+            _IT_Pass $r "22c  Get-FltDockerDesktopPath: found at '$path'"
         } elseif ($path) {
-            _IT_Warn $r 'Get-FltDockerDesktopPath: path returned but file missing' "Path: '$path'"
+            _IT_Warn $r '22c  Get-FltDockerDesktopPath' "Path: '$path'"
         } else {
-            _IT_Warn $r 'Get-FltDockerDesktopPath: Docker Desktop not found' `
+            _IT_Warn $r '22c  Get-FltDockerDesktopPath: Docker Desktop not found' `
                 'Install Docker Desktop or check installation path'
         }
-    } catch { _IT_Fail $r 'Get-FltDockerDesktopPath' $_.Exception.Message }
+    } catch { _IT_Fail $r '22c  Get-FltDockerDesktopPath' $_.Exception.Message }
 
     # 12d. Test-FltDockerAvailable consistent with Get-FltDockerStatus
     try {
@@ -1630,22 +1737,22 @@ function Invoke-IT_DockerOperator {
         $status = Get-FltDockerStatus
         $expectAvail = $status -eq 'running'
         if ($avail -eq $expectAvail) {
-            _IT_Pass $r "Test-FltDockerAvailable: consistent with status '$status' (available=$avail)"
+            _IT_Pass $r "22d  Test-FltDockerAvailable: consistent with status '$status' (available=$avail)"
         } else {
-            _IT_Fail $r 'Test-FltDockerAvailable: consistent with status' "Available=$avail but status='$status'"
+            _IT_Fail $r '22d  Test-FltDockerAvailable: consistent with status' "Available=$avail but status='$status'"
         }
-    } catch { _IT_Fail $r 'Test-FltDockerAvailable' $_.Exception.Message }
+    } catch { _IT_Fail $r '22d  Test-FltDockerAvailable' $_.Exception.Message }
 
     # 12e. Docker daemon running (or WARN with start instructions)
     try {
         $status = Get-FltDockerStatus
         switch ($status) {
-            'running'       { _IT_Pass $r 'Docker daemon is running' }
-            'starting'      { _IT_Warn $r 'Docker daemon is starting' 'Wait a moment and re-run suite 22' }
-            'stopped'       { _IT_Warn $r 'Docker daemon is stopped' 'Start Docker Desktop — or TcFltPkgMgr can start it from Setup' }
-            'not-installed' { _IT_Warn $r 'Docker not installed' 'Install Docker Desktop from https://www.docker.com/products/docker-desktop/' }
+            'running'       { _IT_Pass $r '22e  Docker daemon is running' }
+            'starting'      { _IT_Warn $r '22e  Docker daemon is starting' 'Wait a moment and re-run suite 22' }
+            'stopped'       { _IT_Warn $r '22e  Docker daemon is stopped' 'Start Docker Desktop — or TcFltPkgMgr can start it from Setup' }
+            'not-installed' { _IT_Warn $r '22e  Docker not installed' 'Install Docker Desktop from https://www.docker.com/products/docker-desktop/' }
         }
-    } catch { _IT_Fail $r 'Docker daemon status' $_.Exception.Message }
+    } catch { _IT_Fail $r '22e  Docker daemon status' $_.Exception.Message }
 
     return $r
 }
@@ -1683,12 +1790,12 @@ function Invoke-IT_AnsibleInventory {
         $winOnly = @(_MkT 'DCC-1' '192.168.8.10' 22 'windows' 'physical')
         $res = New-FltAnsibleInventory -Targets $winOnly -Path $inv
         if ($res.Ok -eq $false -and $res.TargetCount -eq 0 -and -not (Test-Path $inv)) {
-            _IT_Pass $r '13a  No Linux targets: Ok=$false, TargetCount=0, no file written'
+            _IT_Pass $r '23a  No Linux targets: Ok=$false, TargetCount=0, no file written'
         } else {
-            _IT_Fail $r '13a  No Linux targets: Ok=$false, TargetCount=0, no file written' `
+            _IT_Fail $r '23a  No Linux targets: Ok=$false, TargetCount=0, no file written' `
                 "Ok=$($res.Ok) Count=$($res.TargetCount) FileExists=$(Test-Path $inv)"
         }
-    } catch { _IT_Fail $r '13a  No Linux targets guard' $_.Exception.Message }
+    } catch { _IT_Fail $r '23a  No Linux targets guard' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 13b — Single physical Linux target → file created, Ok=$true
@@ -1698,12 +1805,12 @@ function Invoke-IT_AnsibleInventory {
         $targets = @(_MkT 'DCC-Linux-1' '192.168.8.110')
         $res = New-FltAnsibleInventory -Targets $targets -Path $inv
         if ($res.Ok -and (Test-Path $inv)) {
-            _IT_Pass $r '13b  Single physical target: Ok=$true and file exists'
+            _IT_Pass $r '23b  Single physical target: Ok=$true and file exists'
         } else {
-            _IT_Fail $r '13b  Single physical target: Ok=$true and file exists' `
+            _IT_Fail $r '23b  Single physical target: Ok=$true and file exists' `
                 "Ok=$($res.Ok) FileExists=$(Test-Path $inv) Msg=$($res.Message)"
         }
-    } catch { _IT_Fail $r '13b  Single physical target written' $_.Exception.Message }
+    } catch { _IT_Fail $r '23b  Single physical target written' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 13c — ansible_host and ansible_port in file
@@ -1711,12 +1818,12 @@ function Invoke-IT_AnsibleInventory {
     try {
         $content = if (Test-Path $inv) { Get-Content $inv -Raw } else { '' }
         if ($content -match 'ansible_host=192\.168\.8\.110' -and $content -match 'ansible_port=22') {
-            _IT_Pass $r '13c  ansible_host and ansible_port present in inventory'
+            _IT_Pass $r '23c  ansible_host and ansible_port present in inventory'
         } else {
-            _IT_Fail $r '13c  ansible_host and ansible_port present in inventory' `
+            _IT_Fail $r '23c  ansible_host and ansible_port present in inventory' `
                 "host=$(($content -match 'ansible_host') ) port=$(($content -match 'ansible_port') )"
         }
-    } catch { _IT_Fail $r '13c  ansible_host / ansible_port' $_.Exception.Message }
+    } catch { _IT_Fail $r '23c  ansible_host / ansible_port' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 13d — Target name is the INI hostname key
@@ -1724,11 +1831,11 @@ function Invoke-IT_AnsibleInventory {
     try {
         $content = if (Test-Path $inv) { Get-Content $inv -Raw } else { '' }
         if ($content -match 'DCC-Linux-1') {
-            _IT_Pass $r '13d  Target name appears as INI hostname key'
+            _IT_Pass $r '23d  Target name appears as INI hostname key'
         } else {
-            _IT_Fail $r '13d  Target name appears as INI hostname key' 'DCC-Linux-1 not found in inventory'
+            _IT_Fail $r '23d  Target name appears as INI hostname key' 'DCC-Linux-1 not found in inventory'
         }
-    } catch { _IT_Fail $r '13d  Target name as hostname key' $_.Exception.Message }
+    } catch { _IT_Fail $r '23d  Target name as hostname key' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 13e — TargetCount counts only Linux targets (Windows excluded)
@@ -1741,12 +1848,12 @@ function Invoke-IT_AnsibleInventory {
         )
         $res = New-FltAnsibleInventory -Targets $mixed -Path $inv
         if ($res.TargetCount -eq 2) {
-            _IT_Pass $r '13e  TargetCount=2 (Linux only, Windows excluded)'
+            _IT_Pass $r '23e  TargetCount=2 (Linux only, Windows excluded)'
         } else {
-            _IT_Fail $r '13e  TargetCount=2 (Linux only, Windows excluded)' `
+            _IT_Fail $r '23e  TargetCount=2 (Linux only, Windows excluded)' `
                 "Got TargetCount=$($res.TargetCount)"
         }
-    } catch { _IT_Fail $r '13e  TargetCount Linux-only' $_.Exception.Message }
+    } catch { _IT_Fail $r '23e  TargetCount Linux-only' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 13f — VM target appears under [vm] group header
@@ -1754,12 +1861,12 @@ function Invoke-IT_AnsibleInventory {
     try {
         $content = if (Test-Path $inv) { Get-Content $inv -Raw } else { '' }
         if ($content -match '\[vm\]' -and $content -match 'Lin-2') {
-            _IT_Pass $r '13f  VM target in [vm] group'
+            _IT_Pass $r '23f  VM target in [vm] group'
         } else {
-            _IT_Fail $r '13f  VM target in [vm] group' `
+            _IT_Fail $r '23f  VM target in [vm] group' `
                 "[vm]=$($content -match '\[vm\]') Lin-2=$($content -match 'Lin-2')"
         }
-    } catch { _IT_Fail $r '13f  VM group' $_.Exception.Message }
+    } catch { _IT_Fail $r '23f  VM group' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 13g — [linux:children] meta-group present when multiple groups exist
@@ -1767,11 +1874,11 @@ function Invoke-IT_AnsibleInventory {
     try {
         $content = if (Test-Path $inv) { Get-Content $inv -Raw } else { '' }
         if ($content -match '\[linux:children\]') {
-            _IT_Pass $r '13g  [linux:children] meta-group present'
+            _IT_Pass $r '23g  [linux:children] meta-group present'
         } else {
-            _IT_Fail $r '13g  [linux:children] meta-group present' '[linux:children] not found'
+            _IT_Fail $r '23g  [linux:children] meta-group present' '[linux:children] not found'
         }
-    } catch { _IT_Fail $r '13g  linux:children' $_.Exception.Message }
+    } catch { _IT_Fail $r '23g  linux:children' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 13h — Container target gets ansible_connection + ansible_docker_host
@@ -1786,12 +1893,12 @@ function Invoke-IT_AnsibleInventory {
         $hasConn   = $content -match 'ansible_connection=community\.docker\.docker_api'
         $hasDocker = $content -match 'ansible_docker_host=tcp://'
         if ($hasConn -and $hasDocker) {
-            _IT_Pass $r '13h  Container: ansible_connection and ansible_docker_host present'
+            _IT_Pass $r '23h  Container: ansible_connection and ansible_docker_host present'
         } else {
-            _IT_Fail $r '13h  Container: ansible_connection and ansible_docker_host present' `
+            _IT_Fail $r '23h  Container: ansible_connection and ansible_docker_host present' `
                 "connection=$hasConn dockerHost=$hasDocker"
         }
-    } catch { _IT_Fail $r '13h  Container vars' $_.Exception.Message }
+    } catch { _IT_Fail $r '23h  Container vars' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 13i — Docker host address resolved from target list
@@ -1800,12 +1907,12 @@ function Invoke-IT_AnsibleInventory {
         $content = if (Test-Path $inv) { Get-Content $inv -Raw } else { '' }
         # The Docker host dcc4 has address 192.168.8.50 — should appear in docker_host URL
         if ($content -match 'ansible_docker_host=tcp://192\.168\.8\.50:') {
-            _IT_Pass $r '13i  Docker host address resolved from fleet target list'
+            _IT_Pass $r '23i  Docker host address resolved from fleet target list'
         } else {
-            _IT_Fail $r '13i  Docker host address resolved from fleet target list' `
+            _IT_Fail $r '23i  Docker host address resolved from fleet target list' `
                 'Expected tcp://192.168.8.50: not found in ansible_docker_host'
         }
-    } catch { _IT_Fail $r '13i  Docker host address resolution' $_.Exception.Message }
+    } catch { _IT_Fail $r '23i  Docker host address resolution' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 13j — Remove-FltAnsibleInventory deletes the file
@@ -1817,19 +1924,19 @@ function Invoke-IT_AnsibleInventory {
         }
         Remove-FltAnsibleInventory -Path $inv
         if (-not (Test-Path $inv)) {
-            _IT_Pass $r '13j  Remove-FltAnsibleInventory: file deleted'
+            _IT_Pass $r '23j  Remove-FltAnsibleInventory: file deleted'
         } else {
-            _IT_Fail $r '13j  Remove-FltAnsibleInventory: file deleted' 'File still exists after removal'
+            _IT_Fail $r '23j  Remove-FltAnsibleInventory: file deleted' 'File still exists after removal'
         }
-    } catch { _IT_Fail $r '13j  Remove-FltAnsibleInventory' $_.Exception.Message }
+    } catch { _IT_Fail $r '23j  Remove-FltAnsibleInventory' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 13k — Remove-FltAnsibleInventory is a no-op when file absent
     # ------------------------------------------------------------------
     try {
         Remove-FltAnsibleInventory -Path $inv   # file was removed in 13j
-        _IT_Pass $r '13k  Remove-FltAnsibleInventory: no-op when file absent'
-    } catch { _IT_Fail $r '13k  Remove-FltAnsibleInventory no-op' $_.Exception.Message }
+        _IT_Pass $r '23k  Remove-FltAnsibleInventory: no-op when file absent'
+    } catch { _IT_Fail $r '23k  Remove-FltAnsibleInventory no-op' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 13l — Parent directory auto-created for deep paths
@@ -1838,12 +1945,12 @@ function Invoke-IT_AnsibleInventory {
         $deepPath = Join-Path $tempDir 'sub' 'deep' 'hosts.ini'
         $res = New-FltAnsibleInventory -Targets @(_MkT 'Lin-D' '1.2.3.5') -Path $deepPath
         if ($res.Ok -and (Test-Path $deepPath)) {
-            _IT_Pass $r '13l  Parent directory auto-created for deep path'
+            _IT_Pass $r '23l  Parent directory auto-created for deep path'
         } else {
-            _IT_Fail $r '13l  Parent directory auto-created for deep path' `
+            _IT_Fail $r '23l  Parent directory auto-created for deep path' `
                 "Ok=$($res.Ok) FileExists=$(Test-Path $deepPath) Msg=$($res.Message)"
         }
-    } catch { _IT_Fail $r '13l  Auto-create parent directory' $_.Exception.Message }
+    } catch { _IT_Fail $r '23l  Auto-create parent directory' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 13m — Return object has Ok, Path, TargetCount, Message properties
@@ -1853,12 +1960,12 @@ function Invoke-IT_AnsibleInventory {
         $props = $res.PSObject.Properties.Name
         if (($props -contains 'Ok') -and ($props -contains 'Path') -and
             ($props -contains 'TargetCount') -and ($props -contains 'Message')) {
-            _IT_Pass $r '13m  Return object has Ok, Path, TargetCount, Message'
+            _IT_Pass $r '23m  Return object has Ok, Path, TargetCount, Message'
         } else {
-            _IT_Fail $r '13m  Return object has Ok, Path, TargetCount, Message' `
+            _IT_Fail $r '23m  Return object has Ok, Path, TargetCount, Message' `
                 "Properties found: $($props -join ', ')"
         }
-    } catch { _IT_Fail $r '13m  Return object shape' $_.Exception.Message }
+    } catch { _IT_Fail $r '23m  Return object shape' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # Cleanup
@@ -1913,12 +2020,12 @@ function Invoke-IT_AnsiblePlaybook {
     try {
         $res = _Get-PackagePlaybook -Action 'install' -PackageName 'curl'
         if ($res.Ok -and (Test-Path $res.Path)) {
-            _IT_Pass $r '14a  _Get-PackagePlaybook install: Ok=$true and file exists'
+            _IT_Pass $r '24a  _Get-PackagePlaybook install: Ok=$true and file exists'
         } else {
-            _IT_Fail $r '14a  _Get-PackagePlaybook install: Ok=$true and file exists' `
+            _IT_Fail $r '24a  _Get-PackagePlaybook install: Ok=$true and file exists' `
                 "Ok=$($res.Ok) Path=$($res.Path) Msg=$($res.Message)"
         }
-    } catch { _IT_Fail $r '14a  _Get-PackagePlaybook install' $_.Exception.Message }
+    } catch { _IT_Fail $r '24a  _Get-PackagePlaybook install' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 14b — Package playbook: correct module and state=present
@@ -1926,12 +2033,12 @@ function Invoke-IT_AnsiblePlaybook {
     try {
         $c = _YmlContent
         if ($c -match 'ansible\.builtin\.package' -and $c -match 'state:\s*present') {
-            _IT_Pass $r '14b  Package install: ansible.builtin.package with state=present'
+            _IT_Pass $r '24b  Package install: ansible.builtin.package with state=present'
         } else {
-            _IT_Fail $r '14b  Package install: ansible.builtin.package with state=present' `
+            _IT_Fail $r '24b  Package install: ansible.builtin.package with state=present' `
                 "module=$($c -match 'ansible.builtin.package') state=$($c -match 'state: present')"
         }
-    } catch { _IT_Fail $r '14b  Package playbook content' $_.Exception.Message }
+    } catch { _IT_Fail $r '24b  Package playbook content' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 14c — _Get-PackagePlaybook (upgrade): state=latest
@@ -1940,11 +2047,11 @@ function Invoke-IT_AnsiblePlaybook {
         $res = _Get-PackagePlaybook -Action 'upgrade' -PackageName 'curl'
         $c   = if (Test-Path $res.Path) { Get-Content $res.Path -Raw } else { '' }
         if ($res.Ok -and $c -match 'state:\s*latest') {
-            _IT_Pass $r '14c  Package upgrade: state=latest'
+            _IT_Pass $r '24c  Package upgrade: state=latest'
         } else {
-            _IT_Fail $r '14c  Package upgrade: state=latest' "Ok=$($res.Ok) state-latest=$($c -match 'state: latest')"
+            _IT_Fail $r '24c  Package upgrade: state=latest' "Ok=$($res.Ok) state-latest=$($c -match 'state: latest')"
         }
-    } catch { _IT_Fail $r '14c  Package upgrade' $_.Exception.Message }
+    } catch { _IT_Fail $r '24c  Package upgrade' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 14d — _Get-PackagePlaybook (remove): state=absent
@@ -1953,11 +2060,11 @@ function Invoke-IT_AnsiblePlaybook {
         $res = _Get-PackagePlaybook -Action 'remove' -PackageName 'curl'
         $c   = if (Test-Path $res.Path) { Get-Content $res.Path -Raw } else { '' }
         if ($res.Ok -and $c -match 'state:\s*absent') {
-            _IT_Pass $r '14d  Package remove: state=absent'
+            _IT_Pass $r '24d  Package remove: state=absent'
         } else {
-            _IT_Fail $r '14d  Package remove: state=absent' "Ok=$($res.Ok) state-absent=$($c -match 'state: absent')"
+            _IT_Fail $r '24d  Package remove: state=absent' "Ok=$($res.Ok) state-absent=$($c -match 'state: absent')"
         }
-    } catch { _IT_Fail $r '14d  Package remove' $_.Exception.Message }
+    } catch { _IT_Fail $r '24d  Package remove' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 14e — _Get-ServicePlaybook (start): correct module and state=started
@@ -1966,12 +2073,12 @@ function Invoke-IT_AnsiblePlaybook {
         $res = _Get-ServicePlaybook -Action 'start' -ServiceName 'nginx'
         $c   = if (Test-Path $res.Path) { Get-Content $res.Path -Raw } else { '' }
         if ($res.Ok -and $c -match 'ansible\.builtin\.systemd' -and $c -match 'state:\s*started') {
-            _IT_Pass $r '14e  Service start: ansible.builtin.systemd with state=started'
+            _IT_Pass $r '24e  Service start: ansible.builtin.systemd with state=started'
         } else {
-            _IT_Fail $r '14e  Service start: ansible.builtin.systemd with state=started' `
+            _IT_Fail $r '24e  Service start: ansible.builtin.systemd with state=started' `
                 "Ok=$($res.Ok) module=$($c -match 'ansible.builtin.systemd') state=$($c -match 'state: started')"
         }
-    } catch { _IT_Fail $r '14e  Service start' $_.Exception.Message }
+    } catch { _IT_Fail $r '24e  Service start' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 14f — _Get-ServicePlaybook (restart): state=restarted
@@ -1980,11 +2087,11 @@ function Invoke-IT_AnsiblePlaybook {
         $res = _Get-ServicePlaybook -Action 'restart' -ServiceName 'nginx'
         $c   = if (Test-Path $res.Path) { Get-Content $res.Path -Raw } else { '' }
         if ($res.Ok -and $c -match 'state:\s*restarted') {
-            _IT_Pass $r '14f  Service restart: state=restarted'
+            _IT_Pass $r '24f  Service restart: state=restarted'
         } else {
-            _IT_Fail $r '14f  Service restart: state=restarted' "Ok=$($res.Ok) restarted=$($c -match 'state: restarted')"
+            _IT_Fail $r '24f  Service restart: state=restarted' "Ok=$($res.Ok) restarted=$($c -match 'state: restarted')"
         }
-    } catch { _IT_Fail $r '14f  Service restart' $_.Exception.Message }
+    } catch { _IT_Fail $r '24f  Service restart' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 14g — _Get-ServicePlaybook (enable): enabled=true, no state key
@@ -1993,12 +2100,12 @@ function Invoke-IT_AnsiblePlaybook {
         $res = _Get-ServicePlaybook -Action 'enable' -ServiceName 'nginx'
         $c   = if (Test-Path $res.Path) { Get-Content $res.Path -Raw } else { '' }
         if ($res.Ok -and $c -match 'enabled:\s*true' -and $c -notmatch 'state:') {
-            _IT_Pass $r '14g  Service enable: enabled=true, no state key'
+            _IT_Pass $r '24g  Service enable: enabled=true, no state key'
         } else {
-            _IT_Fail $r '14g  Service enable: enabled=true, no state key' `
+            _IT_Fail $r '24g  Service enable: enabled=true, no state key' `
                 "Ok=$($res.Ok) enabled=$($c -match 'enabled: true') no-state=$($c -notmatch 'state:')"
         }
-    } catch { _IT_Fail $r '14g  Service enable' $_.Exception.Message }
+    } catch { _IT_Fail $r '24g  Service enable' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 14h — _Get-UserPlaybook (create): correct module and state=present
@@ -2007,12 +2114,12 @@ function Invoke-IT_AnsiblePlaybook {
         $res = _Get-UserPlaybook -Action 'create' -UserName 'deploy' -Groups @('docker','sudo')
         $c   = if (Test-Path $res.Path) { Get-Content $res.Path -Raw } else { '' }
         if ($res.Ok -and $c -match 'ansible\.builtin\.user' -and $c -match 'state:\s*present') {
-            _IT_Pass $r '14h  User create: ansible.builtin.user with state=present'
+            _IT_Pass $r '24h  User create: ansible.builtin.user with state=present'
         } else {
-            _IT_Fail $r '14h  User create: ansible.builtin.user with state=present' `
+            _IT_Fail $r '24h  User create: ansible.builtin.user with state=present' `
                 "Ok=$($res.Ok) module=$($c -match 'ansible.builtin.user') state=$($c -match 'state: present')"
         }
-    } catch { _IT_Fail $r '14h  User create' $_.Exception.Message }
+    } catch { _IT_Fail $r '24h  User create' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 14i — User create: groups and shell appear in playbook
@@ -2020,12 +2127,12 @@ function Invoke-IT_AnsiblePlaybook {
     try {
         $c = if (Test-Path (_LatestYml)) { Get-Content (_LatestYml) -Raw } else { '' }
         if ($c -match 'docker' -and $c -match 'sudo' -and $c -match '/bin/bash') {
-            _IT_Pass $r '14i  User create: groups and shell present in playbook'
+            _IT_Pass $r '24i  User create: groups and shell present in playbook'
         } else {
-            _IT_Fail $r '14i  User create: groups and shell present in playbook' `
+            _IT_Fail $r '24i  User create: groups and shell present in playbook' `
                 "docker=$($c -match 'docker') sudo=$($c -match 'sudo') shell=$($c -match '/bin/bash')"
         }
-    } catch { _IT_Fail $r '14i  User groups and shell' $_.Exception.Message }
+    } catch { _IT_Fail $r '24i  User groups and shell' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 14j — _Get-UserPlaybook (remove): state=absent, remove=true
@@ -2034,12 +2141,12 @@ function Invoke-IT_AnsiblePlaybook {
         $res = _Get-UserPlaybook -Action 'remove' -UserName 'deploy'
         $c   = if (Test-Path $res.Path) { Get-Content $res.Path -Raw } else { '' }
         if ($res.Ok -and $c -match 'state:\s*absent' -and $c -match 'remove:\s*true') {
-            _IT_Pass $r '14j  User remove: state=absent and remove=true'
+            _IT_Pass $r '24j  User remove: state=absent and remove=true'
         } else {
-            _IT_Fail $r '14j  User remove: state=absent and remove=true' `
+            _IT_Fail $r '24j  User remove: state=absent and remove=true' `
                 "Ok=$($res.Ok) absent=$($c -match 'state: absent') remove=$($c -match 'remove: true')"
         }
-    } catch { _IT_Fail $r '14j  User remove' $_.Exception.Message }
+    } catch { _IT_Fail $r '24j  User remove' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 14k — _Get-FilePlaybook: correct module, src, dest, mode
@@ -2049,12 +2156,12 @@ function Invoke-IT_AnsiblePlaybook {
         $c   = if (Test-Path $res.Path) { Get-Content $res.Path -Raw } else { '' }
         if ($res.Ok -and $c -match 'ansible\.builtin\.copy' -and
             $c -match 'src:.*app\.conf' -and $c -match "mode:.*0640") {
-            _IT_Pass $r '14k  File copy: ansible.builtin.copy with correct src, dest, mode'
+            _IT_Pass $r '24k  File copy: ansible.builtin.copy with correct src, dest, mode'
         } else {
-            _IT_Fail $r '14k  File copy: ansible.builtin.copy with correct src, dest, mode' `
+            _IT_Fail $r '24k  File copy: ansible.builtin.copy with correct src, dest, mode' `
                 "Ok=$($res.Ok) module=$($c -match 'ansible.builtin.copy') src=$($c -match 'app.conf') mode=$($c -match '0640')"
         }
-    } catch { _IT_Fail $r '14k  File copy' $_.Exception.Message }
+    } catch { _IT_Fail $r '24k  File copy' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 14l — _Get-DockerPlaybook (start): correct module and state=started
@@ -2063,12 +2170,12 @@ function Invoke-IT_AnsiblePlaybook {
         $res = _Get-DockerPlaybook -Action 'start' -ContainerName 'web-1' -Image 'nginx:latest'
         $c   = if (Test-Path $res.Path) { Get-Content $res.Path -Raw } else { '' }
         if ($res.Ok -and $c -match 'community\.docker\.docker_container' -and $c -match 'state:\s*started') {
-            _IT_Pass $r '14l  Container start: community.docker.docker_container with state=started'
+            _IT_Pass $r '24l  Container start: community.docker.docker_container with state=started'
         } else {
-            _IT_Fail $r '14l  Container start: community.docker.docker_container with state=started' `
+            _IT_Fail $r '24l  Container start: community.docker.docker_container with state=started' `
                 "Ok=$($res.Ok) module=$($c -match 'community.docker.docker_container') state=$($c -match 'state: started')"
         }
-    } catch { _IT_Fail $r '14l  Container start' $_.Exception.Message }
+    } catch { _IT_Fail $r '24l  Container start' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 14m — _Get-DockerPlaybook (remove): state=absent
@@ -2077,11 +2184,11 @@ function Invoke-IT_AnsiblePlaybook {
         $res = _Get-DockerPlaybook -Action 'remove' -ContainerName 'web-1'
         $c   = if (Test-Path $res.Path) { Get-Content $res.Path -Raw } else { '' }
         if ($res.Ok -and $c -match 'state:\s*absent') {
-            _IT_Pass $r '14m  Container remove: state=absent'
+            _IT_Pass $r '24m  Container remove: state=absent'
         } else {
-            _IT_Fail $r '14m  Container remove: state=absent' "Ok=$($res.Ok) absent=$($c -match 'state: absent')"
+            _IT_Fail $r '24m  Container remove: state=absent' "Ok=$($res.Ok) absent=$($c -match 'state: absent')"
         }
-    } catch { _IT_Fail $r '14m  Container remove' $_.Exception.Message }
+    } catch { _IT_Fail $r '24m  Container remove' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 14n — _Get-DockerPlaybook (recreate): recreate=true and pull=true
@@ -2090,12 +2197,12 @@ function Invoke-IT_AnsiblePlaybook {
         $res = _Get-DockerPlaybook -Action 'recreate' -ContainerName 'web-1' -Image 'nginx:latest'
         $c   = if (Test-Path $res.Path) { Get-Content $res.Path -Raw } else { '' }
         if ($res.Ok -and $c -match 'recreate:\s*true' -and $c -match 'pull:\s*true') {
-            _IT_Pass $r '14n  Container recreate: recreate=true and pull=true'
+            _IT_Pass $r '24n  Container recreate: recreate=true and pull=true'
         } else {
-            _IT_Fail $r '14n  Container recreate: recreate=true and pull=true' `
+            _IT_Fail $r '24n  Container recreate: recreate=true and pull=true' `
                 "Ok=$($res.Ok) recreate=$($c -match 'recreate: true') pull=$($c -match 'pull: true')"
         }
-    } catch { _IT_Fail $r '14n  Container recreate' $_.Exception.Message }
+    } catch { _IT_Fail $r '24n  Container recreate' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 14o — Return object has Ok, Path, Message properties
@@ -2104,11 +2211,11 @@ function Invoke-IT_AnsiblePlaybook {
         $res   = _Get-PackagePlaybook -Action 'install' -PackageName 'git'
         $props = $res.PSObject.Properties.Name
         if (($props -contains 'Ok') -and ($props -contains 'Path') -and ($props -contains 'Message')) {
-            _IT_Pass $r '14o  Return object has Ok, Path, Message'
+            _IT_Pass $r '24o  Return object has Ok, Path, Message'
         } else {
-            _IT_Fail $r '14o  Return object has Ok, Path, Message' "Properties: $($props -join ', ')"
+            _IT_Fail $r '24o  Return object has Ok, Path, Message' "Properties: $($props -join ', ')"
         }
-    } catch { _IT_Fail $r '14o  Return object shape' $_.Exception.Message }
+    } catch { _IT_Fail $r '24o  Return object shape' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # Cleanup
@@ -2153,12 +2260,12 @@ function Invoke-IT_AnsibleBatch {
             -Action 'install' -PackageSpec 'curl' `
             -ReadOnly $true
         if ($results.Count -eq 1 -and $results[0].Status -eq 'Skipped') {
-            _IT_Pass $r '15a  Read-only mode: single target returns Skipped'
+            _IT_Pass $r '25a  Read-only mode: single target returns Skipped'
         } else {
-            _IT_Fail $r '15a  Read-only mode: single target returns Skipped' `
+            _IT_Fail $r '25a  Read-only mode: single target returns Skipped' `
                 "Count=$($results.Count) Status=$($results[0].Status)"
         }
-    } catch { _IT_Fail $r '15a  Read-only mode' $_.Exception.Message }
+    } catch { _IT_Fail $r '25a  Read-only mode' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 15b — Read-only mode: Note says 'Read-only mode'
@@ -2170,11 +2277,11 @@ function Invoke-IT_AnsibleBatch {
             -PlaybookBuilder { _Get-PackagePlaybook -Action 'install' -PackageName 'curl' } `
             -ReadOnly $true
         if ($results[0].Note -eq 'Read-only mode') {
-            _IT_Pass $r '15b  Read-only mode: Note = ''Read-only mode'''
+            _IT_Pass $r '25b  Read-only mode: Note = ''Read-only mode'''
         } else {
-            _IT_Fail $r '15b  Read-only mode: Note = ''Read-only mode''' "Note=$($results[0].Note)"
+            _IT_Fail $r '25b  Read-only mode: Note = ''Read-only mode''' "Note=$($results[0].Note)"
         }
-    } catch { _IT_Fail $r '15b  Read-only note' $_.Exception.Message }
+    } catch { _IT_Fail $r '25b  Read-only note' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 15c — Read-only mode: PackageManager = 'ansible'
@@ -2186,12 +2293,12 @@ function Invoke-IT_AnsibleBatch {
             -PlaybookBuilder { _Get-PackagePlaybook -Action 'install' -PackageName 'curl' } `
             -ReadOnly $true
         if ($results[0].PackageManager -eq 'ansible') {
-            _IT_Pass $r '15c  Read-only mode: PackageManager = ''ansible'''
+            _IT_Pass $r '25c  Read-only mode: PackageManager = ''ansible'''
         } else {
-            _IT_Fail $r '15c  Read-only mode: PackageManager = ''ansible''' `
+            _IT_Fail $r '25c  Read-only mode: PackageManager = ''ansible''' `
                 "PackageManager=$($results[0].PackageManager)"
         }
-    } catch { _IT_Fail $r '15c  PackageManager field' $_.Exception.Message }
+    } catch { _IT_Fail $r '25c  PackageManager field' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 15d — Read-only mode: multiple targets all return Skipped
@@ -2204,12 +2311,12 @@ function Invoke-IT_AnsibleBatch {
             -ReadOnly $true
         $allSkipped = ($results | Where-Object { $_.Status -ne 'Skipped' }).Count -eq 0
         if ($results.Count -eq 3 -and $allSkipped) {
-            _IT_Pass $r '15d  Read-only mode: all 3 targets return Skipped'
+            _IT_Pass $r '25d  Read-only mode: all 3 targets return Skipped'
         } else {
-            _IT_Fail $r '15d  Read-only mode: all 3 targets return Skipped' `
+            _IT_Fail $r '25d  Read-only mode: all 3 targets return Skipped' `
                 "Count=$($results.Count) NotSkipped=$(($results | Where-Object { $_.Status -ne 'Skipped' }).Count)"
         }
-    } catch { _IT_Fail $r '15d  Read-only multi-target' $_.Exception.Message }
+    } catch { _IT_Fail $r '25d  Read-only multi-target' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 15e — BatchResult shape: has all required fields
@@ -2225,11 +2332,11 @@ function Invoke-IT_AnsibleBatch {
         $required = @('TargetName','Action','PackageSpec','PackageManager','Status','DurationSec','TimedOut','Note')
         $missing  = $required | Where-Object { $props -notcontains $_ }
         if ($missing.Count -eq 0) {
-            _IT_Pass $r '15e  BatchResult has all required fields'
+            _IT_Pass $r '25e  BatchResult has all required fields'
         } else {
-            _IT_Fail $r '15e  BatchResult has all required fields' "Missing: $($missing -join ', ')"
+            _IT_Fail $r '25e  BatchResult has all required fields' "Missing: $($missing -join ', ')"
         }
-    } catch { _IT_Fail $r '15e  BatchResult shape' $_.Exception.Message }
+    } catch { _IT_Fail $r '25e  BatchResult shape' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 15f — BatchResult field values: Action and PackageSpec preserved
@@ -2242,12 +2349,12 @@ function Invoke-IT_AnsibleBatch {
             -Action 'install' -PackageSpec 'curl' -ReadOnly $true
         $r0 = $results[0]
         if ($r0.Action -eq 'install' -and $r0.PackageSpec -eq 'curl' -and $r0.TargetName -eq 'lin-1') {
-            _IT_Pass $r '15f  BatchResult: Action, PackageSpec, TargetName correct'
+            _IT_Pass $r '25f  BatchResult: Action, PackageSpec, TargetName correct'
         } else {
-            _IT_Fail $r '15f  BatchResult: Action, PackageSpec, TargetName correct' `
+            _IT_Fail $r '25f  BatchResult: Action, PackageSpec, TargetName correct' `
                 "Action=$($r0.Action) PackageSpec=$($r0.PackageSpec) TargetName=$($r0.TargetName)"
         }
-    } catch { _IT_Fail $r '15f  BatchResult field values' $_.Exception.Message }
+    } catch { _IT_Fail $r '25f  BatchResult field values' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 15g — Parser: SUCCESS line → Status='OK'
@@ -2258,11 +2365,11 @@ function Invoke-IT_AnsibleBatch {
         $parsed   = _Parse-AnsibleOutput -RawOutput $fakeOut -ExitCode 0 `
                         -Targets $targets -Action 'install' -PackageSpec 'curl' -Duration 1.5
         if ($parsed[0].Status -eq 'OK') {
-            _IT_Pass $r '15g  Parser: SUCCESS line → Status=OK'
+            _IT_Pass $r '25g  Parser: SUCCESS line → Status=OK'
         } else {
-            _IT_Fail $r '15g  Parser: SUCCESS line → Status=OK' "Status=$($parsed[0].Status)"
+            _IT_Fail $r '25g  Parser: SUCCESS line → Status=OK' "Status=$($parsed[0].Status)"
         }
-    } catch { _IT_Fail $r '15g  Parser SUCCESS' $_.Exception.Message }
+    } catch { _IT_Fail $r '25g  Parser SUCCESS' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 15h — Parser: CHANGED line → Status='OK'
@@ -2273,11 +2380,11 @@ function Invoke-IT_AnsibleBatch {
         $parsed  = _Parse-AnsibleOutput -RawOutput $fakeOut -ExitCode 0 `
                        -Targets $targets -Action 'install' -PackageSpec 'curl' -Duration 1.0
         if ($parsed[0].Status -eq 'OK') {
-            _IT_Pass $r '15h  Parser: CHANGED line → Status=OK'
+            _IT_Pass $r '25h  Parser: CHANGED line → Status=OK'
         } else {
-            _IT_Fail $r '15h  Parser: CHANGED line → Status=OK' "Status=$($parsed[0].Status)"
+            _IT_Fail $r '25h  Parser: CHANGED line → Status=OK' "Status=$($parsed[0].Status)"
         }
-    } catch { _IT_Fail $r '15h  Parser CHANGED' $_.Exception.Message }
+    } catch { _IT_Fail $r '25h  Parser CHANGED' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 15i — Parser: FAILED line → Status='Failed', msg in Note
@@ -2288,12 +2395,12 @@ function Invoke-IT_AnsibleBatch {
         $parsed  = _Parse-AnsibleOutput -RawOutput $fakeOut -ExitCode 2 `
                        -Targets $targets -Action 'install' -PackageSpec 'curl' -Duration 2.0
         if ($parsed[0].Status -eq 'Failed' -and $parsed[0].Note -match 'curl') {
-            _IT_Pass $r '15i  Parser: FAILED! → Status=Failed, msg in Note'
+            _IT_Pass $r '25i  Parser: FAILED! → Status=Failed, msg in Note'
         } else {
-            _IT_Fail $r '15i  Parser: FAILED! → Status=Failed, msg in Note' `
+            _IT_Fail $r '25i  Parser: FAILED! → Status=Failed, msg in Note' `
                 "Status=$($parsed[0].Status) Note=$($parsed[0].Note)"
         }
-    } catch { _IT_Fail $r '15i  Parser FAILED' $_.Exception.Message }
+    } catch { _IT_Fail $r '25i  Parser FAILED' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 15j — Parser: UNREACHABLE line → Status='Unreachable'
@@ -2304,11 +2411,11 @@ function Invoke-IT_AnsibleBatch {
         $parsed  = _Parse-AnsibleOutput -RawOutput $fakeOut -ExitCode 4 `
                        -Targets $targets -Action 'install' -PackageSpec 'curl' -Duration 0.5
         if ($parsed[0].Status -eq 'Unreachable') {
-            _IT_Pass $r '15j  Parser: UNREACHABLE! → Status=Unreachable'
+            _IT_Pass $r '25j  Parser: UNREACHABLE! → Status=Unreachable'
         } else {
-            _IT_Fail $r '15j  Parser: UNREACHABLE! → Status=Unreachable' "Status=$($parsed[0].Status)"
+            _IT_Fail $r '25j  Parser: UNREACHABLE! → Status=Unreachable' "Status=$($parsed[0].Status)"
         }
-    } catch { _IT_Fail $r '15j  Parser UNREACHABLE' $_.Exception.Message }
+    } catch { _IT_Fail $r '25j  Parser UNREACHABLE' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 15k — Parser: exit code 8 → all targets Failed with config error note
@@ -2320,12 +2427,12 @@ function Invoke-IT_AnsibleBatch {
         $allFailed = ($parsed | Where-Object { $_.Status -ne 'Failed' }).Count -eq 0
         $hasNote   = $parsed[0].Note -match 'config|parse'
         if ($allFailed -and $hasNote) {
-            _IT_Pass $r '15k  Parser: exit code 8 → all Failed with config error note'
+            _IT_Pass $r '25k  Parser: exit code 8 → all Failed with config error note'
         } else {
-            _IT_Fail $r '15k  Parser: exit code 8 → all Failed with config error note' `
+            _IT_Fail $r '25k  Parser: exit code 8 → all Failed with config error note' `
                 "AllFailed=$allFailed Note=$($parsed[0].Note)"
         }
-    } catch { _IT_Fail $r '15k  Parser exit 8' $_.Exception.Message }
+    } catch { _IT_Fail $r '25k  Parser exit 8' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 15l — Parser: mixed output — one OK, one Failed
@@ -2341,12 +2448,12 @@ function Invoke-IT_AnsibleBatch {
         $lin1 = $parsed | Where-Object { $_.TargetName -eq 'lin-1' }
         $lin2 = $parsed | Where-Object { $_.TargetName -eq 'lin-2' }
         if ($lin1.Status -eq 'OK' -and $lin2.Status -eq 'Failed') {
-            _IT_Pass $r '15l  Parser: mixed output — lin-1=OK, lin-2=Failed'
+            _IT_Pass $r '25l  Parser: mixed output — lin-1=OK, lin-2=Failed'
         } else {
-            _IT_Fail $r '15l  Parser: mixed output — lin-1=OK, lin-2=Failed' `
+            _IT_Fail $r '25l  Parser: mixed output — lin-1=OK, lin-2=Failed' `
                 "lin-1=$($lin1.Status) lin-2=$($lin2.Status)"
         }
-    } catch { _IT_Fail $r '15l  Parser mixed output' $_.Exception.Message }
+    } catch { _IT_Fail $r '25l  Parser mixed output' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 15m — OnProgress callback is invoked in read-only mode
@@ -2360,11 +2467,11 @@ function Invoke-IT_AnsibleBatch {
             -PlaybookBuilder { _Get-PackagePlaybook -Action 'install' -PackageName 'curl' } `
             -OnProgress $cb -ReadOnly $true
         if ($script:callbackFired) {
-            _IT_Pass $r '15m  OnProgress callback invoked in read-only mode'
+            _IT_Pass $r '25m  OnProgress callback invoked in read-only mode'
         } else {
-            _IT_Fail $r '15m  OnProgress callback invoked in read-only mode' 'Callback was not called'
+            _IT_Fail $r '25m  OnProgress callback invoked in read-only mode' 'Callback was not called'
         }
-    } catch { _IT_Fail $r '15m  OnProgress callback' $_.Exception.Message }
+    } catch { _IT_Fail $r '25m  OnProgress callback' $_.Exception.Message }
 
     return $r
 }
@@ -2406,12 +2513,12 @@ function Invoke-IT_FleetRouting {
         $results = Invoke-FleetAction -Action 'install' -PackageSpec 'curl' -Targets $targets
         $r0 = $results | Where-Object { $_.TargetName -eq 'lin-1' }
         if ($r0 -and $r0.Status -match 'ansible') {
-            _IT_Pass $r '16a  Linux physical target routes to Ansible bucket'
+            _IT_Pass $r '26a  Linux physical target routes to Ansible bucket'
         } else {
-            _IT_Fail $r '16a  Linux physical target routes to Ansible bucket' `
+            _IT_Fail $r '26a  Linux physical target routes to Ansible bucket' `
                 "Status=$($r0.Status)"
         }
-    } catch { _IT_Fail $r '16a  Linux → Ansible routing' $_.Exception.Message }
+    } catch { _IT_Fail $r '26a  Linux → Ansible routing' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 16b — Linux VM target routes to Ansible bucket
@@ -2422,11 +2529,11 @@ function Invoke-IT_FleetRouting {
         $results = Invoke-FleetAction -Action 'install' -PackageSpec 'curl' -Targets $targets
         $r0 = $results | Where-Object { $_.TargetName -eq 'lin-vm-1' }
         if ($r0 -and $r0.Status -match 'ansible') {
-            _IT_Pass $r '16b  Linux VM target routes to Ansible bucket'
+            _IT_Pass $r '26b  Linux VM target routes to Ansible bucket'
         } else {
-            _IT_Fail $r '16b  Linux VM target routes to Ansible bucket' "Status=$($r0.Status)"
+            _IT_Fail $r '26b  Linux VM target routes to Ansible bucket' "Status=$($r0.Status)"
         }
-    } catch { _IT_Fail $r '16b  Linux VM → Ansible routing' $_.Exception.Message }
+    } catch { _IT_Fail $r '26b  Linux VM → Ansible routing' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 16c — Linux container target does NOT route to Ansible bucket;
@@ -2438,12 +2545,12 @@ function Invoke-IT_FleetRouting {
         $results = Invoke-FleetAction -Action 'install' -PackageSpec 'curl' -Targets $targets
         $r0 = $results | Where-Object { $_.TargetName -eq 'cntr-1' }
         if ($r0 -and $r0.Status -eq 'Unsupported' -and $r0.Status -notmatch 'ansible') {
-            _IT_Pass $r '16c  Linux container: Unsupported (not routed to Ansible)'
+            _IT_Pass $r '26c  Linux container: Unsupported (not routed to Ansible)'
         } else {
-            _IT_Fail $r '16c  Linux container: Unsupported (not routed to Ansible)' `
+            _IT_Fail $r '26c  Linux container: Unsupported (not routed to Ansible)' `
                 "Status=$($r0.Status)"
         }
-    } catch { _IT_Fail $r '16c  Container not Ansible' $_.Exception.Message }
+    } catch { _IT_Fail $r '26c  Container not Ansible' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 16d — Windows target does NOT route to Ansible bucket
@@ -2454,12 +2561,12 @@ function Invoke-IT_FleetRouting {
         $results = Invoke-FleetAction -Action 'install' -PackageSpec 'curl' -Targets $targets
         $r0 = $results | Where-Object { $_.TargetName -eq 'win-1' }
         if ($r0 -and $r0.Status -notmatch 'ansible') {
-            _IT_Pass $r '16d  Windows target does NOT route to Ansible bucket'
+            _IT_Pass $r '26d  Windows target does NOT route to Ansible bucket'
         } else {
-            _IT_Fail $r '16d  Windows target does NOT route to Ansible bucket' `
+            _IT_Fail $r '26d  Windows target does NOT route to Ansible bucket' `
                 "Status=$($r0.Status)"
         }
-    } catch { _IT_Fail $r '16d  Windows not Ansible' $_.Exception.Message }
+    } catch { _IT_Fail $r '26d  Windows not Ansible' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 16e — Windows tcpkg target routes to tcpkg SSH bucket
@@ -2470,12 +2577,12 @@ function Invoke-IT_FleetRouting {
         $results = Invoke-FleetAction -Action 'install' -PackageSpec 'curl' -Targets $targets
         $r0 = $results | Where-Object { $_.TargetName -eq 'win-1' }
         if ($r0 -and $r0.Status -match 'tcpkg') {
-            _IT_Pass $r '16e  Windows tcpkg target routes to tcpkg SSH bucket'
+            _IT_Pass $r '26e  Windows tcpkg target routes to tcpkg SSH bucket'
         } else {
-            _IT_Fail $r '16e  Windows tcpkg target routes to tcpkg SSH bucket' `
+            _IT_Fail $r '26e  Windows tcpkg target routes to tcpkg SSH bucket' `
                 "Status=$($r0.Status)"
         }
-    } catch { _IT_Fail $r '16e  Windows → tcpkg routing' $_.Exception.Message }
+    } catch { _IT_Fail $r '26e  Windows → tcpkg routing' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 16f — Windows winget target routes to WinGet SSH bucket
@@ -2486,12 +2593,12 @@ function Invoke-IT_FleetRouting {
         $results = Invoke-FleetAction -Action 'install' -PackageSpec 'curl' -Targets $targets
         $r0 = $results | Where-Object { $_.TargetName -eq 'win-wg' }
         if ($r0 -and $r0.Status -match 'winget') {
-            _IT_Pass $r '16f  Windows winget target routes to WinGet SSH bucket'
+            _IT_Pass $r '26f  Windows winget target routes to WinGet SSH bucket'
         } else {
-            _IT_Fail $r '16f  Windows winget target routes to WinGet SSH bucket' `
+            _IT_Fail $r '26f  Windows winget target routes to WinGet SSH bucket' `
                 "Status=$($r0.Status)"
         }
-    } catch { _IT_Fail $r '16f  Windows → WinGet routing' $_.Exception.Message }
+    } catch { _IT_Fail $r '26f  Windows → WinGet routing' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 16g — Windows target with InternetAccess=False routes to push bucket
@@ -2502,11 +2609,11 @@ function Invoke-IT_FleetRouting {
         $results = Invoke-FleetAction -Action 'install' -PackageSpec 'curl' -Targets $targets
         $r0 = $results | Where-Object { $_.TargetName -eq 'win-push' }
         if ($r0 -and $r0.Status -match 'push') {
-            _IT_Pass $r '16g  Windows IA=False routes to push bucket'
+            _IT_Pass $r '26g  Windows IA=False routes to push bucket'
         } else {
-            _IT_Fail $r '16g  Windows IA=False routes to push bucket' "Status=$($r0.Status)"
+            _IT_Fail $r '26g  Windows IA=False routes to push bucket' "Status=$($r0.Status)"
         }
-    } catch { _IT_Fail $r '16g  Windows → push routing' $_.Exception.Message }
+    } catch { _IT_Fail $r '26g  Windows → push routing' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 16h — Mixed fleet: Linux→Ansible, Windows→tcpkg, in one call
@@ -2521,12 +2628,12 @@ function Invoke-IT_FleetRouting {
         $lin = $results | Where-Object { $_.TargetName -eq 'lin-1' }
         $win = $results | Where-Object { $_.TargetName -eq 'win-1' }
         if ($lin.Status -match 'ansible' -and $win.Status -match 'tcpkg') {
-            _IT_Pass $r '16h  Mixed fleet: lin-1→Ansible, win-1→tcpkg'
+            _IT_Pass $r '26h  Mixed fleet: lin-1→Ansible, win-1→tcpkg'
         } else {
-            _IT_Fail $r '16h  Mixed fleet: lin-1→Ansible, win-1→tcpkg' `
+            _IT_Fail $r '26h  Mixed fleet: lin-1→Ansible, win-1→tcpkg' `
                 "lin=$($lin.Status) win=$($win.Status)"
         }
-    } catch { _IT_Fail $r '16h  Mixed fleet routing' $_.Exception.Message }
+    } catch { _IT_Fail $r '26h  Mixed fleet routing' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 16i — Ansible result has PackageManager = 'ansible'
@@ -2537,12 +2644,12 @@ function Invoke-IT_FleetRouting {
         $results = Invoke-FleetAction -Action 'install' -PackageSpec 'curl' -Targets $targets
         $r0 = $results | Where-Object { $_.TargetName -eq 'lin-1' }
         if ($r0 -and $r0.PackageManager -eq 'ansible') {
-            _IT_Pass $r '16i  Ansible bucket result has PackageManager=''ansible'''
+            _IT_Pass $r '26i  Ansible bucket result has PackageManager=''ansible'''
         } else {
-            _IT_Fail $r '16i  Ansible bucket result has PackageManager=''ansible''' `
+            _IT_Fail $r '26i  Ansible bucket result has PackageManager=''ansible''' `
                 "PackageManager=$($r0.PackageManager)"
         }
-    } catch { _IT_Fail $r '16i  Ansible PackageManager field' $_.Exception.Message }
+    } catch { _IT_Fail $r '26i  Ansible PackageManager field' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 16j — All targets return a result (no silent drops)
@@ -2558,12 +2665,12 @@ function Invoke-IT_FleetRouting {
         )
         $results = Invoke-FleetAction -Action 'install' -PackageSpec 'curl' -Targets $targets
         if ($results.Count -eq 5) {
-            _IT_Pass $r '16j  All 5 targets return a result (no silent drops)'
+            _IT_Pass $r '26j  All 5 targets return a result (no silent drops)'
         } else {
-            _IT_Fail $r '16j  All 5 targets return a result (no silent drops)' `
+            _IT_Fail $r '26j  All 5 targets return a result (no silent drops)' `
                 "Got $($results.Count) results, expected 5"
         }
-    } catch { _IT_Fail $r '16j  No silent drops' $_.Exception.Message }
+    } catch { _IT_Fail $r '26j  No silent drops' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # Restore script-scope state
@@ -2601,12 +2708,12 @@ function Invoke-IT_AnsibleVault {
         $null = Remove-FltStoredPassword -CredentialName $credName
         $result = _Get-VaultPasswordFile
         if ($null -eq $result) {
-            _IT_Pass $r '17a  _Get-VaultPasswordFile: returns $null when no vault password stored'
+            _IT_Pass $r '27a  _Get-VaultPasswordFile: returns $null when no vault password stored'
         } else {
-            _IT_Fail $r '17a  _Get-VaultPasswordFile: returns $null when no vault password stored' `
+            _IT_Fail $r '27a  _Get-VaultPasswordFile: returns $null when no vault password stored' `
                 "Got: $result"
         }
-    } catch { _IT_Fail $r '17a  No vault password → null' $_.Exception.Message }
+    } catch { _IT_Fail $r '27a  No vault password → null' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 17b — _Get-VaultPasswordFile writes temp file when password stored
@@ -2616,12 +2723,12 @@ function Invoke-IT_AnsibleVault {
         $null = Set-FltStoredPassword -CredentialName $credName -PlainPassword $testPw
         $tempFile = _Get-VaultPasswordFile
         if ($tempFile -and (Test-Path $tempFile)) {
-            _IT_Pass $r '17b  _Get-VaultPasswordFile: temp file created when password stored'
+            _IT_Pass $r '27b  _Get-VaultPasswordFile: temp file created when password stored'
         } else {
-            _IT_Fail $r '17b  _Get-VaultPasswordFile: temp file created when password stored' `
+            _IT_Fail $r '27b  _Get-VaultPasswordFile: temp file created when password stored' `
                 "Path=$tempFile Exists=$(if ($tempFile) { Test-Path $tempFile } else { 'n/a' })"
         }
-    } catch { _IT_Fail $r '17b  Vault password → temp file' $_.Exception.Message }
+    } catch { _IT_Fail $r '27b  Vault password → temp file' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 17c — Temp file contains exactly the vault password
@@ -2630,15 +2737,15 @@ function Invoke-IT_AnsibleVault {
         if ($tempFile -and (Test-Path $tempFile)) {
             $content = [System.IO.File]::ReadAllText($tempFile, [System.Text.Encoding]::UTF8)
             if ($content -eq $testPw) {
-                _IT_Pass $r '17c  Temp file content matches stored vault password'
+                _IT_Pass $r '27c  Temp file content matches stored vault password'
             } else {
-                _IT_Fail $r '17c  Temp file content matches stored vault password' `
+                _IT_Fail $r '27c  Temp file content matches stored vault password' `
                     "Expected='$testPw' Got='$content'"
             }
         } else {
-            _IT_Fail $r '17c  Temp file content matches stored vault password' 'Temp file not available (17b failed)'
+            _IT_Fail $r '27c  Temp file content matches stored vault password' 'Temp file not available (17b failed)'
         }
-    } catch { _IT_Fail $r '17c  Temp file content' $_.Exception.Message }
+    } catch { _IT_Fail $r '27c  Temp file content' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 17d — Temp file has .tmp extension (covered by *.tmp in .gitignore)
@@ -2646,14 +2753,14 @@ function Invoke-IT_AnsibleVault {
     try {
         if ($tempFile) {
             if ([System.IO.Path]::GetExtension($tempFile) -eq '.tmp') {
-                _IT_Pass $r '17d  Temp file has .tmp extension'
+                _IT_Pass $r '27d  Temp file has .tmp extension'
             } else {
-                _IT_Fail $r '17d  Temp file has .tmp extension' "Extension=$([System.IO.Path]::GetExtension($tempFile))"
+                _IT_Fail $r '27d  Temp file has .tmp extension' "Extension=$([System.IO.Path]::GetExtension($tempFile))"
             }
         } else {
-            _IT_Fail $r '17d  Temp file has .tmp extension' 'Temp file not available (17b failed)'
+            _IT_Fail $r '27d  Temp file has .tmp extension' 'Temp file not available (17b failed)'
         }
-    } catch { _IT_Fail $r '17d  Temp file extension' $_.Exception.Message }
+    } catch { _IT_Fail $r '27d  Temp file extension' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 17e — Temp file is in the system temp directory
@@ -2663,15 +2770,15 @@ function Invoke-IT_AnsibleVault {
             $expectedDir = [System.IO.Path]::GetTempPath().TrimEnd([System.IO.Path]::DirectorySeparatorChar)
             $actualDir   = [System.IO.Path]::GetDirectoryName($tempFile)
             if ($actualDir -eq $expectedDir) {
-                _IT_Pass $r '17e  Temp file is in system temp directory'
+                _IT_Pass $r '27e  Temp file is in system temp directory'
             } else {
-                _IT_Fail $r '17e  Temp file is in system temp directory' `
+                _IT_Fail $r '27e  Temp file is in system temp directory' `
                     "Expected='$expectedDir' Got='$actualDir'"
             }
         } else {
-            _IT_Fail $r '17e  Temp file in system temp dir' 'Temp file not available (17b failed)'
+            _IT_Fail $r '27e  Temp file in system temp dir' 'Temp file not available (17b failed)'
         }
-    } catch { _IT_Fail $r '17e  Temp file location' $_.Exception.Message }
+    } catch { _IT_Fail $r '27e  Temp file location' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 17f — Caller can delete the temp file (no locks)
@@ -2680,15 +2787,15 @@ function Invoke-IT_AnsibleVault {
         if ($tempFile -and (Test-Path $tempFile)) {
             Remove-Item $tempFile -Force -ErrorAction Stop
             if (-not (Test-Path $tempFile)) {
-                _IT_Pass $r '17f  Temp file can be deleted by caller (no locks)'
+                _IT_Pass $r '27f  Temp file can be deleted by caller (no locks)'
             } else {
-                _IT_Fail $r '17f  Temp file can be deleted by caller (no locks)' 'File still exists after Remove-Item'
+                _IT_Fail $r '27f  Temp file can be deleted by caller (no locks)' 'File still exists after Remove-Item'
             }
             $tempFile = $null
         } else {
-            _IT_Fail $r '17f  Temp file can be deleted by caller (no locks)' 'Temp file not available (17b failed)'
+            _IT_Fail $r '27f  Temp file can be deleted by caller (no locks)' 'Temp file not available (17b failed)'
         }
-    } catch { _IT_Fail $r '17f  Temp file deletable' $_.Exception.Message }
+    } catch { _IT_Fail $r '27f  Temp file deletable' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # 17g — Second call to _Get-VaultPasswordFile creates a new temp file
@@ -2698,11 +2805,11 @@ function Invoke-IT_AnsibleVault {
     try {
         $tempFile2 = _Get-VaultPasswordFile
         if ($tempFile2 -and (Test-Path $tempFile2)) {
-            _IT_Pass $r '17g  Second call creates a fresh temp file'
+            _IT_Pass $r '27g  Second call creates a fresh temp file'
         } else {
-            _IT_Fail $r '17g  Second call creates a fresh temp file' "Path=$tempFile2"
+            _IT_Fail $r '27g  Second call creates a fresh temp file' "Path=$tempFile2"
         }
-    } catch { _IT_Fail $r '17g  Second call idempotent' $_.Exception.Message }
+    } catch { _IT_Fail $r '27g  Second call idempotent' $_.Exception.Message }
     finally {
         if ($tempFile2 -and (Test-Path $tempFile2)) {
             Remove-Item $tempFile2 -Force -ErrorAction SilentlyContinue
@@ -2731,12 +2838,12 @@ function Invoke-IT_AnsibleVault {
         $null = Remove-FltStoredPassword -CredentialName $credName
         $fn   = Get-Command 'Invoke-FltVaultSetup' -ErrorAction SilentlyContinue
         if ($fn -and $fn.CommandType -in @('Function','ExternalScript')) {
-            _IT_Pass $r '17h  Invoke-FltVaultSetup is defined and callable'
+            _IT_Pass $r '27h  Invoke-FltVaultSetup is defined and callable'
         } else {
-            _IT_Fail $r '17h  Invoke-FltVaultSetup is defined and callable' `
+            _IT_Fail $r '27h  Invoke-FltVaultSetup is defined and callable' `
                 "CommandType=$($fn.CommandType)"
         }
-    } catch { _IT_Fail $r '17h  Invoke-FltVaultSetup defined' $_.Exception.Message }
+    } catch { _IT_Fail $r '27h  Invoke-FltVaultSetup defined' $_.Exception.Message }
 
     # ------------------------------------------------------------------
     # Cleanup — remove test credential entry

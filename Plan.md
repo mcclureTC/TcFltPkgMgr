@@ -509,8 +509,8 @@ remote management, and hosting the Ansible operator container.
 - [x] `Remove-FltAnsibleInventory` — deletes hosts.ini after each run;
       silent no-op when file absent
 - [x] Phase 5.3–5.6 function stubs present (`throw 'Not implemented — Phase X.X'`)
-- [x] Suite 13 (Ansible inventory builder) added to `IntegrationTests.ps1` —
-      13 checks (13a–13m), fully offline, no Ansible required:
+- [x] Suite 23 (Ansible inventory builder) added to `IntegrationTests.ps1` —
+      13 checks (23a–23m), fully offline, no Ansible required:
       13a empty-fleet guard · 13b file created · 13c ansible_host/port ·
       13d hostname key · 13e TargetCount · 13f vm group · 13g linux:children ·
       13h container vars · 13i docker host resolution · 13j remove ·
@@ -538,7 +538,7 @@ remote management, and hosting the Ansible operator container.
       `recreate` adds `recreate:true`+`pull:true`; `restart` adds `force_kill:true`;
       default host group is `containers`
 - [x] All playbooks: `become:true`, `gather_facts:false`, FQCN module names
-- [x] Suite 14 (Ansible playbook builder) — 15 checks (14a–14o), fully offline;
+- [x] Suite 24 (Ansible playbook builder) — 15 checks (24a–24o), fully offline;
       local `_Get-FltAnsiblePlaybookDir` override redirects writes to temp dir:
       14a–14d package builder · 14e–14g service builder · 14h–14j user builder ·
       14k file builder · 14l–14n container builder · 14o return shape
@@ -558,7 +558,7 @@ remote management, and hosting the Ansible operator container.
 - [x] Exit code mapping: `0`=OK, `2`=failures, `4`=unreachable, `6`=both, `8`=config error
 - [x] `Write-FltBatchEntry` with `PackageManager = 'ansible'`
 - [x] `ansible.forks` already in `settings.default.json` (default 10) — no change needed
-- [x] Suite 15 (Ansible batch executor) — 13 checks (15a–15m), fully offline:
+- [x] Suite 25 (Ansible batch executor) — 13 checks (25a–25m), fully offline:
       15a–15d read-only mode · 15e–15f BatchResult shape ·
       15g–15k parser (SUCCESS/CHANGED/FAILED/UNREACHABLE/exit-8) ·
       15l mixed output · 15m OnProgress callback
@@ -580,7 +580,7 @@ remote management, and hosting the Ansible operator container.
 - [x] Unrouted-targets catch: targets landing in no bucket receive
       `Status='Unsupported'`, `PackageManager='none'` — never silently dropped
 - [x] Merge results into `$allResults`
-- [x] Suite 16 (Fleet executor routing) — 10 checks (16a–16j), fully offline
+- [x] Suite 26 (Fleet executor routing) — 10 checks (26a–26j), fully offline
       via read-only mode:
       16a–16b Linux physical/VM→Ansible · 16c container→Unsupported ·
       16d Windows not Ansible · 16e tcpkg · 16f WinGet · 16g push ·
@@ -605,7 +605,7 @@ remote management, and hosting the Ansible operator container.
 - [x] Vault files (`ansible/group_vars/`, `ansible/host_vars/`) are NOT
       gitignored — AES-256 encrypted files are safe to commit
 - [x] `*.tmp` already in `.gitignore` — covers vault temp file; no new entries
-- [x] Suite 17 (Ansible Vault helpers) — 8 checks (17a–17h), fully offline:
+- [x] Suite 27 (Ansible Vault helpers) — 8 checks (27a–27h), fully offline:
       17a null when no password · 17b temp file created · 17c content matches ·
       17d .tmp extension · 17e system temp location · 17f deletable ·
       17g fresh file on second call · 17h Invoke-FltVaultSetup defined

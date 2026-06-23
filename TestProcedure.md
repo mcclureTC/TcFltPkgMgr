@@ -308,27 +308,12 @@ Tests `DockerRepository.ps1` — Docker Desktop availability and status on the o
 
 ---
 
-### Suite 22 — Docker operator
 
-**Infrastructure required:** Docker Desktop installed on operator machine (checks WARN gracefully if absent)
-
-Tests `DockerRepository.ps1` functions for Docker Desktop management on the operator machine.
-
-| # | Test name | What is tested | How verified |
-|---|-----------|----------------|--------------|
-| 12a | docker CLI available | `docker` command is on PATH | `Get-Command docker`. WARN with install URL if absent. Remaining checks skip if CLI missing. |
-| 12b | `Get-FltDockerStatus` valid value | Returns one of `running`, `starting`, `stopped`, `not-installed` | Calls function, checks against known valid values |
-| 12c | `Get-FltDockerDesktopPath` finds installation | Returns path to `Docker Desktop.exe` | Checks known install paths and HKCU App Paths registry. WARN if not found. |
-| 12d | `Test-FltDockerAvailable` consistent with status | `$true` iff status is `running` | Calls both functions, verifies consistency |
-| 12e | Docker daemon running | Daemon is ready for commands | PASS if running; WARN with appropriate message for `starting`, `stopped`, `not-installed` |
-
----
-
-### Suite 13 — Ansible inventory builder
+### Suite 23 — Ansible inventory builder
 
 **Infrastructure required:** None (fully offline — no Ansible installation needed)
 **Per target:** No (runs once using synthetic FleetTarget objects)
-**Check count:** 13 (13a–13m)
+**Check count:** 13 (23a–23m)
 
 Tests `New-FltAnsibleInventory` and `Remove-FltAnsibleInventory` in
 `execution/AnsibleExecutor.ps1`. All checks use a temp path and synthetic
@@ -336,117 +321,117 @@ Tests `New-FltAnsibleInventory` and `Remove-FltAnsibleInventory` in
 
 | # | Test name | What is tested | How verified |
 |---|-----------|----------------|--------------|
-| 13a | No Linux targets: Ok=$false, no file | Returns `Ok=$false`, `TargetCount=0`, file not created when fleet has no Linux targets | Passes one Windows target, checks all three conditions |
-| 13b | Single physical target: file created | File is written and `Ok=$true` for one Linux physical target | Calls function, checks `Ok` and `Test-Path` on temp inventory |
-| 13c | ansible_host and ansible_port in file | SSH connection vars appear in generated INI | Reads file content, checks regex for `ansible_host=192.168.8.110` and `ansible_port=22` |
-| 13d | Target name is INI hostname key | `FleetTarget.Name` is the host entry key in the INI file | Reads file, checks `DCC-Linux-1` appears |
-| 13e | TargetCount excludes Windows targets | Count reflects Linux targets only from a mixed fleet | Passes 2 Linux + 1 Windows, checks `TargetCount=2` |
-| 13f | VM target in [vm] group | `TargetType='vm'` target appears under `[vm]` header | Reads file, checks `[vm]` header and target name present |
-| 13g | [linux:children] meta-group present | Meta-group written when both physical and vm groups exist | Reads file, checks `[linux:children]` present |
-| 13h | Container: docker_api vars present | Container targets include `ansible_connection` and `ansible_docker_host` | Passes one physical + one container target, checks both vars in file |
-| 13i | Docker host address resolved from fleet | `ansible_docker_host` URL uses the Docker host target's `.Address`, not its name | Checks `tcp://192.168.8.50:` in the docker_host URL |
-| 13j | Remove-FltAnsibleInventory deletes file | Inventory file is removed after call | Calls `Remove-FltAnsibleInventory`, checks `Test-Path` is `$false` |
-| 13k | Remove-FltAnsibleInventory no-op when absent | Calling remove on a non-existent file does not throw | Calls function again on already-removed path, checks no exception |
-| 13l | Parent directory auto-created | Function creates missing parent directories | Passes a deep temp path with no existing parents, checks file created |
-| 13m | Return object shape | Result has `Ok`, `Path`, `TargetCount`, `Message` properties | Checks all four via `PSObject.Properties.Name` |
+| 23a | No Linux targets: Ok=$false, no file | Returns `Ok=$false`, `TargetCount=0`, file not created when fleet has no Linux targets | Passes one Windows target, checks all three conditions |
+| 23b | Single physical target: file created | File is written and `Ok=$true` for one Linux physical target | Calls function, checks `Ok` and `Test-Path` on temp inventory |
+| 23c | ansible_host and ansible_port in file | SSH connection vars appear in generated INI | Reads file content, checks regex for `ansible_host=192.168.8.110` and `ansible_port=22` |
+| 23d | Target name is INI hostname key | `FleetTarget.Name` is the host entry key in the INI file | Reads file, checks `DCC-Linux-1` appears |
+| 23e | TargetCount excludes Windows targets | Count reflects Linux targets only from a mixed fleet | Passes 2 Linux + 1 Windows, checks `TargetCount=2` |
+| 23f | VM target in [vm] group | `TargetType='vm'` target appears under `[vm]` header | Reads file, checks `[vm]` header and target name present |
+| 23g | [linux:children] meta-group present | Meta-group written when both physical and vm groups exist | Reads file, checks `[linux:children]` present |
+| 23h | Container: docker_api vars present | Container targets include `ansible_connection` and `ansible_docker_host` | Passes one physical + one container target, checks both vars in file |
+| 23i | Docker host address resolved from fleet | `ansible_docker_host` URL uses the Docker host target's `.Address`, not its name | Checks `tcp://192.168.8.50:` in the docker_host URL |
+| 23j | Remove-FltAnsibleInventory deletes file | Inventory file is removed after call | Calls `Remove-FltAnsibleInventory`, checks `Test-Path` is `$false` |
+| 23k | Remove-FltAnsibleInventory no-op when absent | Calling remove on a non-existent file does not throw | Calls function again on already-removed path, checks no exception |
+| 23l | Parent directory auto-created | Function creates missing parent directories | Passes a deep temp path with no existing parents, checks file created |
+| 23m | Return object shape | Result has `Ok`, `Path`, `TargetCount`, `Message` properties | Checks all four via `PSObject.Properties.Name` |
 
 ---
 
-### Suite 14 — Ansible playbook builder
+### Suite 24 — Ansible playbook builder
 
 **Infrastructure required:** None (fully offline — no Ansible installation needed)
 **Per target:** No (runs once; playbook dir redirected to a temp directory)
-**Check count:** 15 (14a–14o)
+**Check count:** 15 (24a–24o)
 
 Tests all five `_Get-*Playbook` functions and the shared `_Write-AnsiblePlaybook` helper in `execution/AnsibleExecutor.ps1`. Each test writes a real YAML file to a temp directory (via a local `_Get-FltAnsiblePlaybookDir` override) and inspects the content with regex. No Ansible process is invoked.
 
 | # | Test name | What is tested | How verified |
 |---|-----------|----------------|--------------|
-| 14a | Package install: Ok=$true and file exists | `_Get-PackagePlaybook install` writes a file | Checks `Ok=$true` and `Test-Path $res.Path` |
-| 14b | Package install: correct module and state=present | `ansible.builtin.package` with `state: present` | Regex match on written YAML |
-| 14c | Package upgrade: state=latest | `upgrade` action maps to `state: latest` | Regex match on written YAML |
-| 14d | Package remove: state=absent | `remove` action maps to `state: absent` | Regex match on written YAML |
-| 14e | Service start: correct module and state=started | `ansible.builtin.systemd` with `state: started` | Regex match on written YAML |
-| 14f | Service restart: state=restarted | `restart` action maps to `state: restarted` | Regex match on written YAML |
-| 14g | Service enable: enabled=true, no state key | `enable` writes `enabled: true` without a `state:` key | Regex match; also checks `state:` is absent |
-| 14h | User create: correct module and state=present | `ansible.builtin.user` with `state: present` | Regex match on written YAML |
-| 14i | User create: groups and shell present | Supplementary groups and shell path appear in playbook | Regex match for `docker`, `sudo`, `/bin/bash` |
-| 14j | User remove: state=absent and remove=true | `remove` action writes `state: absent` and `remove: true` | Regex match on written YAML |
-| 14k | File copy: correct module, src, dest, mode | `ansible.builtin.copy` with correct src, dest, mode `0640` | Regex match on written YAML |
-| 14l | Container start: correct module and state=started | `community.docker.docker_container` with `state: started` | Regex match on written YAML |
-| 14m | Container remove: state=absent | `remove` action maps to `state: absent` | Regex match on written YAML |
-| 14n | Container recreate: recreate=true and pull=true | `recreate` action writes both `recreate: true` and `pull: true` | Regex match on written YAML |
-| 14o | Return object has Ok, Path, Message | All builders return `{ Ok; Path; Message }` | Checks all three via `PSObject.Properties.Name` |
+| 24a | Package install: Ok=$true and file exists | `_Get-PackagePlaybook install` writes a file | Checks `Ok=$true` and `Test-Path $res.Path` |
+| 24b | Package install: correct module and state=present | `ansible.builtin.package` with `state: present` | Regex match on written YAML |
+| 24c | Package upgrade: state=latest | `upgrade` action maps to `state: latest` | Regex match on written YAML |
+| 24d | Package remove: state=absent | `remove` action maps to `state: absent` | Regex match on written YAML |
+| 24e | Service start: correct module and state=started | `ansible.builtin.systemd` with `state: started` | Regex match on written YAML |
+| 24f | Service restart: state=restarted | `restart` action maps to `state: restarted` | Regex match on written YAML |
+| 24g | Service enable: enabled=true, no state key | `enable` writes `enabled: true` without a `state:` key | Regex match; also checks `state:` is absent |
+| 24h | User create: correct module and state=present | `ansible.builtin.user` with `state: present` | Regex match on written YAML |
+| 24i | User create: groups and shell present | Supplementary groups and shell path appear in playbook | Regex match for `docker`, `sudo`, `/bin/bash` |
+| 24j | User remove: state=absent and remove=true | `remove` action writes `state: absent` and `remove: true` | Regex match on written YAML |
+| 24k | File copy: correct module, src, dest, mode | `ansible.builtin.copy` with correct src, dest, mode `0640` | Regex match on written YAML |
+| 24l | Container start: correct module and state=started | `community.docker.docker_container` with `state: started` | Regex match on written YAML |
+| 24m | Container remove: state=absent | `remove` action maps to `state: absent` | Regex match on written YAML |
+| 24n | Container recreate: recreate=true and pull=true | `recreate` action writes both `recreate: true` and `pull: true` | Regex match on written YAML |
+| 24o | Return object has Ok, Path, Message | All builders return `{ Ok; Path; Message }` | Checks all three via `PSObject.Properties.Name` |
 
 ---
 
-### Suite 15 — Ansible batch executor
+### Suite 25 — Ansible batch executor
 
 **Infrastructure required:** None (fully offline — no Ansible installation needed)
 **Per target:** No
-**Check count:** 13 (15a–15m)
+**Check count:** 13 (25a–25m)
 
 Tests `Invoke-FltAnsibleBatch` and `_Parse-AnsibleOutput` in `execution/AnsibleExecutor.ps1`. Read-only mode tests exercise the full function code path without writing files or calling Ansible. Parser tests call `_Parse-AnsibleOutput` directly with synthetic output strings.
 
 | # | Test name | What is tested | How verified |
 |---|-----------|----------------|--------------|
-| 15a | Read-only: single target returns Skipped | `ReadOnly=$true` bypasses Ansible and returns `Status='Skipped'` | Checks `Count=1` and `Status=Skipped` |
-| 15b | Read-only: Note = 'Read-only mode' | Note field is set correctly in read-only path | Checks `Note -eq 'Read-only mode'` |
-| 15c | Read-only: PackageManager = 'ansible' | PackageManager field is always 'ansible' | Checks `PackageManager -eq 'ansible'` |
-| 15d | Read-only: multiple targets all Skipped | All targets return Skipped, not just the first | Passes 3 targets, checks all have `Status=Skipped` |
-| 15e | BatchResult has all required fields | Result object has TargetName, Action, PackageSpec, PackageManager, Status, DurationSec, TimedOut, Note | Checks all 8 fields via `PSObject.Properties.Name` |
-| 15f | BatchResult: Action, PackageSpec, TargetName correct | Field values match what was passed to the function | Checks all three field values |
-| 15g | Parser: SUCCESS → Status=OK | `SUCCESS` host line maps to `Status='OK'` | Passes synthetic output, checks status |
-| 15h | Parser: CHANGED → Status=OK | `CHANGED` host line also maps to `Status='OK'` | Passes synthetic output, checks status |
-| 15i | Parser: FAILED! → Status=Failed, msg in Note | `FAILED!` line maps to `Status='Failed'`; `msg` from JSON appears in Note | Checks both status and Note content |
-| 15j | Parser: UNREACHABLE! → Status=Unreachable | `UNREACHABLE!` line maps to `Status='Unreachable'` | Passes synthetic output, checks status |
-| 15k | Parser: exit code 8 → all Failed | Exit code 8 marks all targets Failed with config error note | Passes empty output + exit 8, checks all Failed and Note contains 'config' or 'parse' |
-| 15l | Parser: mixed output — one OK, one Failed | Per-host status correctly assigned when hosts differ | Passes two-host output, checks lin-1=OK and lin-2=Failed |
-| 15m | OnProgress callback invoked in read-only mode | `$OnProgress` scriptblock is called even in read-only path | Sets a flag variable in callback, checks it was set |
+| 25a | Read-only: single target returns Skipped | `ReadOnly=$true` bypasses Ansible and returns `Status='Skipped'` | Checks `Count=1` and `Status=Skipped` |
+| 25b | Read-only: Note = 'Read-only mode' | Note field is set correctly in read-only path | Checks `Note -eq 'Read-only mode'` |
+| 25c | Read-only: PackageManager = 'ansible' | PackageManager field is always 'ansible' | Checks `PackageManager -eq 'ansible'` |
+| 25d | Read-only: multiple targets all Skipped | All targets return Skipped, not just the first | Passes 3 targets, checks all have `Status=Skipped` |
+| 25e | BatchResult has all required fields | Result object has TargetName, Action, PackageSpec, PackageManager, Status, DurationSec, TimedOut, Note | Checks all 8 fields via `PSObject.Properties.Name` |
+| 25f | BatchResult: Action, PackageSpec, TargetName correct | Field values match what was passed to the function | Checks all three field values |
+| 25g | Parser: SUCCESS → Status=OK | `SUCCESS` host line maps to `Status='OK'` | Passes synthetic output, checks status |
+| 25h | Parser: CHANGED → Status=OK | `CHANGED` host line also maps to `Status='OK'` | Passes synthetic output, checks status |
+| 25i | Parser: FAILED! → Status=Failed, msg in Note | `FAILED!` line maps to `Status='Failed'`; `msg` from JSON appears in Note | Checks both status and Note content |
+| 25j | Parser: UNREACHABLE! → Status=Unreachable | `UNREACHABLE!` line maps to `Status='Unreachable'` | Passes synthetic output, checks status |
+| 25k | Parser: exit code 8 → all Failed | Exit code 8 marks all targets Failed with config error note | Passes empty output + exit 8, checks all Failed and Note contains 'config' or 'parse' |
+| 25l | Parser: mixed output — one OK, one Failed | Per-host status correctly assigned when hosts differ | Passes two-host output, checks lin-1=OK and lin-2=Failed |
+| 25m | OnProgress callback invoked in read-only mode | `$OnProgress` scriptblock is called even in read-only path | Sets a flag variable in callback, checks it was set |
 
 ---
 
-### Suite 16 — Fleet executor routing
+### Suite 26 — Fleet executor routing
 
 **Infrastructure required:** None (fully offline — read-only mode)
 **Per target:** No
-**Check count:** 10 (16a–16j)
+**Check count:** 10 (26a–26j)
 
 Tests the four-bucket routing logic in `Invoke-FleetAction` (`execution/FleetExecutor.ps1`). Sets `$Script:FltReadOnly = $true` before each call so no SSH, Ansible, or tcpkg processes are started. Inspects `BatchResult.Status` and `BatchResult.PackageManager` to verify each target was routed to the correct bucket.
 
 | # | Test name | What is tested | How verified |
 |---|-----------|----------------|--------------|
-| 16a | Linux physical → Ansible bucket | `OS='linux'`, `TargetType='physical'` routes to Ansible | `Status` matches `ansible` |
-| 16b | Linux VM → Ansible bucket | `OS='linux'`, `TargetType='vm'` routes to Ansible | `Status` matches `ansible` |
-| 16c | Linux container → Unsupported | `OS='linux'`, `TargetType='container'` lands in unrouted catch | `Status='Unsupported'`, not `ansible` |
-| 16d | Windows not Ansible | `OS='windows'` target does not route to Ansible bucket | `Status` does not match `ansible` |
-| 16e | Windows tcpkg → tcpkg SSH | `PackageManager='tcpkg'`, `InternetAccess=$true` | `Status` matches `tcpkg` |
-| 16f | Windows winget → WinGet SSH | `PackageManager='winget'`, `InternetAccess=$true` | `Status` matches `winget` |
-| 16g | Windows IA=False → push | `InternetAccess=$false` routes to push bucket | `Status` matches `push` |
-| 16h | Mixed fleet routed correctly | Linux and Windows targets in one call each reach their correct bucket | `lin-1` status matches `ansible`, `win-1` matches `tcpkg` |
-| 16i | Ansible result PackageManager='ansible' | `PackageManager` field is set correctly for Ansible bucket | `PackageManager -eq 'ansible'` |
-| 16j | No silent drops | All 5 targets (2 Linux, 2 Windows SSH, 1 push) return a result | `results.Count -eq 5` |
+| 26a | Linux physical → Ansible bucket | `OS='linux'`, `TargetType='physical'` routes to Ansible | `Status` matches `ansible` |
+| 26b | Linux VM → Ansible bucket | `OS='linux'`, `TargetType='vm'` routes to Ansible | `Status` matches `ansible` |
+| 26c | Linux container → Unsupported | `OS='linux'`, `TargetType='container'` lands in unrouted catch | `Status='Unsupported'`, not `ansible` |
+| 26d | Windows not Ansible | `OS='windows'` target does not route to Ansible bucket | `Status` does not match `ansible` |
+| 26e | Windows tcpkg → tcpkg SSH | `PackageManager='tcpkg'`, `InternetAccess=$true` | `Status` matches `tcpkg` |
+| 26f | Windows winget → WinGet SSH | `PackageManager='winget'`, `InternetAccess=$true` | `Status` matches `winget` |
+| 26g | Windows IA=False → push | `InternetAccess=$false` routes to push bucket | `Status` matches `push` |
+| 26h | Mixed fleet routed correctly | Linux and Windows targets in one call each reach their correct bucket | `lin-1` status matches `ansible`, `win-1` matches `tcpkg` |
+| 26i | Ansible result PackageManager='ansible' | `PackageManager` field is set correctly for Ansible bucket | `PackageManager -eq 'ansible'` |
+| 26j | No silent drops | All 5 targets (2 Linux, 2 Windows SSH, 1 push) return a result | `results.Count -eq 5` |
 
 ---
 
-### Suite 17 — Ansible Vault helpers
+### Suite 27 — Ansible Vault helpers
 
 **Infrastructure required:** None (fully offline — credential store and temp file only)
 **Per target:** No
-**Check count:** 8 (17a–17h)
+**Check count:** 8 (27a–27h)
 
 Tests `_Get-VaultPasswordFile` and `Invoke-FltVaultSetup` in `execution/AnsibleExecutor.ps1`. Seeds the credential store with a known vault password via `Set-FltStoredPassword`, verifies temp file behaviour, then cleans up. Does not invoke `ansible-vault` or any Ansible process.
 
 | # | Test name | What is tested | How verified |
 |---|-----------|----------------|--------------|
-| 17a | No vault password → $null | `_Get-VaultPasswordFile` returns `$null` when no `ansible_vault` credential is stored | Clears credential store, calls function, checks result is `$null` |
-| 17b | Vault password → temp file created | Function writes a temp file when a vault password is stored | Stores test password, calls function, checks `Ok` and `Test-Path` |
-| 17c | Temp file content matches password | The temp file contains exactly the stored vault password | Reads file with `File::ReadAllText`, compares to stored value |
-| 17d | Temp file has .tmp extension | File extension is `.tmp` (covered by `*.tmp` in `.gitignore`) | Checks `Path.GetExtension` |
-| 17e | Temp file in system temp directory | File is written to `Path.GetTempPath()` | Compares `Path.GetDirectoryName` to `GetTempPath()` |
-| 17f | Temp file deletable by caller | No file locks — caller can `Remove-Item` immediately | Calls `Remove-Item -Force`, checks file is gone |
-| 17g | Second call creates fresh temp file | Function is idempotent — does not reuse a deleted path | Calls function again, checks new file exists |
-| 17h | Invoke-FltVaultSetup is defined | Function exists and is callable | `Get-Command 'Invoke-FltVaultSetup'` returns a result |
+| 27a | No vault password → $null | `_Get-VaultPasswordFile` returns `$null` when no `ansible_vault` credential is stored | Clears credential store, calls function, checks result is `$null` |
+| 27b | Vault password → temp file created | Function writes a temp file when a vault password is stored | Stores test password, calls function, checks `Ok` and `Test-Path` |
+| 27c | Temp file content matches password | The temp file contains exactly the stored vault password | Reads file with `File::ReadAllText`, compares to stored value |
+| 27d | Temp file has .tmp extension | File extension is `.tmp` (covered by `*.tmp` in `.gitignore`) | Checks `Path.GetExtension` |
+| 27e | Temp file in system temp directory | File is written to `Path.GetTempPath()` | Compares `Path.GetDirectoryName` to `GetTempPath()` |
+| 27f | Temp file deletable by caller | No file locks — caller can `Remove-Item` immediately | Calls `Remove-Item -Force`, checks file is gone |
+| 27g | Second call creates fresh temp file | Function is idempotent — does not reuse a deleted path | Calls function again, checks new file exists |
+| 27h | Invoke-FltVaultSetup is defined | Function exists and is callable | `Get-Command 'Invoke-FltVaultSetup'` returns a result |
 
 ---
 

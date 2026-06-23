@@ -32,14 +32,15 @@ function Get-FltTestResults {
 
 # Persist a single suite result to test-results.json.
 function Save-FltTestResult {
-    param([string]$SuiteKey, [int]$Passed, [int]$Failed, [int]$Warned)
+    param([string]$SuiteKey, [int]$Passed, [int]$Failed, [int]$Warned, [int]$Skipped = 0)
     $path    = Get-FltTestResultsPath
     $results = Get-FltTestResults
     $results[$SuiteKey] = [pscustomobject]@{
-        RunAt  = (Get-Date -Format 'yyyy-MM-dd HH:mm')
-        Passed = $Passed
-        Failed = $Failed
-        Warned = $Warned
+        RunAt   = (Get-Date -Format 'yyyy-MM-dd HH:mm')
+        Passed  = $Passed
+        Failed  = $Failed
+        Warned  = $Warned
+        Skipped = $Skipped
     }
     try {
         $results | ConvertTo-Json -Depth 3 |
@@ -53,11 +54,15 @@ function Save-FltTestResult {
 function _TR_ResultCell {
     param($Hist)
     if (-not $Hist) { return '—', 'Dark' }
-    $total = $Hist.Passed + $Hist.Failed + $Hist.Warned
+    $skipped = if ($Hist.PSObject.Properties['Skipped']) { $Hist.Skipped } else { 0 }
+    $total   = $Hist.Passed + $Hist.Failed + $Hist.Warned + $skipped
+    $skipTag = if ($skipped -gt 0) { " ($skipped skip)" } else { '' }
     if ($Hist.Failed -gt 0) {
-        return "$($Hist.Passed)/$total FAIL", 'Red'
+        return "$($Hist.Passed)/$total FAIL$skipTag", 'Red'
     } elseif ($Hist.Warned -gt 0) {
-        return "$($Hist.Passed)/$total WARN", 'Yellow'
+        return "$($Hist.Passed)/$total WARN$skipTag", 'Yellow'
+    } elseif ($skipped -gt 0) {
+        return "$($Hist.Passed)/$total ✓$skipTag", 'Green'
     } else {
         return "$($Hist.Passed)/$total ✓", 'Green'
     }
@@ -100,7 +105,7 @@ function _Show-TestRunnerDashboard {
         $runAt = if ($hist) { $hist.RunAt } else { 'never' }
         $tag   = if ($s.NeedsSSH) { '  [needs target]' } else { '' }
         $name  = "$($s.Name)$tag"
-        $dispId = 10 + $s.Id
+        $dispId = $s.Id
         Paint-FltRow $row ('  {0,-4}  {1,-42}  {2,-5}  {3,-16}  {4}' -f $dispId, $name, '?', $runAt, $res) $clr
         $row++
     }
@@ -230,15 +235,22 @@ function _TR_RunIntSuite {
         }
     }
 
-    $total = $r.Passed + $r.Failed + $r.Warned
+    $skipped   = if ($r.PSObject.Properties['Skipped']) { $r.Skipped } else { 0 }
+    $shown     = $r.Passed + $r.Failed + $r.Warned + $skipped
+    $defined   = if ($Suite.PSObject.Properties['CheckCount']) { $Suite.CheckCount } else { $shown }
+    $notShown  = [Math]::Max(0, $defined - $shown)
+    $skipStr   = if ($skipped  -gt 0) { "   $skipped skipped" } else { '' }
     Write-Host ''
     Write-Host "  $('-' * 64)" -ForegroundColor DarkGray
-    if     ($r.Failed -eq 0 -and $r.Warned -eq 0) {
+    if     ($r.Failed -eq 0 -and $r.Warned -eq 0 -and $skipped -eq 0) {
         Write-Host "  All $($r.Passed) checks passed." -ForegroundColor Green
     } elseif ($r.Failed -eq 0) {
-        Write-Host "  $($r.Passed) passed   $($r.Warned) warnings   $total total" -ForegroundColor Yellow
+        Write-Host "  $($r.Passed) passed   $($r.Warned) warnings$skipStr   $shown shown" -ForegroundColor Yellow
     } else {
-        Write-Host "  $($r.Passed) passed   $($r.Failed) failed   $($r.Warned) warnings   $total total" -ForegroundColor Red
+        Write-Host "  $($r.Passed) passed   $($r.Failed) failed   $($r.Warned) warnings$skipStr   $shown shown" -ForegroundColor Red
+    }
+    if ($notShown -gt 0) {
+        Write-Host "  ($notShown of $defined defined checks not shown — only fire on failure or unmet prerequisites)" -ForegroundColor DarkGray
     }
     Write-Host ''
     Read-Host '  Press Enter to return'
@@ -343,8 +355,9 @@ function Invoke-FltTestRunner {
             $tp = 0; $tf = 0; $tw = 0
             foreach ($suite in $itSuites) {
                 $r = _TR_RunIntSuite -Suite $suite -Targets $selObjs -Credential $cred
-                Save-FltTestResult -SuiteKey "IT$($suite.Id)" `
-                    -Passed $r.Passed -Failed $r.Failed -Warned $r.Warned
+                $sk1 = if ($r.PSObject.Properties['Skipped']) { $r.Skipped } else { 0 }
+          Save-FltTestResult -SuiteKey "IT$($suite.Id)" `
+                    -Passed $r.Passed -Failed $r.Failed -Warned $r.Warned -Skipped $sk1
                 $tp += $r.Passed; $tf += $r.Failed; $tw += $r.Warned
             }
             $total = $tp + $tf + $tw
@@ -353,10 +366,9 @@ function Invoke-FltTestRunner {
             continue
         }
 
-        # 11-16 — run specific integration suite
+        # 11-27 — run specific integration suite (Id matches UI display number)
         if ($num -ge 11 -and $num -le 99) {
-            $id    = $num - 10
-            $suite = $itSuites | Where-Object { $_.Id -eq $id }
+            $suite = $itSuites | Where-Object { $_.Id -eq $num }
             if (-not $suite) { $result = "No suite $num"; continue }
 
             $selObjs = @($Script:FleetTargets | Where-Object { $selectedTargets -contains $_.Name })
@@ -370,8 +382,9 @@ function Invoke-FltTestRunner {
                 $cred = _TR_GetCredential -Target ($selObjs | Select-Object -First 1)
             }
             $r = _TR_RunIntSuite -Suite $suite -Targets $selObjs -Credential $cred
-            Save-FltTestResult -SuiteKey "IT$id" `
-                -Passed $r.Passed -Failed $r.Failed -Warned $r.Warned
+            $sk2 = if ($r.PSObject.Properties['Skipped']) { $r.Skipped } else { 0 }
+            Save-FltTestResult -SuiteKey "IT$num" `
+                -Passed $r.Passed -Failed $r.Failed -Warned $r.Warned -Skipped $sk2
             $total = $r.Passed + $r.Failed + $r.Warned
             $result = "$($r.Passed)/$total passed"
             $resultClr = if ($r.Failed -gt 0) { 'Red' } elseif ($r.Warned -gt 0) { 'Yellow' } else { 'Green' }
