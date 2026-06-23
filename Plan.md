@@ -939,6 +939,13 @@ be captured before passing to the scriptblock. Apply the same pattern in
       34a target added · 34b fields · 34c address inheritance · 34d compose fields ·
       34e duplicate guard · 34f __local__ host · 34g all path functions · 34h deploy function
 - [x] `IntegrationTests.ps1` split into 5 files by subsystem:
+- [x] `IT-Containers.ps1` (Suite 31, 32) — all suites now save/restore
+      `$Script:FleetTargets` using `$savedFleetTargets`; Suite 34 also
+      saves/restores `targets.local.json` to prevent synthetic test targets
+      persisting to disk across sessions
+- [x] `DisplayAdapter.ps1` (`Read-FltBatchNav`) — skips blocking input when
+      `$Script:FltReadOnly` or `[Console]::IsInputRedirected` (prevents hangs)
+- [x] `TestRunner.ps1` — auto-continues on all-pass; pauses only on failure/warning
       `IT-Infrastructure.ps1` (6 suites) · `IT-TcpkgWinGet.ps1` (4) ·
       `IT-Ansible.ps1` (7) · `IT-Containers.ps1` (7)
       `IntegrationTests.ps1` is now the thin header with helpers + dot-sources
