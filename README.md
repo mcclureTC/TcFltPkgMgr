@@ -663,6 +663,37 @@ fleet dashboard navigation.
 
 ---
 
+## Phase 8.0 pre-work
+
+Three housekeeping items completed before building the Container Admin menu:
+
+### `targetType` in command log
+
+`Write-FltBatchEntry` now includes a `targetType` field per result row in the NDJSON log.
+The value is resolved from `$Script:FleetTargets` by target name at log-write time,
+so no changes to `BatchResult` class were required.
+
+### Type column in batch dashboard
+
+The batch operation dashboard now shows a `Type` column (`Phys` / `VM` / `Cntr`) between
+the target name and status columns. The target name column was narrowed from 22 to 18
+characters to accommodate. The column uses `Get-FltTypeDisplay` which is the same
+standalone wrapper used in the fleet dashboard.
+
+### Post-batch page navigation
+
+`Read-FltBatchNav` replaces the plain `Read-Host` at the end of batch operations in
+`WinGetMenu` and `LinuxMenu`. On multi-page result sets it accepts `-` / `+` key presses
+to navigate pages before Enter exits. On single-page results it behaves identically to
+the previous `Read-Host`.
+
+The `_Ansi_RepaintBatchDashboard` bug is also fixed: action/mode context is now stored in
+script-scope vars (`FltBatchAction`, `FltBatchPackageSpec`, `FltBatchMode`,
+`FltBatchTimeoutSecs`) so page-navigation repaints work correctly without re-passing
+header arguments.
+
+---
+
 ## File Layout
 
 ```

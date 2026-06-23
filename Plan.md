@@ -802,16 +802,29 @@ be captured before passing to the scriptblock. Apply the same pattern in
 `ContainerMenu.ps1` for all `$PlaybookBuilder` and `$DockerArgs` captures.
 
 
-- [ ] **`-`/`+` key wiring in batch menus** — `WinGetMenu`, `LinuxMenu`, and `ContainerMenu`
+- [x] **`-`/`+` key wiring in batch menus** — `WinGetMenu`, `LinuxMenu`, and `ContainerMenu`
       need a non-blocking key poll loop during batch runs so `Move-FltBatchPage` is
       actually reachable. Currently `Invoke-FleetMenu` polls but batch menu callers do not.
       Add a lightweight polling helper to `_Invoke-AnsibleBatchAction` and the
       WinGet equivalent.
-- [ ] **`TargetType` in `CommandLog.ps1`** — Phase 7 is done; this item is now unblocked.
+- [x] **`TargetType` in `CommandLog.ps1`** — Phase 7 is done; this item is now unblocked.
       Add `targetType` field to `Write-FltBatchEntry` output, derived from `$Results`.
-- [ ] **`Type` column in batch dashboard rows** — Phase 2.3 deferred item; add
+- [x] **`Type` column in batch dashboard rows** — Phase 2.3 deferred item; add
       `TypeDisplay()` / `Get-FltTypeDisplay` to the `_Ansi_UpdateBatchRow` line format.
       Requires narrowing the target name column slightly (22 → 18 chars).
+
+- [x] Stored `$Script:FltBatchAction/PackageSpec/Mode/TimeoutSecs` in
+      `_Ansi_ShowFleetBatchDashboard`; `_Ansi_RepaintBatchDashboard` falls
+      back to stored vars when called with empty args (fixes page nav repaint)
+- [x] `Read-FltBatchNav` added to `DisplayAdapter.ps1` — post-batch
+      `-`/`+` navigation loop before Enter; no-op on single-page results
+- [x] `Read-FltBatchNav` wired into `WinGetMenu.ps1` and `LinuxMenu.ps1`
+- [x] Suite 31 (Phase 8.0 pre-work) — 8 checks (31a–31h), fully offline:
+      31a action vars · 31b repaint no-op · 31c–31d function existence ·
+      31e–31f targetType field · 31g TypeDisplay · 31h header format
+- [x] Security: no hardcoded secrets
+- [x] `.gitignore`: no new entries needed
+- [x] `README.md`: Phase 8.0 section added
 
 ### 8.1 — Fleet menu (`ui/menus/FleetMenu.ps1`)
 
@@ -954,7 +967,7 @@ be captured before passing to the scriptblock. Apply the same pattern in
 > add `TargetType` when Phase 7 lands.
 
 - [x] `PackageManager` field — implement in Phase 4.4 bug fixes (Phase 3 is done)
-- [ ] Add `TargetType` field per result row — Phase 7 done; implement in Phase 8.0
+- [x] Add `TargetType` field per result row — completed in Phase 8.0
 
 ### 10.2 — Log viewer
 

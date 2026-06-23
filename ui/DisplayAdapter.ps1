@@ -107,6 +107,26 @@ function Move-FltBatchPage {
     }
 }
 
+# Post-batch navigation loop. Shows results, allows - / + page navigation,
+# then waits for Enter. Call after all batch results are written.
+function Read-FltBatchNav {
+    param([string]$PromptText = '  Batch complete. Press Enter to continue (- / + to page)')
+    if ($Script:FltBatchTotalPages -le 1) {
+        [void](Read-Host $PromptText.Replace(' (- / + to page)', ''))
+        return
+    }
+    Write-Host $PromptText -ForegroundColor DarkGray
+    while ($true) {
+        $key = [Console]::ReadKey($true)
+        if ($key.Key -eq [ConsoleKey]::Enter)       { break }
+        if ($key.KeyChar -eq '-' -or $key.Key -eq [ConsoleKey]::Subtract) {
+            Move-FltBatchPage -Delta -1
+        } elseif ($key.KeyChar -eq '+' -or $key.Key -eq [ConsoleKey]::Add) {
+            Move-FltBatchPage -Delta 1
+        }
+    }
+}
+
 # Render a numbered table of items with configurable columns. Used for package
 # search results, version pickers, feed pickers, and other list displays.
 function Show-FltTable {

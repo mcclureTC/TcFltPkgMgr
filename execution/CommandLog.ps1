@@ -103,11 +103,15 @@ function Write-FltBatchEntry {
         package        = $PackageSpec
         packageManager = $pm
         results        = @($Results | ForEach-Object {
+            $tgt  = $Script:FleetTargets | Where-Object { $_.Name -eq $_.TargetName } | Select-Object -First 1
+            $tgtN = $_.TargetName   # capture for inner scope
+            $tgt  = $Script:FleetTargets | Where-Object { $_.Name -eq $tgtN } | Select-Object -First 1
             [ordered]@{
-                target   = $_.TargetName
-                status   = $_.Status
-                durSec   = [math]::Round($_.DurationSec, 1)
-                note     = $_.Note
+                target      = $_.TargetName
+                targetType  = if ($tgt) { $tgt.TargetType } else { '' }
+                status      = $_.Status
+                durSec      = [math]::Round($_.DurationSec, 1)
+                note        = $_.Note
             }
         })
     }

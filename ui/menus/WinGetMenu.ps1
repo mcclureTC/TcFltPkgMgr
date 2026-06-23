@@ -100,7 +100,7 @@ function _Invoke-WinGetBatchAction {
     Write-Host -NoNewline "`e[${sumRow};1H${sumClr}${sumStr}`e[0m`e[K"
     Write-Host -NoNewline "`e[$($Script:FltBatchScrollStart);1H"
     Write-Host ''
-    [void](Read-Host '  Batch complete. Press Enter to continue')
+    Read-FltBatchNav
 }
 
 # ── Install ───────────────────────────────────────────────────────────────────

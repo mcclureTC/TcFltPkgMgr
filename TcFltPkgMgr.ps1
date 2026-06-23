@@ -188,6 +188,10 @@ $Script:FltBatchPage        = 0
 $Script:FltBatchPageSize    = 20
 $Script:FltBatchTotalPages  = 1
 $Script:FltBatchTargets     = @()
+$Script:FltBatchAction      = ''
+$Script:FltBatchPackageSpec = ''
+$Script:FltBatchMode        = ''
+$Script:FltBatchTimeoutSecs = 0
 
 # General dashboard height tracker.
 $Script:FltDashHeight = 0

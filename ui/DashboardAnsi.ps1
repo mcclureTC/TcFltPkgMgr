@@ -412,6 +412,12 @@ function _Ansi_ShowFleetBatchDashboard {
         }
     }
 
+    # Store header context so _Ansi_RepaintBatchDashboard can repaint without args
+    $Script:FltBatchAction      = $Action
+    $Script:FltBatchPackageSpec = $PackageSpec
+    $Script:FltBatchMode        = $Mode
+    $Script:FltBatchTimeoutSecs = $TimeoutSecs
+
     _Ansi_RepaintBatchDashboard -Action $Action -PackageSpec $PackageSpec `
         -Mode $Mode -TimeoutSecs $TimeoutSecs
 }
@@ -420,11 +426,17 @@ function _Ansi_ShowFleetBatchDashboard {
 # Called on initial draw, page navigation, and progress updates.
 function _Ansi_RepaintBatchDashboard {
     param(
-        [string] $Action,
-        [string] $PackageSpec,
-        [string] $Mode,
-        [int]    $TimeoutSecs = 0
+        [string] $Action      = '',
+        [string] $PackageSpec = '',
+        [string] $Mode        = '',
+        [int]    $TimeoutSecs = -1
     )
+    # When called from page navigation (no args), use stored script-scope context
+    if ([string]::IsNullOrEmpty($Action))      { $Action      = $Script:FltBatchAction }
+    if ([string]::IsNullOrEmpty($PackageSpec)) { $PackageSpec = $Script:FltBatchPackageSpec }
+    if ([string]::IsNullOrEmpty($Mode))        { $Mode        = $Script:FltBatchMode }
+    if ($TimeoutSecs -lt 0)                    { $TimeoutSecs = $Script:FltBatchTimeoutSecs }
+
     $sw         = _Ansi_GetSafeWidth
     $headerRows = 7
     $page       = $Script:FltBatchPage
@@ -464,7 +476,7 @@ function _Ansi_RepaintBatchDashboard {
     }
     _Ansi_PaintRow 4 $cmdPreview 'Dark'
     _Ansi_PaintRow 5 ('-' * $sw) 'Dark'
-    _Ansi_PaintRow 6 ('  {0,-22} {1,-14} {2,9}  {3}' -f 'Target','Status','Duration','Note') 'Dark'
+    _Ansi_PaintRow 6 ('  {0,-18} {1,-5} {2,-14} {3,9}  {4}' -f 'Target','Type','Status','Duration','Note') 'Dark'
     _Ansi_PaintRow 7 ('-' * $sw) 'Dark'
 
     # Paint current page targets
@@ -472,8 +484,9 @@ function _Ansi_RepaintBatchDashboard {
         $t   = $pageTargets[$i]
         $st  = $Script:FltBatchStatus[$t.Name]
         $row = $headerRows + 1 + $i
-        $durStr = if ($st.Duration -gt 0) { '{0,7:F1} s' -f $st.Duration } else { '         ' }
-        $line   = '  {0,-22} {1,-14} {2}  {3}' -f $t.Name, $st.Status, $durStr, $st.Note
+        $typeStr = Get-FltTypeDisplay -Target $t
+        $durStr  = if ($st.Duration -gt 0) { '{0,7:F1} s' -f $st.Duration } else { '         ' }
+        $line    = '  {0,-18} {1,-5} {2,-14} {3}  {4}' -f $t.Name, $typeStr, $st.Status, $durStr, $st.Note
         if ($line.Length -gt $sw) { $line = $line.Substring(0, $sw) }
         $clr = switch -Wildcard ($st.Status) {
             'OK*'      { "`e[92m" }  'Failed*' { "`e[91m" }
@@ -536,8 +549,10 @@ function _Ansi_UpdateBatchRow {
     if ($onPage -and $st.ContainsKey('Row')) {
         $sw     = _Ansi_GetSafeWidth
         $row    = $st['Row']
-        $durStr = if ($Duration -gt 0) { '{0,7:F1} s' -f $Duration } else { '         ' }
-        $line   = '  {0,-22} {1,-14} {2}  {3}' -f $TargetName, $Status, $durStr, $Note
+        $tgt     = $Script:FltBatchTargets | Where-Object { $_.Name -eq $TargetName } | Select-Object -First 1
+        $typeStr = if ($tgt) { Get-FltTypeDisplay -Target $tgt } else { '    ' }
+        $durStr  = if ($Duration -gt 0) { '{0,7:F1} s' -f $Duration } else { '         ' }
+        $line    = '  {0,-18} {1,-5} {2,-14} {3}  {4}' -f $TargetName, $typeStr, $Status, $durStr, $Note
         if ($line.Length -gt $sw) { $line = $line.Substring(0, $sw) }
 
         $clr = switch -Wildcard ($Status) {

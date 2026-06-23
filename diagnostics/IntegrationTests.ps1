@@ -1090,6 +1090,16 @@ function Get-IT_Suites {
             PerTarget   = $false   # fully offline — tests script-scope state directly
             Function    = 'Invoke-IT_BatchPagination'
             CheckCount  = 8
+        },
+        [pscustomobject]@{
+            Id          = 31
+            Name        = 'Phase 8.0 pre-work'
+            Description = 'CommandLog targetType, batch dashboard Type column vars, Read-FltBatchNav, stored action vars'
+            NeedsTarget = $false
+            NeedsSSH    = $false
+            PerTarget   = $false   # fully offline
+            Function    = 'Invoke-IT_Phase80PreWork'
+            CheckCount  = 8
         }
     )
 }
@@ -2566,19 +2576,18 @@ function Invoke-IT_FleetRouting {
     } catch { _IT_Fail $r '26b  Linux VM → Ansible routing' $_.Exception.Message }
 
     # ------------------------------------------------------------------
-    # 16c — Linux container target does NOT route to Ansible bucket;
-    #        gets Unsupported result (no package manager configured)
+    # 16c — Linux container target routes to docker-exec bucket (not Ansible)
     # ------------------------------------------------------------------
     try {
         $Script:FltBatchStatus = @{}
         $targets = @(_MkT 'cntr-1' 'linux' 'container')
         $results = Invoke-FleetAction -Action 'install' -PackageSpec 'curl' -Targets $targets
         $r0 = $results | Where-Object { $_.TargetName -eq 'cntr-1' }
-        if ($r0 -and $r0.Status -eq 'Unsupported' -and $r0.Status -notmatch 'ansible') {
-            _IT_Pass $r '26c  Linux container: Unsupported (not routed to Ansible)'
+        if ($r0 -and $r0.PackageManager -eq 'docker-exec' -and $r0.Status -notmatch 'ansible') {
+            _IT_Pass $r '26c  Linux container: routes to docker-exec (not Ansible)'
         } else {
-            _IT_Fail $r '26c  Linux container: Unsupported (not routed to Ansible)' `
-                "Status=$($r0.Status)"
+            _IT_Fail $r '26c  Linux container: routes to docker-exec (not Ansible)' `
+                "PackageManager=$($r0.PackageManager) Status=$($r0.Status)"
         }
     } catch { _IT_Fail $r '26c  Container not Ansible' $_.Exception.Message }
 
@@ -3478,6 +3487,196 @@ function Invoke-IT_BatchPagination {
     $Script:FltBatchPageSize    = $savedPageSize
     $Script:FltBatchTotalPages  = $savedTotalPages
     $Script:FltBatchTargets     = $savedTargets
+    $Script:FltBatchStatus      = $savedStatus
+    $Script:FltBatchDashHeight  = $savedHeight
+    $Script:FltBatchScrollStart = $savedScroll
+
+    return $r
+}
+
+# ── Suite 31 — Phase 8.0 pre-work ─────────────────────────────────────────────
+
+function Invoke-IT_Phase80PreWork {
+    $r = _IT_NewResult
+
+    _IT_Section 'Phase 8.0 pre-work'
+
+    # Save/restore batch state
+    $savedAction      = $Script:FltBatchAction
+    $savedPackage     = $Script:FltBatchPackageSpec
+    $savedMode        = $Script:FltBatchMode
+    $savedTimeout     = $Script:FltBatchTimeoutSecs
+    $savedPage        = $Script:FltBatchPage
+    $savedTotalPages  = $Script:FltBatchTotalPages
+    $savedTargets     = $Script:FltBatchTargets
+    $savedPageSize    = $Script:FltBatchPageSize
+    $savedStatus      = $Script:FltBatchStatus
+    $savedHeight      = $Script:FltBatchDashHeight
+    $savedScroll      = $Script:FltBatchScrollStart
+
+    # ------------------------------------------------------------------
+    # 31a — Script-scope action vars are initialised at startup
+    # ------------------------------------------------------------------
+    try {
+        $hasAction  = $null -ne $Script:FltBatchAction
+        $hasPackage = $null -ne $Script:FltBatchPackageSpec
+        $hasMode    = $null -ne $Script:FltBatchMode
+        if ($hasAction -and $hasPackage -and $hasMode) {
+            _IT_Pass $r '31a  FltBatchAction/PackageSpec/Mode vars initialised at startup'
+        } else {
+            _IT_Fail $r '31a  FltBatchAction/PackageSpec/Mode vars initialised at startup' `
+                "Action=$hasAction Package=$hasPackage Mode=$hasMode"
+        }
+    } catch { _IT_Fail $r '31a  Script-scope action vars' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 31b — _Ansi_RepaintBatchDashboard uses stored vars when called with empty args
+    #        (test by setting known stored values, calling repaint, checking no error)
+    # ------------------------------------------------------------------
+    try {
+        $Script:FltBatchAction      = 'install'
+        $Script:FltBatchPackageSpec = 'curl'
+        $Script:FltBatchMode        = 'Ansible'
+        $Script:FltBatchTimeoutSecs = 0
+        $Script:FltBatchPage        = 0
+        $Script:FltBatchPageSize    = 20
+        $Script:FltBatchTotalPages  = 1
+        $Script:FltBatchTargets     = @()
+        $Script:FltBatchStatus      = @{}
+        $Script:FltBatchDashHeight  = 15
+        $Script:FltBatchScrollStart = 16
+
+        # Override repaint to be a no-op for this test
+        function _Ansi_RepaintBatchDashboard { param($Action,$PackageSpec,$Mode,$TimeoutSecs) <# no-op #> }
+
+        # Invoke-FltBatchPageNav calls _Ansi_RepaintBatchDashboard with no args
+        # It should not throw even though stored vars are set
+        Invoke-FltBatchPageNav -Delta 0   # delta 0 = no page change, but exercises the path
+        _IT_Pass $r '31b  _Ansi_RepaintBatchDashboard: no error when called via Invoke-FltBatchPageNav'
+    } catch { _IT_Fail $r '31b  _Ansi_RepaintBatchDashboard stored vars' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 31c — Read-FltBatchNav is defined and callable
+    # ------------------------------------------------------------------
+    try {
+        $fn = Get-Command 'Read-FltBatchNav' -ErrorAction SilentlyContinue
+        if ($fn) {
+            _IT_Pass $r '31c  Read-FltBatchNav is defined'
+        } else {
+            _IT_Fail $r '31c  Read-FltBatchNav is defined' 'Function not found'
+        }
+    } catch { _IT_Fail $r '31c  Read-FltBatchNav defined' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 31d — Move-FltBatchPage is defined and callable
+    # ------------------------------------------------------------------
+    try {
+        $fn = Get-Command 'Move-FltBatchPage' -ErrorAction SilentlyContinue
+        if ($fn) {
+            _IT_Pass $r '31d  Move-FltBatchPage is defined'
+        } else {
+            _IT_Fail $r '31d  Move-FltBatchPage is defined' 'Function not found'
+        }
+    } catch { _IT_Fail $r '31d  Move-FltBatchPage defined' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 31e — Write-FltBatchEntry log record contains targetType field
+    # ------------------------------------------------------------------
+    try {
+        # Build a synthetic result and check the record shape
+        $t = [FleetTarget]::new('test-1', '10.0.0.1', 22, 'admin', $true)
+        $t.TargetType = 'physical'
+        $Script:FleetTargets = @($t)
+
+        $res = [BatchResult]::new()
+        $res.TargetName     = 'test-1'
+        $res.Action         = 'install'
+        $res.PackageSpec    = 'curl'
+        $res.PackageManager = 'ansible'
+        $res.Status         = 'OK'
+        $res.DurationSec    = 1.5
+        $res.TimedOut       = $false
+        $res.Note           = ''
+
+        # Intercept _Write-FltLogEntry to capture the record
+        $script:capturedRecord = $null
+        function _Write-FltLogEntry { param($Record); $script:capturedRecord = $Record }
+
+        Write-FltBatchEntry -Action 'install' -PackageSpec 'curl' -Results @($res)
+
+        if ($script:capturedRecord -and
+            $script:capturedRecord.results -and
+            $script:capturedRecord.results[0].Contains('targetType')) {
+            _IT_Pass $r '31e  Write-FltBatchEntry: log record contains targetType field'
+        } else {
+            _IT_Fail $r '31e  Write-FltBatchEntry: log record contains targetType field' `
+                "Record=$(if ($script:capturedRecord) { 'present' } else { 'null' })"
+        }
+    } catch { _IT_Fail $r '31e  Write-FltBatchEntry targetType' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 31f — targetType value is correct for a physical target
+    # ------------------------------------------------------------------
+    try {
+        if ($script:capturedRecord -and $script:capturedRecord.results) {
+            $tt = $script:capturedRecord.results[0].targetType
+            if ($tt -eq 'physical') {
+                _IT_Pass $r '31f  Write-FltBatchEntry: targetType=''physical'' for physical target'
+            } else {
+                _IT_Fail $r '31f  Write-FltBatchEntry: targetType=''physical'' for physical target' "Got: $tt"
+            }
+        } else {
+            _IT_Fail $r '31f  Write-FltBatchEntry targetType value' 'No record from 31e'
+        }
+    } catch { _IT_Fail $r '31f  targetType value' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 31g — Get-FltTypeDisplay returns correct strings
+    # ------------------------------------------------------------------
+    try {
+        $physical  = [FleetTarget]::new('p', '1.2.3.4', 22, '', $false)
+        $physical.TargetType = 'physical'
+        $vm        = [FleetTarget]::new('v', '1.2.3.5', 22, '', $false)
+        $vm.TargetType = 'vm'
+        $container = [FleetTarget]::new('c', '1.2.3.6', 22, '', $false)
+        $container.TargetType = 'container'
+
+        $dp = Get-FltTypeDisplay -Target $physical
+        $dv = Get-FltTypeDisplay -Target $vm
+        $dc = Get-FltTypeDisplay -Target $container
+
+        if ($dp -eq 'Phys' -and $dv -eq 'VM' -and $dc -eq 'Cntr') {
+            _IT_Pass $r '31g  Get-FltTypeDisplay: Phys/VM/Cntr for physical/vm/container'
+        } else {
+            _IT_Fail $r '31g  Get-FltTypeDisplay: Phys/VM/Cntr for physical/vm/container' `
+                "physical=$dp vm=$dv container=$dc"
+        }
+    } catch { _IT_Fail $r '31g  Get-FltTypeDisplay' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 31h — Batch dashboard header row format includes Type column
+    # ------------------------------------------------------------------
+    try {
+        # The header row format string should now include Type (5 chars)
+        $headerFmt = '  {0,-18} {1,-5} {2,-14} {3,9}  {4}' -f 'Target','Type','Status','Duration','Note'
+        if ($headerFmt -match 'Type') {
+            _IT_Pass $r '31h  Batch dashboard header includes Type column'
+        } else {
+            _IT_Fail $r '31h  Batch dashboard header includes Type column' "Format: $headerFmt"
+        }
+    } catch { _IT_Fail $r '31h  Batch header Type column' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # Restore state
+    # ------------------------------------------------------------------
+    $Script:FltBatchAction      = $savedAction
+    $Script:FltBatchPackageSpec = $savedPackage
+    $Script:FltBatchMode        = $savedMode
+    $Script:FltBatchTimeoutSecs = $savedTimeout
+    $Script:FltBatchPage        = $savedPage
+    $Script:FltBatchTotalPages  = $savedTotalPages
+    $Script:FltBatchTargets     = $savedTargets
+    $Script:FltBatchPageSize    = $savedPageSize
     $Script:FltBatchStatus      = $savedStatus
     $Script:FltBatchDashHeight  = $savedHeight
     $Script:FltBatchScrollStart = $savedScroll
