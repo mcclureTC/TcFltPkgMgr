@@ -965,6 +965,48 @@ are handled correctly.
 
 ---
 
+## Adding and editing targets (Phase 9.1)
+
+### Add target
+
+**Setup → Add target** now prompts for OS and package manager for physical and VM targets.
+
+| Field | Physical / VM | Container |
+|-------|---------------|-----------|
+| Target type | Physical / VM / Container | always Container |
+| OS | 1. Windows (default) / 2. Linux | always Linux |
+| Package manager | tcpkg / WinGet / Both (Windows only) | apt / apk / yum / dnf |
+| Internet Access | prompted (Windows only) | skipped |
+| Host / Port / User | prompted | inherited from Docker host |
+
+Linux and VM targets skip the Internet Access prompt - it has no meaning for Linux.
+
+### Edit target
+
+**Setup → select target → Edit** now shows the current OS, Type, and PackageManager at
+the top of the edit screen and allows changing them:
+
+- OS change: Windows ↔ Linux
+- PackageManager change (Windows only): tcpkg / WinGet / Both
+- Internet Access change (Windows only)
+- Container targets: Host/Port/User/password fields are skipped (inherited)
+
+### Setup dashboard
+
+The Setup targets view now shows a `PM` (package manager) column between Type and Address:
+
+```
+  #    Name                 OS   Type  PM      Address          Port    Internet
+  11.  DCC-1                Win  Phys  tcpkg   10.0.0.1         22      Yes
+  12.  DCC-VM-Debian        Lnx  VM    apt     192.168.1.50     22      ---
+  13.  Web-1                Lnx  Cntr  apt     docker-host/...  22      ---
+```
+
+For targets with no explicit PackageManager set, the column shows the effective default:
+`tcpkg` for Windows, `apt` for Linux and containers.
+
+---
+
 ## File Layout
 
 ```

@@ -324,6 +324,16 @@ function Get-IT_Suites {
             PerTarget   = $false   # fully offline
             Function    = 'Invoke-IT_ComposeLifecycle'
             CheckCount  = 8
+        },
+        [pscustomobject]@{
+            Id          = 36
+            Name        = 'Phase 9.1 OS/PM prompts'
+            Description = 'Add Target OS/PackageManager fields; Edit flow OS/PM/TargetType; Setup dashboard PM column'
+            NeedsTarget = $false
+            NeedsSSH    = $false
+            PerTarget   = $false   # fully offline
+            Function    = 'Invoke-IT_OsPrompts'
+            CheckCount  = 8
         }
     )
 }

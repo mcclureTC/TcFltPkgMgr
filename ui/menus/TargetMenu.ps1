@@ -10,27 +10,79 @@ function Invoke-TargetMenu {
     if ($Target) {
         # Edit an existing target
         Clear-Host
-        Write-Host ("  Editing '$($Target.Name)' — blank keeps current value.") -ForegroundColor Cyan
+        $isContainer = $Target.TargetType -eq 'container'
+        Write-Host "  Editing '$($Target.Name)' — blank keeps current value." -ForegroundColor Cyan
         Write-Host ''
-        $newName = Read-FltValue "  Name   ($($Target.Name)):"   -AllowEmpty
-        $newHost = Read-FltValue "  Host   ($($Target.Address)):"   -AllowEmpty
-        $newPort = Read-FltValue "  Port   ($($Target.Port)):"   -AllowEmpty
-        $newUser = Read-FltValue "  User   ($($Target.User)):"   -AllowEmpty
+        Write-Host "  Current: OS=$($Target.OS)  Type=$($Target.TargetType)  PM=$(if ($Target.PackageManager) { $Target.PackageManager } else { '(auto)' })" -ForegroundColor DarkGray
+        Write-Host ''
+
+        $newName = Read-FltValue "  Name   ($($Target.Name)):"    -AllowEmpty
+        $newHost = if ($isContainer) { '' } else {
+            Read-FltValue "  Host   ($($Target.Address)):" -AllowEmpty
+        }
+        $newPort = if ($isContainer) { '' } else {
+            Read-FltValue "  Port   ($($Target.Port)):"    -AllowEmpty
+        }
+        $newUser = if ($isContainer) { '' } else {
+            Read-FltValue "  User   ($($Target.User)):"    -AllowEmpty
+        }
 
         $plainPwd = ''
-        if (Read-FltYesNo -Prompt 'Update password?') {
+        if (-not $isContainer -and (Read-FltYesNo -Prompt 'Update password?')) {
             $plainPwd = (Read-Host '  New password').Trim()
         }
 
+        # OS change (non-container only)
+        $newOS = ''
+        if (-not $isContainer) {
+            Write-Host ''
+            Write-Host "  OS ($($Target.OS)) — change?" -ForegroundColor Cyan
+            Write-Host '   1. Windows   2. Linux   0. Keep current'
+            Write-Host ''
+            $osEdit = (Read-Host '  Choice (blank = keep)').Trim()
+            $newOS = switch ($osEdit) {
+                '1' { 'windows' }
+                '2' { 'linux'   }
+                default { '' }
+            }
+        }
+
+        # PackageManager change
+        $newPM = ''
+        $effectiveOS = if ($newOS) { $newOS } else { $Target.OS }
+        if (-not $isContainer -and $effectiveOS -eq 'windows') {
+            Write-Host ''
+            $curPM = if ($Target.PackageManager) { $Target.PackageManager } else { 'tcpkg' }
+            Write-Host "  Package manager ($curPM) — change?" -ForegroundColor Cyan
+            Write-Host '   1. tcpkg   2. WinGet   3. Both   0. Keep current'
+            Write-Host ''
+            $pmEdit = (Read-Host '  Choice (blank = keep)').Trim()
+            $newPM = switch ($pmEdit) {
+                '1' { 'tcpkg'  }
+                '2' { 'winget' }
+                '3' { 'both'   }
+                default { '' }
+            }
+        }
+
+        # Internet Access (Windows targets only)
         $newIA = $null
-        if (Read-FltYesNo -Prompt 'Update Internet Access setting?') {
-            $newIA = Read-FltYesNo -Prompt 'Does this target have its own Internet Access?'
+        if (-not $isContainer -and $effectiveOS -eq 'windows') {
+            if (Read-FltYesNo -Prompt 'Update Internet Access setting?') {
+                $newIA = Read-FltYesNo -Prompt 'Does this target have its own Internet Access?'
+            }
         }
 
         $ok = Edit-FleetTarget -Name $Target.Name `
-                  -NewName   $newName -NewHost $newHost `
+                  -NewName   $newName `
+                  -NewHost   $newHost `
                   -NewPort   (if ($newPort -match '^\d+$') { [int]$newPort } else { 0 }) `
-                  -NewUser   $newUser -PlainPassword $plainPwd -InternetAccess $newIA
+                  -NewUser   $newUser `
+                  -PlainPassword $plainPwd `
+                  -InternetAccess $newIA `
+                  -OS            $newOS `
+                  -PackageManager $newPM
+
         Write-Host $(if ($ok) { "  Updated '$($Target.Name)'." } else { "  Update failed." }) `
             -ForegroundColor $(if ($ok) { 'Green' } else { 'Red' })
         Read-Host '  Press Enter'
@@ -128,6 +180,33 @@ function Invoke-TargetMenu {
     }
 
     # ── Physical / VM target flow ──────────────────────────────────────────────
+
+    # OS prompt
+    Write-Host ''
+    Write-Host '  Operating system:' -ForegroundColor Cyan
+    Write-Host '   1. Windows  (default)'
+    Write-Host '   2. Linux'
+    Write-Host ''
+    $osChoice = (Read-Host '  OS').Trim()
+    $os = if ($osChoice -eq '2') { 'linux' } else { 'windows' }
+
+    # PackageManager prompt (Windows only)
+    $pm = ''
+    if ($os -eq 'windows') {
+        Write-Host ''
+        Write-Host '  Package manager:' -ForegroundColor Cyan
+        Write-Host '   1. tcpkg  (TwinCAT packages — default)'
+        Write-Host '   2. WinGet (Windows apps)'
+        Write-Host '   3. Both   (tcpkg + WinGet)'
+        Write-Host ''
+        $pmChoice = (Read-Host '  Choice (blank = tcpkg)').Trim()
+        $pm = switch ($pmChoice) {
+            '2' { 'winget' }
+            '3' { 'both'   }
+            default { 'tcpkg' }
+        }
+    }
+
     $hostAddr = Read-FltValue 'Host address (blank to cancel):' -CancelOnBlank; if (-not $hostAddr) { return }
     $port = Read-FltValue 'Port (blank = 22):' -AllowEmpty
     if (-not $port) { $port = '22' }
@@ -150,26 +229,29 @@ function Invoke-TargetMenu {
         if (-not $keyFile) { return }
     }
 
-    $ia = Read-FltYesNo -Prompt 'Does this target have its own Internet Access?'
-
-    # Set OS based on target type
-    $os = if ($targetType -in @('physical','vm')) { 'windows' } else { 'linux' }
+    # Internet Access — only meaningful for Windows targets
+    $ia = $false
+    if ($os -eq 'windows') {
+        $ia = Read-FltYesNo -Prompt 'Does this target have its own Internet Access?'
+    }
 
     $ok = Add-FleetTarget -Name $name -HostAddress $hostAddr -Port ([int]$port) -User $user `
               -PlainPassword $plainPwd -KeyFile $keyFile -InternetAccess $ia
 
     if ($ok) {
-        # Update OS and TargetType on the newly added target
+        # Set OS, TargetType, PackageManager on the newly added target
         $newTgt = $Script:FleetTargets | Where-Object { $_.Name -eq $name } | Select-Object -First 1
         if ($newTgt) {
-            $newTgt.TargetType = $targetType
+            $newTgt.OS            = $os
+            $newTgt.TargetType    = $targetType
+            $newTgt.PackageManager = $pm
             Save-FltTargets -Targets $Script:FleetTargets | Out-Null
         }
+        Write-Host "  Added '$name' ($os/$targetType$(if ($pm) { '/' + $pm } else { '' }))." -ForegroundColor Green
+    } else {
+        Write-Host "  Add failed (exit $Script:FltLastExit)." -ForegroundColor Red
+        Write-Host "  Command: $Script:FltLastCmd" -ForegroundColor DarkGray
     }
-
-    Write-Host $(if ($ok) { "  Added '$name'." } else { "  Add failed (exit $Script:FltLastExit)." }) `
-        -ForegroundColor $(if ($ok) { 'Green' } else { 'Red' })
-    Write-Host "  Command: $Script:FltLastCmd" -ForegroundColor DarkGray
     Read-Host '  Press Enter'
 }
 
@@ -270,6 +352,13 @@ function _Deploy-ComposeTargets {
                 -Services $Services
     if (-not $pull.Ok) {
         Write-Host "  Pull warning: $($pull.Message)" -ForegroundColor Yellow
+        if ($pull.Output) {
+            Write-Host ''
+            $pull.Output -split "`n" | Select-Object -Last 10 | ForEach-Object {
+                Write-Host "  $_" -ForegroundColor DarkGray
+            }
+            Write-Host ''
+        }
     } else {
         Write-Host '  Pull complete.' -ForegroundColor Green
     }
@@ -282,6 +371,13 @@ function _Deploy-ComposeTargets {
     } else {
         Write-Host "  Start failed: $($up.Message)" -ForegroundColor Red
         Write-Host "  Command: $($up.Command)" -ForegroundColor DarkGray
+        if ($up.Output) {
+            Write-Host ''
+            $up.Output -split "`n" | Select-Object -Last 15 | ForEach-Object {
+                Write-Host "  $_" -ForegroundColor DarkGray
+            }
+            Write-Host ''
+        }
     }
 }
 

@@ -656,3 +656,147 @@ function Invoke-IT_ReachCache {
 
 # Tests that require tcpkg installed locally: target verify, internet access
 # toggle, and config archive export/import.
+
+# ── Suite 36 — Phase 9.1 OS/PM prompts ───────────────────────────────────────
+
+function Invoke-IT_OsPrompts {
+    $r = _IT_NewResult
+
+    _IT_Section 'Phase 9.1 OS/PM prompts'
+
+    $savedTargets    = $Script:FleetTargets
+    $targetsFilePath = Join-Path $Script:FltConfigDir 'targets.local.json'
+    $savedTargetFile = Get-Content $targetsFilePath -Raw -ErrorAction SilentlyContinue
+
+    # Seed a minimal fleet with one Windows and one Linux target
+    $win = [FleetTarget]::new('win-1', '10.0.0.1', 22, 'admin', $true)
+    $win.OS = 'windows'; $win.TargetType = 'physical'; $win.PackageManager = 'tcpkg'
+    $lin = [FleetTarget]::new('lin-1', '10.0.0.2', 22, 'admin', $false)
+    $lin.OS = 'linux';   $lin.TargetType = 'physical'; $lin.PackageManager = ''
+    $vm  = [FleetTarget]::new('vm-1',  '10.0.0.3', 22, 'admin', $false)
+    $vm.OS  = 'linux';   $vm.TargetType  = 'vm';       $vm.PackageManager = ''
+    $Script:FleetTargets = @($win, $lin, $vm)
+
+    # ------------------------------------------------------------------
+    # 36a — FleetTarget: OS field stores 'linux' on a Linux physical target
+    # ------------------------------------------------------------------
+    try {
+        $t = $Script:FleetTargets | Where-Object { $_.Name -eq 'lin-1' }
+        if ($t.OS -eq 'linux') {
+            _IT_Pass $r '36a  FleetTarget.OS stores ''linux'' for Linux physical target'
+        } else {
+            _IT_Fail $r '36a  FleetTarget.OS stores ''linux'' for Linux physical target' `
+                "OS=$($t.OS)"
+        }
+    } catch { _IT_Fail $r '36a  FleetTarget.OS linux' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 36b — FleetTarget: OS field stores 'linux' on a VM target
+    # ------------------------------------------------------------------
+    try {
+        $t = $Script:FleetTargets | Where-Object { $_.Name -eq 'vm-1' }
+        if ($t.OS -eq 'linux' -and $t.TargetType -eq 'vm') {
+            _IT_Pass $r '36b  FleetTarget: VM target can have OS=''linux'' and TargetType=''vm'''
+        } else {
+            _IT_Fail $r '36b  FleetTarget: VM target can have OS=''linux'' and TargetType=''vm''' `
+                "OS=$($t.OS) Type=$($t.TargetType)"
+        }
+    } catch { _IT_Fail $r '36b  FleetTarget VM linux' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 36c — FleetTarget: Windows target PackageManager set correctly
+    # ------------------------------------------------------------------
+    try {
+        $t = $Script:FleetTargets | Where-Object { $_.Name -eq 'win-1' }
+        if ($t.OS -eq 'windows' -and $t.PackageManager -eq 'tcpkg') {
+            _IT_Pass $r '36c  Windows target: OS=''windows'', PackageManager=''tcpkg'''
+        } else {
+            _IT_Fail $r '36c  Windows target: OS=''windows'', PackageManager=''tcpkg''' `
+                "OS=$($t.OS) PM=$($t.PackageManager)"
+        }
+    } catch { _IT_Fail $r '36c  Windows PM' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 36d — Ansible bucket routing: Linux physical routes to Ansible
+    # ------------------------------------------------------------------
+    try {
+        $ansibleTargets = @($Script:FleetTargets | Where-Object {
+            $_.OS -eq 'linux' -and $_.TargetType -ne 'container'
+        })
+        if ($ansibleTargets.Count -eq 2 -and ($ansibleTargets | Where-Object { $_.Name -eq 'lin-1' })) {
+            _IT_Pass $r '36d  Ansible bucket: Linux physical and VM both route to Ansible'
+        } else {
+            _IT_Fail $r '36d  Ansible bucket: Linux physical and VM both route to Ansible' `
+                "Count=$($ansibleTargets.Count) Names=$($ansibleTargets.Name -join ',')"
+        }
+    } catch { _IT_Fail $r '36d  Ansible routing' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 36e — Windows bucket: Linux targets excluded
+    # ------------------------------------------------------------------
+    try {
+        $winTargets = @($Script:FleetTargets | Where-Object {
+            $_.OS -ne 'linux' -and $_.TargetType -ne 'container'
+        })
+        if ($winTargets.Count -eq 1 -and $winTargets[0].Name -eq 'win-1') {
+            _IT_Pass $r '36e  Windows bucket: Linux/VM targets excluded, only Windows remains'
+        } else {
+            _IT_Fail $r '36e  Windows bucket: Linux/VM targets excluded, only Windows remains' `
+                "Count=$($winTargets.Count) Names=$($winTargets.Name -join ',')"
+        }
+    } catch { _IT_Fail $r '36e  Windows bucket' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 36f — Edit-FleetTarget accepts OS and PackageManager parameters
+    # ------------------------------------------------------------------
+    try {
+        $fn = Get-Command 'Edit-FleetTarget' -ErrorAction SilentlyContinue
+        $hasOS = $fn.Parameters.ContainsKey('OS')
+        $hasPM = $fn.Parameters.ContainsKey('PackageManager')
+        if ($hasOS -and $hasPM) {
+            _IT_Pass $r '36f  Edit-FleetTarget accepts -OS and -PackageManager parameters'
+        } else {
+            _IT_Fail $r '36f  Edit-FleetTarget accepts -OS and -PackageManager parameters' `
+                "HasOS=$hasOS HasPM=$hasPM"
+        }
+    } catch { _IT_Fail $r '36f  Edit-FleetTarget params' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 36g — EffectivePackageManager: Linux target resolves to 'apt'
+    # ------------------------------------------------------------------
+    try {
+        $t = $Script:FleetTargets | Where-Object { $_.Name -eq 'lin-1' }
+        $ePM = Get-FltEffectivePackageManager -Target $t
+        if ($ePM -eq 'apt') {
+            _IT_Pass $r '36g  EffectivePackageManager: Linux target with empty PM resolves to ''apt'''
+        } else {
+            _IT_Fail $r '36g  EffectivePackageManager: Linux target with empty PM resolves to ''apt''' `
+                "Got: $ePM"
+        }
+    } catch { _IT_Fail $r '36g  EffectivePackageManager linux' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 36h — EffectivePackageManager: Windows target with 'winget' keeps 'winget'
+    # ------------------------------------------------------------------
+    try {
+        $t = [FleetTarget]::new('win-2', '10.0.0.4', 22, 'admin', $true)
+        $t.OS = 'windows'; $t.PackageManager = 'winget'
+        $ePM = Get-FltEffectivePackageManager -Target $t
+        if ($ePM -eq 'winget') {
+            _IT_Pass $r '36h  EffectivePackageManager: Windows/winget target keeps ''winget'''
+        } else {
+            _IT_Fail $r '36h  EffectivePackageManager: Windows/winget target keeps ''winget''' `
+                "Got: $ePM"
+        }
+    } catch { _IT_Fail $r '36h  EffectivePackageManager winget' $_.Exception.Message }
+
+    # Restore
+    $Script:FleetTargets = $savedTargets
+    if ($null -ne $savedTargetFile) {
+        $savedTargetFile | Set-Content $targetsFilePath -Encoding UTF8 -NoNewline
+    } elseif (Test-Path $targetsFilePath) {
+        Remove-Item $targetsFilePath -Force -ErrorAction SilentlyContinue
+    }
+
+    return $r
+}

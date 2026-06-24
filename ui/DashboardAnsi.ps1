@@ -210,18 +210,22 @@ function _Ansi_ShowSetupDashboard {
         }
         if ($n -eq 0) { _Ansi_PaintRow 3 '  (no sources configured)' 'Dark' }
     } else {
-        $hName = Get-FltSortHeader 'Name'     'Name'           $SortState
-        $hOS   = Get-FltSortHeader 'OS'       'OS'             $SortState
-        $hType = Get-FltSortHeader 'Type'     'TargetType'     $SortState
-        $hAddr = Get-FltSortHeader 'Address'  'Address'        $SortState
-        $hPort = Get-FltSortHeader 'Port'     'Port'           $SortState
-        $hIA   = Get-FltSortHeader 'Internet' 'InternetAccess' $SortState
-        _Ansi_PaintRow 2 ('  {0,3}  {1,-22} {2,-4} {3,-5} {4,-18} {5,-6} {6}' -f `
-            '#', $hName, $hOS, $hType, $hAddr, $hPort, $hIA) 'Dark'
+        $hName = Get-FltSortHeader 'Name'    'Name'           $SortState
+        $hOS   = Get-FltSortHeader 'OS'      'OS'             $SortState
+        $hType = Get-FltSortHeader 'Type'    'TargetType'     $SortState
+        $hPM   = Get-FltSortHeader 'PM'      'PackageManager' $SortState
+        $hAddr = Get-FltSortHeader 'Address' 'Address'        $SortState
+        $hPort = Get-FltSortHeader 'Port'    'Port'           $SortState
+        $hIA   = Get-FltSortHeader 'Internet''InternetAccess' $SortState
+        _Ansi_PaintRow 2 ('  {0,3}  {1,-20} {2,-4} {3,-5} {4,-7} {5,-16} {6,-6} {7}' -f `
+            '#', $hName, $hOS, $hType, $hPM, $hAddr, $hPort, $hIA) 'Dark'
         for ($i = 0; $i -lt $n; $i++) {
             $t    = $display[$i]
             $os   = if ($t.OS -eq 'linux') { 'Lnx' } elseif ($t.OS -eq 'macos') { 'Mac' } else { 'Win' }
             $type = if ($t.TargetType -eq 'container') { 'Cntr' } elseif ($t.TargetType -eq 'vm') { 'VM' } else { 'Phys' }
+            $pm   = if ($t.PackageManager) { $t.PackageManager } `
+                    elseif ($t.OS -eq 'linux') { 'apt' } `
+                    elseif ($t.TargetType -eq 'container') { 'apt' } else { 'tcpkg' }
             $addr = if ($t.TargetType -eq 'container' -and $t.DockerHost -and $t.ContainerName) {
                 "$($t.DockerHost)/$($t.ContainerName)"
             } else { $t.Address }
@@ -231,8 +235,8 @@ function _Ansi_ShowSetupDashboard {
             $rowClr = if ($t.TargetType -eq 'container')                          { 'Magenta' }
                       elseif ($t.OS -eq 'linux' -or $t.OS -eq 'macos')            { 'Cyan'    }
                       else                                                         { ''        }
-            _Ansi_PaintRow (3 + $i) ('  {0,3}. {1,-22} {2,-4} {3,-5} {4,-18} {5,-6} {6}' -f `
-                ($i + 11), $t.Name, $os, $type, $addr, $t.Port, $ia) $rowClr
+            _Ansi_PaintRow (3 + $i) ('  {0,3}. {1,-20} {2,-4} {3,-5} {4,-7} {5,-16} {6,-6} {7}' -f `
+                ($i + 11), $t.Name, $os, $type, $pm, $addr, $t.Port, $ia) $rowClr
         }
         if ($n -eq 0) { _Ansi_PaintRow 3 '  (no remote targets configured)' 'Dark' }
     }

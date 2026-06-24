@@ -997,7 +997,7 @@ be captured before passing to the scriptblock. Apply the same pattern in
 
 ## Phase 9 — Setup menu updates
 
-### 9.1 — Add target: OS/PackageManager prompts (physical and VM targets)
+### 9.1 — Add target: OS/PackageManager prompts (physical and VM targets) ✅
 
 > **Already completed in earlier phases:**
 > - TargetType prompt (Physical/VM/Container) - done in Phase 7.4
@@ -1006,12 +1006,18 @@ be captured before passing to the scriptblock. Apply the same pattern in
 > **Active bug:** Adding a Debian VMware VM today silently sets OS='windows',
 > routing it to tcpkg/WinGet buckets instead of Ansible. This must be fixed.
 
-- [ ] `OS: 1. Windows  2. Linux  (default = Windows):` prompt for Physical/VM
+- [x] `OS: 1. Windows  2. Linux  (default = Windows):` prompt for Physical/VM
       targets after TargetType; skip for containers (always Linux)
-- [ ] If Windows: `Package manager: 1. tcpkg  2. WinGet  3. Both  (default 1):`
-- [ ] If Linux or VM: skip Internet Access prompt
-- [ ] Edit flow: show current OS/TargetType/PackageManager, allow changes
-- [ ] Add `OS`, `Type`, `PackageManager` columns to Setup dashboard
+- [x] If Windows: `Package manager: 1. tcpkg  2. WinGet  3. Both  (default 1):`
+- [x] If Linux or VM: skip Internet Access prompt
+- [x] Edit flow: show current OS/TargetType/PackageManager, allow changes
+- [x] Add `OS`, `Type`, `PackageManager` columns to Setup dashboard
+- [x] `IT-Infrastructure.ps1` Suite 36 (OS/PM prompts) — 8 checks (36a–36h),
+      fully offline: OS field storage (36a–36b), PM field (36c), Ansible routing
+      (36d–36e), Edit-FleetTarget params (36f), EffectivePackageManager (36g–36h)
+- [x] `DashboardAnsi.ps1` — PM column added to Setup dashboard
+- [x] Security: no hardcoded secrets
+- [x] `README.md`: Phase 9.1 section added
 
 ### 9.2 — Prerequisites check (`ui/menus/TargetMenu.ps1`)
 

@@ -591,6 +591,27 @@ Tests the compose-aware routing helpers and Deploy menu in `ui/menus/ContainerMe
 
 ---
 
+### Suite 36 — Phase 9.1 OS/PackageManager prompts
+
+**Infrastructure required:** None (fully offline)
+**Per target:** No
+**Check count:** 8 (36a–36h)
+
+Tests that OS, TargetType, and PackageManager fields are correctly stored on fleet targets and that routing buckets work accordingly. Uses a synthetic fleet with one Windows, one Linux physical, and one Linux VM target.
+
+| # | Test name | What is tested | How verified |
+|---|-----------|----------------|--------------|
+| 36a | Linux physical OS field | `FleetTarget.OS = 'linux'` for a Linux physical target | Checks `OS -eq 'linux'` |
+| 36b | Linux VM OS + Type fields | VM target can have `OS='linux'` and `TargetType='vm'` simultaneously | Checks both fields |
+| 36c | Windows PackageManager | Windows target has `OS='windows'` and `PackageManager='tcpkg'` | Checks both fields |
+| 36d | Ansible routing | Linux physical and VM both appear in Ansible bucket (`OS='linux' AND TargetType != 'container'`) | Checks Count=2 and names |
+| 36e | Windows bucket excludes Linux | Only the Windows target remains after Linux/VM are routed to Ansible | Checks Count=1 and name='win-1' |
+| 36f | Edit-FleetTarget parameters | `Edit-FleetTarget` accepts `-OS` and `-PackageManager` parameters | `Get-Command` parameter check |
+| 36g | EffectivePackageManager Linux | Linux target with empty PM resolves to `'apt'` | Checks return value |
+| 36h | EffectivePackageManager WinGet | Windows target with explicit `'winget'` PM keeps `'winget'` | Checks return value |
+
+---
+
 ## Adding New Tests
 
 When implementing a new phase, add tests in the appropriate location:
