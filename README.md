@@ -1049,6 +1049,27 @@ or `hosts: all` to target everything in the generated inventory.
 
 ---
 
+## System menu (8. System)
+
+Access via **Fleet → 8. System**.
+
+### 1. Startup check
+
+Checks and optionally remediates the operator environment in order:
+
+1. **Docker Desktop** — if stopped, prompts to start it and waits up to 60 seconds
+   (countdown shown). Press **Escape** or **Q** to skip.
+2. **`tcflt-ansible` container** — if stopped, runs `docker start tcflt-ansible` automatically.
+3. **Linux targets** — SSH TCP probe on each Linux fleet target.
+4. **Windows targets** — SSH TCP probe on each Windows fleet target.
+
+### 2. Health check
+
+Read-only snapshot of current system state — same checks as startup but no remediation.
+Useful for confirming everything is ready before running fleet operations.
+
+---
+
 ## File Layout
 
 ```

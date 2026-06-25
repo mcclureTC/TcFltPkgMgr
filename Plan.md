@@ -1055,6 +1055,38 @@ be captured before passing to the scriptblock. Apply the same pattern in
 - [x] Security: no hardcoded secrets
 - [x] `README.md`: Phase 9.1 section added
 
+### 9.x — System menu (Fleet → 8. System) ✅
+
+New top-level fleet menu item alongside tcpkg, WinGet, Linux Admin, Containers.
+
+- [x] `ui/menus/SystemMenu.ps1` — new file
+- [x] `Invoke-FltStartupCheck` — Docker Desktop detection + 60s countdown retry
+      (Escape/Q to skip); auto-start `tcflt-ansible`; SSH probe all Linux + Windows targets
+- [x] `Invoke-FltHealthCheck` — read-only snapshot of same checks
+- [x] `Invoke-SystemMenu` — submenu with choices 1 (startup) and 2 (health)
+- [x] `FleetMenu.ps1` — choice 8 dispatches to `Invoke-SystemMenu`
+- [x] `DashboardAnsi.ps1` — footer updated: `8. System` added
+- [x] `TcFltPkgMgr.ps1` — `SystemMenu.ps1` added to module loader
+- [x] Security: no hardcoded secrets
+- [x] `README.md`: System menu section added
+
+> **VMware VM disk encryption note:**
+> If the VM was installed with full-disk encryption (LUKS), the startup check
+> can power on the VM via `vmrun start` but SSH will not be available until
+> the LUKS passphrase is entered at the console. There is no safe way to
+> automate this without compromising the encryption.
+>
+> **Option B — Dropbear initramfs (future improvement):**
+> Install `dropbear-initramfs` on the VM to enable a tiny SSH server that
+> starts before LUKS decryption. The startup check could then:
+> 1. SSH to the VM on port 22 (Dropbear)
+> 2. Run `cryptroot-unlock` and pipe the passphrase (retrieved from the
+>    TcFltPkgMgr Vault)
+> 3. Wait for the VM to finish booting and SSH to become available
+> This requires the LUKS passphrase to be stored in the Vault (Phase 5.6)
+> and Dropbear configured with the `tcflt-ansible` public key.
+> For now: reinstall VM without disk encryption (Option A).
+
 ### 9.2 — Prerequisites check (`ui/menus/TargetMenu.ps1`)
 
 > The built-in diagnostics (Setup > 10) already cover tcpkg, Posh-SSH, and

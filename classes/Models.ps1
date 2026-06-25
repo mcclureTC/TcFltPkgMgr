@@ -20,6 +20,7 @@ class FleetTarget {
     [string] $ComposeFile     # relative path to compose file from TcFltPkgMgr root (containers only)
     [string] $ComposeService  # service name within the compose file (containers only)
     [string] $ComposeProject  # --project-name for docker compose (derived from filename)
+    [string] $VmxPath         # absolute path to .vmx file (VM targets only, operator-local)
 
     FleetTarget() {
         $this.Port          = 22
@@ -32,6 +33,7 @@ class FleetTarget {
         $this.ComposeFile   = ''
         $this.ComposeService = ''
         $this.ComposeProject = ''
+        $this.VmxPath        = ''
     }
 
     FleetTarget([string]$Name, [string]$Address, [int]$Port,
@@ -50,6 +52,7 @@ class FleetTarget {
         $this.ComposeFile    = ''
         $this.ComposeService = ''
         $this.ComposeProject = ''
+        $this.VmxPath        = ''
     }
 
     # Returns the effective package manager — resolves empty string to OS default

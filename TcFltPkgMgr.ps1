@@ -108,6 +108,7 @@ $modules = @(
     'ui\menus\WinGetMenu.ps1',
     'ui\menus\LinuxMenu.ps1',
     'ui\menus\ContainerMenu.ps1',
+    'ui\menus\SystemMenu.ps1',
     'ui\menus\UiConfigMenu.ps1',
     'ui\menus\FleetMenu.ps1'
 )

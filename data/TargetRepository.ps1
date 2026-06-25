@@ -124,6 +124,10 @@ function _Target-ToHashtable {
         PackageManager = $Target.PackageManager
         DockerHost     = $Target.DockerHost
         ContainerName  = $Target.ContainerName
+        ComposeFile    = $Target.ComposeFile
+        ComposeService = $Target.ComposeService
+        ComposeProject = $Target.ComposeProject
+        VmxPath        = $Target.VmxPath
     }
 }
 
@@ -142,6 +146,10 @@ function _Target-FromHashtable {
     if ($Ht.PackageManager) { $t.PackageManager = [string]$Ht.PackageManager }
     if ($Ht.DockerHost)     { $t.DockerHost     = [string]$Ht.DockerHost }
     if ($Ht.ContainerName)  { $t.ContainerName  = [string]$Ht.ContainerName }
+    if ($Ht.ComposeFile)    { $t.ComposeFile    = [string]$Ht.ComposeFile }
+    if ($Ht.ComposeService) { $t.ComposeService = [string]$Ht.ComposeService }
+    if ($Ht.ComposeProject) { $t.ComposeProject = [string]$Ht.ComposeProject }
+    if ($Ht.VmxPath)        { $t.VmxPath        = [string]$Ht.VmxPath }
     return $t
 }
 
@@ -354,7 +362,8 @@ function Edit-FleetTarget {
         [object] $InternetAccess = $null,
         [string] $OS             = '',
         [string] $TargetType     = '',
-        [string] $PackageManager = ''
+        [string] $PackageManager = '',
+        [string] $VmxPath        = $null
     )
 
     $targets  = @(Get-FleetTargets -Silent)
@@ -395,6 +404,7 @@ function Edit-FleetTarget {
     if ($OS)                  { $existing.OS            = $OS }
     if ($TargetType)          { $existing.TargetType    = $TargetType }
     if ($PackageManager)      { $existing.PackageManager = $PackageManager }
+    if ($null -ne $VmxPath)   { $existing.VmxPath       = $VmxPath }
 
     return Save-FltTargets -Targets $targets
 }

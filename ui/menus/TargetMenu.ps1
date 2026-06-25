@@ -73,15 +73,26 @@ function Invoke-TargetMenu {
             }
         }
 
+        # VmxPath (VM targets only)
+        $newVmxPath = ''
+        if ($Target.TargetType -eq 'vm') {
+            $curVmx = if ($Target.VmxPath) { $Target.VmxPath } else { '(not set)' }
+            Write-Host ''
+            Write-Host "  VMX path ($curVmx):" -ForegroundColor DarkGray
+            $newVmxPath = Read-FltValue 'New .vmx path (blank to keep current):' -AllowEmpty
+        }
+
+        $resolvedPort = if ($newPort -match '^\d+$') { [int]$newPort } else { 0 }
         $ok = Edit-FleetTarget -Name $Target.Name `
-                  -NewName   $newName `
-                  -NewHost   $newHost `
-                  -NewPort   (if ($newPort -match '^\d+$') { [int]$newPort } else { 0 }) `
-                  -NewUser   $newUser `
-                  -PlainPassword $plainPwd `
+                  -NewName        $newName `
+                  -NewHost        $newHost `
+                  -NewPort        $resolvedPort `
+                  -NewUser        $newUser `
+                  -PlainPassword  $plainPwd `
                   -InternetAccess $newIA `
-                  -OS            $newOS `
-                  -PackageManager $newPM
+                  -OS             $newOS `
+                  -PackageManager $newPM `
+                  -VmxPath        $newVmxPath
 
         Write-Host $(if ($ok) { "  Updated '$($Target.Name)'." } else { "  Update failed." }) `
             -ForegroundColor $(if ($ok) { 'Green' } else { 'Red' })
@@ -235,9 +246,20 @@ function Invoke-TargetMenu {
         $ia = Read-FltYesNo -Prompt 'Does this target have its own Internet Access?'
     }
 
+    # VMX path — VM targets only (for auto-start via vmrun.exe)
+    $vmxPath = ''
+    if ($targetType -eq 'vm') {
+        Write-Host ''
+        Write-Host '  VMware VM file (optional — for auto-start in System > Startup check):' -ForegroundColor DarkGray
+        $vmxPath = Read-FltValue 'Path to .vmx file (blank to skip):' -AllowEmpty
+        if ($vmxPath -and -not (Test-Path $vmxPath)) {
+            Write-Host "  Warning: file not found at '$vmxPath' — saved anyway." -ForegroundColor Yellow
+        }
+    }
+
     $ok = Add-FleetTarget -Name $name -HostAddress $hostAddr -Port ([int]$port) -User $user `
               -PlainPassword $plainPwd -KeyFile $keyFile -InternetAccess $ia `
-              -OS $os -TargetType $targetType -PackageManager $pm
+              -OS $os -TargetType $targetType -PackageManager $pm -VmxPath $vmxPath
 
     if ($ok) {
         Write-Host "  Added '$name' ($os/$targetType$(if ($pm) { '/' + $pm } else { '' }))." -ForegroundColor Green
