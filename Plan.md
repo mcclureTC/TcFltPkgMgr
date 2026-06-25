@@ -1166,6 +1166,15 @@ New top-level fleet menu item alongside tcpkg, WinGet, Linux Admin, Containers.
 | Log system | I5 | No | Entry written, retrieved, retention preserves current log |
 | Reachability cache | I6 | Optional | Cache skip, expiry, live population |
 
+> **OsFilter support added (2026-06-25):**
+> Suite metadata now includes `OsFilter = 'windows' | 'linux' | 'any'`.
+> `_TR_RunIntSuite` filters targets to only those matching the suite OS before
+> running. Suites 13, 17, 18, 19, 20 = `windows`; suites 21–27 = `linux`.
+> When running all integration (option 9), Windows and Linux credentials are
+> prompted separately so mixed fleets can run all suites in one pass.
+> Tests 25i–25l updated to use PLAY RECAP output format (not JSON ad-hoc).
+> Total checks: 225 (up from 205).
+
 ### 10.5.3 — Future integration suites (add as phases complete)
 
 - [x] Phase 3: WinGet install via SSH (I7)

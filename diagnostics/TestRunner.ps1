@@ -172,6 +172,21 @@ function _TR_RunIntSuite {
         [FleetTarget[]]  $Targets    = @(),
         [System.Management.Automation.PSCredential] $Credential = $null
     )
+
+    # Filter targets to only those matching the suite's OsFilter
+    $osFilter = if ($Suite.PSObject.Properties['OsFilter']) { $Suite.OsFilter } else { 'any' }
+    if ($osFilter -eq 'windows') {
+        $Targets = @($Targets | Where-Object { $_.OS -ne 'linux' })
+    } elseif ($osFilter -eq 'linux') {
+        $Targets = @($Targets | Where-Object { $_.OS -eq 'linux' })
+    }
+    # If suite needs a target but none match the OS filter, skip gracefully
+    if ($Suite.NeedsTarget -and $Targets.Count -eq 0) {
+        $r = _IT_NewResult
+        $r | Add-Member -NotePropertyName 'Skipped' -NotePropertyValue $Suite.CheckCount -Force
+        return $r
+    }
+
     Clear-Host
     Write-Host ''
     Write-Host "  Integration Test: $($Suite.Name)" -ForegroundColor White
@@ -370,18 +385,36 @@ function Invoke-FltTestRunner {
         # 9 — run all integration suites
         if ($num -eq 9) {
             $selObjs = @($Script:FleetTargets | Where-Object { $selectedTargets -contains $_.Name })
-            $cred    = $null
+            $cred      = $null
+            $credLinux = $null
             if ($itSuites | Where-Object { $_.NeedsSSH }) {
                 if ($selObjs.Count -eq 0) {
                     $result = 'SSH suite needs a target — toggle one with 101+'
                     $resultClr = 'Yellow'
                     continue
                 }
-                $cred = _TR_GetCredential -Target ($selObjs | Select-Object -First 1)
+                # Separate credentials for Windows and Linux targets
+                $winTarget   = $selObjs | Where-Object { $_.OS -ne 'linux' } | Select-Object -First 1
+                $linuxTarget = $selObjs | Where-Object { $_.OS -eq 'linux' } | Select-Object -First 1
+
+                if ($winTarget) {
+                    Write-Host "  Windows credential (for $($winTarget.Name)):" -ForegroundColor DarkGray
+                    $cred = _TR_GetCredential -Target $winTarget
+                }
+                if ($linuxTarget) {
+                    Write-Host "  Linux credential (for $($linuxTarget.Name)):" -ForegroundColor DarkGray
+                    $credLinux = _TR_GetCredential -Target $linuxTarget
+                }
+                # Fallback: if only one OS type selected, use same cred for both
+                if (-not $cred)      { $cred      = $credLinux }
+                if (-not $credLinux) { $credLinux = $cred }
             }
             $tp = 0; $tf = 0; $tw = 0
             foreach ($suite in $itSuites) {
-                $r = _TR_RunIntSuite -Suite $suite -Targets $selObjs -Credential $cred
+                # Pass credential matching the suite's OS filter
+                $suiteOs   = if ($suite.PSObject.Properties['OsFilter']) { $suite.OsFilter } else { 'any' }
+                $suiteCred = if ($suiteOs -eq 'linux' -and $credLinux) { $credLinux } else { $cred }
+                $r = _TR_RunIntSuite -Suite $suite -Targets $selObjs -Credential $suiteCred
                 $sk1 = if ($r.PSObject.Properties['Skipped']) { $r.Skipped } else { 0 }
           Save-FltTestResult -SuiteKey "IT$($suite.Id)" `
                     -Passed $r.Passed -Failed $r.Failed -Warned $r.Warned -Skipped $sk1

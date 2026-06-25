@@ -102,6 +102,7 @@ function Get-IT_Suites {
             NeedsTarget = $true
             NeedsSSH    = $true
             PerTarget   = $true    # runs against each selected target
+            OsFilter    = 'windows'
             Function    = 'Invoke-IT_SSH'
             CheckCount  = 5
         },
@@ -142,6 +143,7 @@ function Get-IT_Suites {
             NeedsTarget = $false
             NeedsSSH    = $false
             PerTarget   = $true    # target-specific tests run per selected target
+            OsFilter    = 'windows'
             Function    = 'Invoke-IT_TcpkgLocal'
             CheckCount  = 9
         },
@@ -152,6 +154,7 @@ function Get-IT_Suites {
             NeedsTarget = $false
             NeedsSSH    = $false
             PerTarget   = $true    # remote status query runs per target
+            OsFilter    = 'windows'
             Function    = 'Invoke-IT_PackageQueries'
             CheckCount  = 3
         },
@@ -162,6 +165,7 @@ function Get-IT_Suites {
             NeedsTarget = $false
             NeedsSSH    = $false
             PerTarget   = $false   # routing logic is local; search runs once
+            OsFilter    = 'windows'
             Function    = 'Invoke-IT_WinGet'
             CheckCount  = 11
         },
@@ -172,6 +176,7 @@ function Get-IT_Suites {
             NeedsTarget = $true
             NeedsSSH    = $true
             PerTarget   = $true    # runs against each selected target
+            OsFilter    = 'windows'
             Function    = 'Invoke-IT_WinGetLive'
             CheckCount  = 9
         },
@@ -182,6 +187,7 @@ function Get-IT_Suites {
             NeedsTarget = $false
             NeedsSSH    = $false
             PerTarget   = $false   # local check only
+            OsFilter    = 'linux'
             Function    = 'Invoke-IT_Ansible'
             CheckCount  = 7
         },
@@ -192,6 +198,7 @@ function Get-IT_Suites {
             NeedsTarget = $false
             NeedsSSH    = $false
             PerTarget   = $false
+            OsFilter    = 'linux'
             Function    = 'Invoke-IT_DockerOperator'
             CheckCount  = 5
         },
@@ -202,6 +209,7 @@ function Get-IT_Suites {
             NeedsTarget = $false
             NeedsSSH    = $false
             PerTarget   = $false   # fully offline — synthetic targets only
+            OsFilter    = 'linux'
             Function    = 'Invoke-IT_AnsibleInventory'
             CheckCount  = 13
         },
@@ -212,6 +220,7 @@ function Get-IT_Suites {
             NeedsTarget = $false
             NeedsSSH    = $false
             PerTarget   = $false   # fully offline — no Ansible required
+            OsFilter    = 'linux'
             Function    = 'Invoke-IT_AnsiblePlaybook'
             CheckCount  = 15
         },
@@ -222,6 +231,7 @@ function Get-IT_Suites {
             NeedsTarget = $false
             NeedsSSH    = $false
             PerTarget   = $false   # offline — parser tested directly; live run tested in Phase 5.5+
+            OsFilter    = 'linux'
             Function    = 'Invoke-IT_AnsibleBatch'
             CheckCount  = 13
         },
@@ -232,6 +242,7 @@ function Get-IT_Suites {
             NeedsTarget = $false
             NeedsSSH    = $false
             PerTarget   = $false   # fully offline — read-only mode exercises bucket logic
+            OsFilter    = 'linux'
             Function    = 'Invoke-IT_FleetRouting'
             CheckCount  = 10
         },
@@ -242,6 +253,7 @@ function Get-IT_Suites {
             NeedsTarget = $false
             NeedsSSH    = $false
             PerTarget   = $false   # fully offline — credential store and temp file only
+            OsFilter    = 'linux'
             Function    = 'Invoke-IT_AnsibleVault'
             CheckCount  = 8
         },

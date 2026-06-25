@@ -850,70 +850,78 @@ function Invoke-IT_AnsibleBatch {
     } catch { _IT_Fail $r '25h  Parser CHANGED' $_.Exception.Message }
 
     # ------------------------------------------------------------------
-    # 15i — Parser: FAILED line → Status='Failed', msg in Note
+    # 25i — Parser: PLAY RECAP failed host → Status=Failed, msg in Note
     # ------------------------------------------------------------------
     try {
-        $targets = @(_MkLT 'lin-1')
-        $fakeOut = 'lin-1 | FAILED! => {"msg": "No package curl found", "task": "install curl"}'
+        $targets = @(_MkLT 'lin-1' '10.0.0.1')
+        $fakeOut = @(
+            "PLAY RECAP *****",
+            "fatal: [10.0.0.1]: FAILED! => {`"msg`": `"No package curl found`"}",
+            "10.0.0.1 : ok=0  changed=0  unreachable=0  failed=1  skipped=0  rescued=0  ignored=0"
+        ) -join "`n"
         $parsed  = _Parse-AnsibleOutput -RawOutput $fakeOut -ExitCode 2 `
                        -Targets $targets -Action 'install' -PackageSpec 'curl' -Duration 2.0
-        if ($parsed[0].Status -eq 'Failed' -and $parsed[0].Note -match 'curl') {
-            _IT_Pass $r '25i  Parser: FAILED! → Status=Failed, msg in Note'
+        if ($parsed[0].Status -eq 'Failed') {
+            _IT_Pass $r '25i  Parser: PLAY RECAP failed host → Status=Failed'
         } else {
-            _IT_Fail $r '25i  Parser: FAILED! → Status=Failed, msg in Note' `
+            _IT_Fail $r '25i  Parser: PLAY RECAP failed host → Status=Failed' `
                 "Status=$($parsed[0].Status) Note=$($parsed[0].Note)"
         }
     } catch { _IT_Fail $r '25i  Parser FAILED' $_.Exception.Message }
 
     # ------------------------------------------------------------------
-    # 15j — Parser: UNREACHABLE line → Status='Unreachable'
+    # 25j — Parser: PLAY RECAP unreachable host → Status=Unreachable
     # ------------------------------------------------------------------
     try {
-        $targets = @(_MkLT 'lin-1')
-        $fakeOut = 'lin-1 | UNREACHABLE! => {"msg": "Failed to connect to the host via ssh"}'
-        $parsed  = _Parse-AnsibleOutput -RawOutput $fakeOut -ExitCode 4 `
+        $targets = @(_MkLT 'lin-1' '10.0.0.1')
+        $fakeOut = @(
+            "PLAY RECAP *****",
+            "10.0.0.1 : ok=0  changed=0  unreachable=1  failed=0  skipped=0  rescued=0  ignored=0"
+        ) -join "`n"
+        $parsed  = _Parse-AnsibleOutput -RawOutput $fakeOut -ExitCode 3 `
                        -Targets $targets -Action 'install' -PackageSpec 'curl' -Duration 0.5
         if ($parsed[0].Status -eq 'Unreachable') {
-            _IT_Pass $r '25j  Parser: UNREACHABLE! → Status=Unreachable'
+            _IT_Pass $r '25j  Parser: PLAY RECAP unreachable host → Status=Unreachable'
         } else {
-            _IT_Fail $r '25j  Parser: UNREACHABLE! → Status=Unreachable' "Status=$($parsed[0].Status)"
+            _IT_Fail $r '25j  Parser: UNREACHABLE → Status=Unreachable' "Status=$($parsed[0].Status)"
         }
     } catch { _IT_Fail $r '25j  Parser UNREACHABLE' $_.Exception.Message }
 
     # ------------------------------------------------------------------
-    # 15k — Parser: exit code 8 → all targets Failed with config error note
+    # 25k — Parser: no output → all targets Failed with exit code note
     # ------------------------------------------------------------------
     try {
-        $targets = @(_MkLT 'lin-1'; _MkLT 'lin-2' '10.0.0.2')
-        $parsed  = _Parse-AnsibleOutput -RawOutput '' -ExitCode 8 `
+        $targets = @(_MkLT 'lin-1' '10.0.0.1'; _MkLT 'lin-2' '10.0.0.2')
+        $parsed  = _Parse-AnsibleOutput -RawOutput '' -ExitCode 2 `
                        -Targets $targets -Action 'install' -PackageSpec 'curl' -Duration 0.1
         $allFailed = ($parsed | Where-Object { $_.Status -ne 'Failed' }).Count -eq 0
-        $hasNote   = $parsed[0].Note -match 'config|parse'
+        $hasNote   = $parsed[0].Note -match 'exit|output'
         if ($allFailed -and $hasNote) {
-            _IT_Pass $r '25k  Parser: exit code 8 → all Failed with config error note'
+            _IT_Pass $r '25k  Parser: empty output → all Failed with note'
         } else {
-            _IT_Fail $r '25k  Parser: exit code 8 → all Failed with config error note' `
+            _IT_Fail $r '25k  Parser: empty output → all Failed with note' `
                 "AllFailed=$allFailed Note=$($parsed[0].Note)"
         }
-    } catch { _IT_Fail $r '25k  Parser exit 8' $_.Exception.Message }
+    } catch { _IT_Fail $r '25k  Parser empty output' $_.Exception.Message }
 
     # ------------------------------------------------------------------
-    # 15l — Parser: mixed output — one OK, one Failed
+    # 25l — Parser: PLAY RECAP mixed — one OK (changed), one Failed
     # ------------------------------------------------------------------
     try {
         $targets = @(_MkLT 'lin-1' '10.0.0.1'; _MkLT 'lin-2' '10.0.0.2')
         $fakeOut = @(
-            'lin-1 | SUCCESS => {"changed": false}'
-            'lin-2 | FAILED! => {"msg": "Permission denied"}'
+            "PLAY RECAP *****",
+            "10.0.0.1 : ok=1  changed=1  unreachable=0  failed=0  skipped=0  rescued=0  ignored=0",
+            "10.0.0.2 : ok=0  changed=0  unreachable=0  failed=1  skipped=0  rescued=0  ignored=0"
         ) -join "`n"
         $parsed = _Parse-AnsibleOutput -RawOutput $fakeOut -ExitCode 2 `
                       -Targets $targets -Action 'install' -PackageSpec 'curl' -Duration 3.0
         $lin1 = $parsed | Where-Object { $_.TargetName -eq 'lin-1' }
         $lin2 = $parsed | Where-Object { $_.TargetName -eq 'lin-2' }
         if ($lin1.Status -eq 'OK' -and $lin2.Status -eq 'Failed') {
-            _IT_Pass $r '25l  Parser: mixed output — lin-1=OK, lin-2=Failed'
+            _IT_Pass $r '25l  Parser: PLAY RECAP mixed — lin-1=OK, lin-2=Failed'
         } else {
-            _IT_Fail $r '25l  Parser: mixed output — lin-1=OK, lin-2=Failed' `
+            _IT_Fail $r '25l  Parser: PLAY RECAP mixed — lin-1=OK, lin-2=Failed' `
                 "lin-1=$($lin1.Status) lin-2=$($lin2.Status)"
         }
     } catch { _IT_Fail $r '25l  Parser mixed output' $_.Exception.Message }

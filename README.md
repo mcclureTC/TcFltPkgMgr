@@ -1089,6 +1089,25 @@ without them; only the specific feature they support is unavailable.
 
 ---
 
+## Integration test suite OS filtering
+
+Each integration suite has an `OsFilter` field that controls which fleet
+targets it runs against:
+
+| Filter | Suites | Reason |
+|--------|--------|--------|
+| `windows` | 13, 17, 18, 19, 20 | SSH/tcpkg/WinGet — Windows targets only |
+| `linux` | 21–27 | Ansible — Linux targets only |
+| `any` | all others | Offline or OS-agnostic |
+
+When running **option 9 (all integration)** with a mixed fleet selected,
+the test runner prompts for Windows and Linux credentials separately,
+then routes each suite to the correct credential and target set automatically.
+
+Total: **225 checks** across 26 suites + 35 diagnostic checks.
+
+---
+
 ## File Layout
 
 ```
