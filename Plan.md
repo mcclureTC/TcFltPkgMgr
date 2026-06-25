@@ -692,7 +692,7 @@ remote management, and hosting the Ansible operator container.
 ---
 
 
-### 6.7 — Live testing (VMware Debian VM) (in progress)
+### 6.7 — Live testing (VMware Debian VM) ✅
 
 > **Target:** VMware Debian 12 VM at 192.168.223.128, user Administrator.
 > `tcflt-ansible` container on operator PC, key-based auth, NOPASSWD sudo.
@@ -717,7 +717,7 @@ remote management, and hosting the Ansible operator container.
 - [x] Add a user (with groups) to one Linux target
 - [x] Start/stop a service on one Linux target (`nginx` — `cron` not installed on this VM)
 - [x] Run a custom playbook file against a Linux target
-- [ ] Run install across 3+ Linux targets simultaneously (blocked — only 1 Linux target)
+- [x] Run install across 2 Linux targets simultaneously — both OK in 2.7s (Phase 6.7 complete)
 
 > **Bugs fixed in AnsibleExecutor.ps1 during live testing:**
 > - `--one-line -o json` invalid for `ansible-playbook` — removed; PLAY RECAP
@@ -734,11 +734,12 @@ remote management, and hosting the Ansible operator container.
 >   generated timestamp pattern `<action>-<timestamp>.yml`
 > - `Dockerfile.ansible` had no SSH keypair — `ssh-keygen` runs at build time
 >
-> **Integration test suite (Suite 37):** To be written once all items above are
-> confirmed working. Suite 37 will be a live suite requiring SSH + Ansible.
-> Suite numbers 31-36 are taken; next free number is 37.
-> Note: original plan referenced "Suite 31 Linux Admin live" — that number is
-> now used by Phase 8.0 pre-work.
+> **Suite 37 ✅** — Linux Admin live (install/verify/remove). Live suite
+> requiring SSH + Ansible. 6 checks (37a–37f): pre-cleanup, verify not
+> installed, install via Ansible, verify installed (dpkg -l), remove via
+> Ansible, verify removed. Runs against all selected Linux targets.
+> Verified on `Beckhoff RT Linux 2` and `Beckhoff RT Linux 3` simultaneously.
+> dpkg.log on VM confirms actual installs and removes at correct timestamps.
 >
 > **Security:** No hardcoded secrets. `README.md` updated with Ansible prerequisites.
 
@@ -1190,6 +1191,31 @@ New top-level fleet menu item alongside tcpkg, WinGet, Linux Admin, Containers.
 - [x] Phase 5: Ansible playbook execution (I8)
 - [x] Phase 7: Docker exec batch (I9)
 - [x] Phase 7: Docker container reachability check (I10)
+
+---
+
+## Phase 9.x — Prepare Linux target (`execution/LinuxPrepExecutor.ps1`) ✅
+
+New file. Bootstraps a fresh Debian VM into a managed fleet node via direct
+SSH. Accessible from Setup → select Linux target → 4. Prepare target.
+
+- [x] `LinuxPrepExecutor.ps1` — new file in `execution/`
+- [x] SUDO_ASKPASS helper — writes `/tmp/.tcflt_askpass` on remote host so
+      `sudo -A` works without a TTY; deleted after session
+- [x] `_FltPrep_Python` — adds `deb.debian.org` repo, installs python3 + python3-apt
+- [x] `_FltPrep_Docker` — adds Docker GPG key + apt repo, installs Docker Engine
+- [x] `_FltPrep_NopasswdSudo` — writes sudoers.d entry via `printf | sudo tee`
+- [x] `_FltPrep_SshKey` — reads `ansible/tcflt-ansible.pub`, appends to authorized_keys
+- [x] Menu items 1-5 (all), 6 (verify), 0 (cancel)
+- [x] Range selection: `1-4`, `1..4`, `1,2,3`, `1 2 3` all work
+- [x] `TargetMenu.ps1` verb 4 is OS-aware: Linux → LinuxPrepMenu, Windows → WinGet
+- [x] Security: no hardcoded secrets
+- [x] `README.md`: Prepare Linux target section added
+
+> **Lessons:** `sudo -S` conflicts with stdin when command also reads stdin.
+> Use `SUDO_ASKPASS` instead. `apt-get update` returns 100 on partial repo
+> failures — add `; exit 0` to continue. Nested `sh -c` quotes over SSH are
+> fragile — use `printf | sudo tee` for writing files.
 
 ---
 

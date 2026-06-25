@@ -1330,3 +1330,145 @@ function Invoke-IT_AnsibleVault {
 # Tests Invoke-FltDockerExecBatch, Invoke-FltDockerLifecycleBatch, and
 # _Get-FltContainerPkgCmd. Fully offline — read-only mode and direct function
 # calls only; no SSH or Docker connections are made.
+
+# ── Suite 37 — Linux Admin live: install/verify/remove ────────────────────────
+#
+# Live test: runs against all selected Linux targets via Ansible.
+# Verifies the full install → check → remove → check cycle using htop.
+# htop has no dependencies and installs/removes cleanly on Debian.
+
+function Invoke-IT_LinuxAdminLive {
+    param([System.Management.Automation.PSCredential] $Credential = $null)
+    $r = _IT_NewResult
+
+    _IT_Section 'Linux Admin live — install/verify/remove'
+
+    $linuxTargets = @($Script:FleetTargets | Where-Object {
+        $_.OS -eq 'linux' -and $_.TargetType -ne 'container' -and
+        $_.Address -and $_.Address -ne '__local__'
+    })
+
+    if ($linuxTargets.Count -eq 0) {
+        _IT_Warn $r '37  No Linux targets available — skipping live tests'
+        return $r
+    }
+
+    $pkg = 'htop'
+
+    # Helper: check if package is installed on a target via SSH
+    # Returns $true if installed (dpkg shows 'ii'), $false otherwise
+    function _37_DpkgInstalled {
+        param([FleetTarget]$Target, [pscredential]$Cred, [string]$Package)
+        $sess = $null
+        try {
+            $sessParams = @{
+                ComputerName = $Target.Address
+                Port         = $Target.Port
+                Credential   = $Cred
+                AcceptKey    = $true
+                ErrorAction  = 'Stop'
+            }
+            $sess   = New-SSHSession @sessParams
+            $cmd    = "dpkg -l $Package 2>/dev/null | grep -c '^ii' || echo 0"
+            $result = Invoke-SSHCommand -SessionId $sess.SessionId -Command $cmd
+            $n      = [int](($result.Output -join '').Trim() -replace '[^0-9]','')
+            return ($n -gt 0)
+        } finally {
+            if ($sess) { Remove-SSHSession -SessionId $sess.SessionId | Out-Null }
+        }
+    }
+
+    # Helper: run Ansible package action, return $true if all OK
+    function _37_AnsiblePkg {
+        param([string]$Action, [string]$Package, [object[]]$Targets)
+        $pb = [scriptblock]::Create("_Get-PackagePlaybook -Action '$Action' -PackageName '$Package'")
+        $results = Invoke-FltAnsibleBatch -Targets $Targets -Action $Action `
+            -PackageSpec $Package -PlaybookBuilder $pb -ReadOnly $false
+        return (@($results | Where-Object { $_.Status -notlike 'OK*' }).Count -eq 0)
+    }
+
+    # ------------------------------------------------------------------
+    # 37a — Pre-cleanup: remove htop if present
+    # ------------------------------------------------------------------
+    try {
+        $ok = _37_AnsiblePkg -Action 'remove' -Package $pkg -Targets $linuxTargets
+        _IT_Pass $r "37a  Pre-cleanup: '$pkg' removed or already absent on all Linux targets"
+    } catch { _IT_Warn $r '37a  Pre-cleanup' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 37b — Verify NOT installed before test
+    # ------------------------------------------------------------------
+    try {
+        $notInstalled = $true
+        foreach ($t in $linuxTargets) {
+            if (_37_DpkgInstalled -Target $t -Cred $Credential -Package $pkg) {
+                $notInstalled = $false
+            }
+        }
+        if ($notInstalled) {
+            _IT_Pass $r "37b  '$pkg' confirmed NOT installed on all Linux targets before test"
+        } else {
+            _IT_Warn $r "37b  '$pkg' NOT installed before test" "Package still present after pre-cleanup"
+        }
+    } catch { _IT_Warn $r '37b  Verify not installed' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 37c — Install via Ansible
+    # ------------------------------------------------------------------
+    try {
+        if (_37_AnsiblePkg -Action 'install' -Package $pkg -Targets $linuxTargets) {
+            _IT_Pass $r "37c  Install '$pkg' via Ansible — all Linux targets OK"
+        } else {
+            _IT_Fail $r "37c  Install '$pkg' via Ansible — all Linux targets OK" 'One or more targets failed'
+        }
+    } catch { _IT_Fail $r '37c  Install' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 37d — Verify INSTALLED after install
+    # ------------------------------------------------------------------
+    try {
+        $allInstalled = $true
+        foreach ($t in $linuxTargets) {
+            if (-not (_37_DpkgInstalled -Target $t -Cred $Credential -Package $pkg)) {
+                $allInstalled = $false
+            }
+        }
+        if ($allInstalled) {
+            _IT_Pass $r "37d  '$pkg' confirmed INSTALLED on all Linux targets (dpkg -l ii)"
+        } else {
+            _IT_Fail $r "37d  '$pkg' confirmed INSTALLED on all Linux targets (dpkg -l ii)" `
+                'One or more targets show package not installed'
+        }
+    } catch { _IT_Fail $r '37d  Verify installed' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 37e — Remove via Ansible
+    # ------------------------------------------------------------------
+    try {
+        if (_37_AnsiblePkg -Action 'remove' -Package $pkg -Targets $linuxTargets) {
+            _IT_Pass $r "37e  Remove '$pkg' via Ansible — all Linux targets OK"
+        } else {
+            _IT_Fail $r "37e  Remove '$pkg' via Ansible — all Linux targets OK" 'One or more targets failed'
+        }
+    } catch { _IT_Fail $r '37e  Remove' $_.Exception.Message }
+
+    # ------------------------------------------------------------------
+    # 37f — Verify REMOVED after remove
+    # ------------------------------------------------------------------
+    try {
+        $allGone = $true
+        foreach ($t in $linuxTargets) {
+            if (_37_DpkgInstalled -Target $t -Cred $Credential -Package $pkg) {
+                $allGone = $false
+            }
+        }
+        if ($allGone) {
+            _IT_Pass $r "37f  '$pkg' confirmed REMOVED from all Linux targets (dpkg -l not ii)"
+        } else {
+            _IT_Fail $r "37f  '$pkg' confirmed REMOVED from all Linux targets (dpkg -l not ii)" `
+                'One or more targets still show package installed'
+        }
+    } catch { _IT_Fail $r '37f  Verify removed' $_.Exception.Message }
+
+    return $r
+}

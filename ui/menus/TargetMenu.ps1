@@ -1092,7 +1092,8 @@ function Invoke-SetupMenu {
                 $result = "$($tgt.Name)  ($($tgt.Address))  — enter action for Config:"
                 Show-SetupDashboard -Mode 'targets' -Items $items -Result $result `
                     -SortState $activeSortState -FilterState $activeFilterState
-                Write-Host '  1. Verify   2. Edit   3. Remove   4. Prepare target (install WinGet)   0. Cancel' -ForegroundColor Cyan
+                $prepLabel = if ($tgt.OS -eq 'linux') { '4. Prepare target (Python/Docker/sudo/key)' } else { '4. Prepare target (install WinGet)' }
+                Write-Host "  1. Verify   2. Edit   3. Remove   $prepLabel   0. Cancel" -ForegroundColor Cyan
                 $verb = (Read-Host '  Action').Trim()
 
                 if ($verb -eq '1') {
@@ -1115,11 +1116,11 @@ function Invoke-SetupMenu {
                         $result = 'Remove cancelled.'
                     }
                 } elseif ($verb -eq '4') {
-                    # Prepare target — install WinGet via SSH
+                    # Prepare target — OS-aware: Linux = python/docker/sudo/key, Windows = WinGet
                     $cred = $null
-                    $pwd  = Resolve-FltPassword -CredentialName $tgt.Name -PromptLabel '' -Silent
-                    if ($pwd) {
-                        $sec  = ConvertTo-SecureString $pwd -AsPlainText -Force
+                    $stored = Get-FltStoredPassword -CredentialName $tgt.Name
+                    if ($stored) {
+                        $sec  = ConvertTo-SecureString $stored -AsPlainText -Force
                         $cred = [System.Management.Automation.PSCredential]::new($tgt.User, $sec)
                     } else {
                         Clear-Host
@@ -1132,6 +1133,11 @@ function Invoke-SetupMenu {
                         }
                     }
                     if ($cred) {
+                        if ($tgt.OS -eq 'linux') {
+                            Clear-Host
+                            Invoke-FltLinuxPrepMenu -Target $tgt -Credential $cred
+                            $result = "Prepare complete: $($tgt.Name)"
+                        } else {
                         Clear-Host
                         Write-Host "  Installing WinGet on $($tgt.Name)..." -ForegroundColor Cyan
                         Write-Host ''
@@ -1182,6 +1188,7 @@ function Invoke-SetupMenu {
                             $result = "WinGet install failed on $($tgt.Name) — see instructions above"
                         }
                         Read-Host '  Press Enter'
+                        } # end Windows (WinGet) branch
                     } else {
                         $result = 'Prepare cancelled — no credentials'
                     }

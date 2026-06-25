@@ -1153,6 +1153,43 @@ To override a setting, copy the relevant key into `config/settings.local.json`
 
 ---
 
+## Preparing a new Linux target (Setup → select target → 4. Prepare target)
+
+For Linux targets, the Prepare command bootstraps a fresh Debian VM into a
+managed fleet node via direct SSH (no Ansible required — works before Python
+is installed).
+
+```
+   1. Python 3 + python3-apt  (required for Ansible)
+   2. Docker Engine           (required for container targets)
+   3. Passwordless sudo       (required for Ansible become)
+   4. Install Ansible SSH key (required for key-based Ansible auth)
+   5. All of the above
+   6. Verify current state only
+   0. Cancel
+```
+
+Select items using any of: `1 2 3`, `1,2,3`, `1-4`, or `1..4`.
+
+**Prerequisites on the target before running Prepare:**
+- openssh-server installed and running
+- SSH access with password authentication
+- User has sudo access (password required — item 3 will configure NOPASSWD)
+
+**What each step does:**
+
+1. Adds `deb.debian.org` apt repo, installs `python3` and `python3-apt`
+2. Adds Docker GPG key and apt repo, installs Docker Engine
+3. Writes `/etc/sudoers.d/tcflt-nopasswd` with `NOPASSWD: ALL` for the target user
+4. Reads public key from `ansible/tcflt-ansible.pub` and appends to `~/.ssh/authorized_keys`
+
+> **Note:** Step 2 (Docker) requires internet access to `download.docker.com`.
+> If the VM uses Beckhoff apt mirrors (which require credentials), the standard
+> Debian repo is added automatically so Python and Docker can be installed
+> from public mirrors.
+
+---
+
 ## File Layout
 
 ```

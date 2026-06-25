@@ -346,6 +346,17 @@ function Get-IT_Suites {
             PerTarget   = $false   # fully offline
             Function    = 'Invoke-IT_OsPrompts'
             CheckCount  = 8
+        },
+        [pscustomobject]@{
+            Id          = 37
+            Name        = 'Linux Admin live — install/verify/remove'
+            Description = 'Live Ansible: verify not installed, install, verify installed, remove, verify gone'
+            NeedsTarget = $true
+            NeedsSSH    = $true
+            PerTarget   = $false   # runs against all selected Linux targets at once
+            OsFilter    = 'linux'
+            Function    = 'Invoke-IT_LinuxAdminLive'
+            CheckCount  = 6
         }
     )
 }
