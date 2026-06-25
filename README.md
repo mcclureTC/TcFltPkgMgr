@@ -1128,6 +1128,31 @@ Active filters and entry count are shown above the table.
 
 ---
 
+## Configuration reference (`config/settings.default.jsonc`)
+
+`settings.default.jsonc` is a commented reference file showing every available
+setting with descriptions. It is not loaded by TcFltPkgMgr — it exists for
+documentation only.
+
+To override a setting, copy the relevant key into `config/settings.local.json`
+(plain JSON, gitignored). Only the keys you want to override need to be present.
+
+**Example `settings.local.json`:**
+
+```json
+{
+  "ui": {
+    "dashboardPageSize": 30,
+    "reachCacheSecs": 30
+  },
+  "ansible": {
+    "forks": 20
+  }
+}
+```
+
+---
+
 ## File Layout
 
 ```

@@ -1,16 +1,76 @@
-// settings.local.json template — copy to settings.local.json and customise.
-// This file is gitignored.
+// =============================================================================
+//  TcFltPkgMgr — Default settings reference
+//  Copy values you want to override into config/settings.local.json
+//  (settings.local.json is gitignored and never committed)
+//
+//  JSON with Comments (.jsonc) — for reference only, not loaded by the tool.
+//  The tool reads settings.default.json and settings.local.json (plain JSON).
+// =============================================================================
 {
-  // "ssh": {
-  //   "timeoutSeconds": 3600,
-  //   "throttleLimit":  20
-  // },
-  // "ui": {
-  //   "defaultLiveMode": true,
-  //   "autoElevate":     true
-  // },
-  // "log": {
-  //   "retentionDays": 90,
-  //   "captureOutput": true
-  // }
+  // ── SSH ─────────────────────────────────────────────────────────────────────
+  "ssh": {
+    "timeoutSeconds": 1800,   // SSH operation timeout (seconds)
+    "throttleLimit":  25,     // max parallel SSH connections
+    "jitterMaxMs":    2000,   // max random delay between connections (ms)
+    "retryCount":     3       // retry count on transient failure
+  },
+
+  // ── Security ────────────────────────────────────────────────────────────────
+  "security": {
+    "credentialBackend": ""   // "" = auto-detect | "dpapi" | "secretservice" | "keychain" | "plaintext"
+  },
+
+  // ── UI ──────────────────────────────────────────────────────────────────────
+  "ui": {
+    "defaultLiveMode":    false,  // false = read-only at startup
+    "autoElevate":        false,  // reserved for future use
+    "dashboardRefreshMs": 500,    // fleet dashboard polling interval (ms)
+    "displayBackend":     "ansi", // "ansi" only (future: "spectre")
+    "dashboardPageSize":  20,     // targets shown per dashboard page
+    "reachCacheSecs":     60      // seconds before re-checking reachability
+  },
+
+  // ── Logging ─────────────────────────────────────────────────────────────────
+  "log": {
+    "retentionDays":  30,    // delete log files older than N days
+    "captureOutput":  false, // capture full command stdout/stderr in log
+    "captureFleet":   true,  // log fleet batch operations
+    "captureSession": false  // log session start/end events
+  },
+
+  // ── tcpkg ───────────────────────────────────────────────────────────────────
+  "tcpkg": {
+    "executablePath":  "tcpkg",                                          // local tcpkg command
+    "remoteTcpkgPath": "C:\\ProgramData\\Beckhoff\\TcPkg\\TcPkg.exe"   // path on remote Windows targets
+  },
+
+  // ── WinGet ──────────────────────────────────────────────────────────────────
+  "winget": {
+    "remoteWinGetPath": "winget", // winget command on remote Windows targets
+    "timeoutSeconds":   300       // WinGet operation timeout (seconds)
+  },
+
+  // ── Ansible ─────────────────────────────────────────────────────────────────
+  "ansible": {
+    "executablePath":  "ansible-playbook", // ansible-playbook command (native/WSL mode)
+    "dockerContainer": "tcflt-ansible",    // container name for Docker mode
+    "useWsl":          false,              // true = run ansible via WSL
+    "wslDistro":       "",                 // WSL distro name (blank = default)
+    "tempDir":         "",                 // temp dir for generated files (blank = auto)
+    "forks":           10                  // ansible --forks value
+  },
+
+  // ── Docker ──────────────────────────────────────────────────────────────────
+  "docker": {
+    "throttleLimit": 20,  // max parallel docker operations
+    "logTailLines":  50   // default lines for 'docker logs --tail'
+  },
+
+  // ── Docker Compose ──────────────────────────────────────────────────────────
+  "compose": {
+    "dir":     "compose",             // relative path to compose files from TcFltPkgMgr root
+    "network": "container-network",   // default Docker network name for generated compose files
+    "subnet":  "192.168.20.0/24",    // default subnet for inline network definition
+    "gateway": "192.168.20.1"        // default gateway for inline network definition
+  }
 }

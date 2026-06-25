@@ -1114,7 +1114,8 @@ New top-level fleet menu item alongside tcpkg, WinGet, Linux Admin, Containers.
 - [x] `ui.reachCacheSecs: 60` — already in `settings.default.json`
 - [x] `winget` section — implement in Phase 4.4 bug fixes (Phase 3 is done)
 - [x] `ansible` section — done in Phase 5.0
-- [ ] `settings.default.jsonc` — add when the above sections are added
+- [x] `settings.default.jsonc` — created with comments for all 9 sections:
+      ssh, security, ui, log, tcpkg, winget, ansible, docker, compose
 
 ---
 
@@ -1310,7 +1311,7 @@ New top-level fleet menu item alongside tcpkg, WinGet, Linux Admin, Containers.
 | `ui/menus/FleetMenu.ps1` | ✅ done | 1-7: tcpkg, WinGet, Linux Admin, Containers, Profiles, UIConfig, Setup |
 | `ui/menus/TargetMenu.ps1` | partial | Add/Edit/Remove done; container+compose done (7.4, 8.9); OS/PM prompt pending (9.1) |
 | `config/settings.default.json` | ✅ done | docker, ui, winget, ansible, compose sections all present |
-| `config/settings.default.jsonc` | pending | Add commented reference version alongside settings.default.json |
+| `config/settings.default.jsonc` | ✅ done | Commented reference version with all 9 sections |
 | `TcFltPkgMgr.ps1` | partial | OS detection done; Linux config paths pending (phase 12.1) |
 | `ui/menus/ContainerMenu.ps1` | ✅ done | All 10 choices including compose-aware lifecycle and Deploy |
 | `data/ComposeRepository.ps1` | ✅ done | 13 compose functions: templates, CSV import/export, docker compose exec |
