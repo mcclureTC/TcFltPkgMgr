@@ -1057,7 +1057,7 @@ be captured before passing to the scriptblock. Apply the same pattern in
 - [x] Security: no hardcoded secrets
 - [x] `README.md`: Phase 9.1 section added
 
-### 9.x — System menu (Fleet → 8. System) ✅
+### 9.4 — System menu (Fleet → 8. System) ✅
 
 New top-level fleet menu item alongside tcpkg, WinGet, Linux Admin, Containers.
 
@@ -1121,6 +1121,31 @@ New top-level fleet menu item alongside tcpkg, WinGet, Linux Admin, Containers.
 
 ---
 
+## Phase 9.5 — Prepare Linux target (`execution/LinuxPrepExecutor.ps1`) ✅
+
+New file. Bootstraps a fresh Debian VM into a managed fleet node via direct
+SSH. Accessible from Setup → select Linux target → 4. Prepare target.
+
+- [x] `LinuxPrepExecutor.ps1` — new file in `execution/`
+- [x] SUDO_ASKPASS helper — writes `/tmp/.tcflt_askpass` on remote host so
+      `sudo -A` works without a TTY; deleted after session
+- [x] `_FltPrep_Python` — adds `deb.debian.org` repo, installs python3 + python3-apt
+- [x] `_FltPrep_Docker` — adds Docker GPG key + apt repo, installs Docker Engine
+- [x] `_FltPrep_NopasswdSudo` — writes sudoers.d entry via `printf | sudo tee`
+- [x] `_FltPrep_SshKey` — reads `ansible/tcflt-ansible.pub`, appends to authorized_keys
+- [x] Menu items 1-5 (all), 6 (verify), 0 (cancel)
+- [x] Range selection: `1-4`, `1..4`, `1,2,3`, `1 2 3` all work
+- [x] `TargetMenu.ps1` verb 4 is OS-aware: Linux → LinuxPrepMenu, Windows → WinGet
+- [x] Security: no hardcoded secrets
+- [x] `README.md`: Prepare Linux target section added
+
+> **Lessons:** `sudo -S` conflicts with stdin when command also reads stdin.
+> Use `SUDO_ASKPASS` instead. `apt-get update` returns 100 on partial repo
+> failures — add `; exit 0` to continue. Nested `sh -c` quotes over SSH are
+> fragile — use `printf | sudo tee` for writing files.
+
+---
+
 ## Phase 10 — Command log updates
 
 ### 10.1 — `Write-FltBatchEntry` (`execution/CommandLog.ps1`) ✅
@@ -1167,14 +1192,35 @@ New top-level fleet menu item alongside tcpkg, WinGet, Linux Admin, Containers.
 
 ### 10.5.2 — Integration test suites
 
-| Suite | Id | Needs target | Tests |
-|-------|----|--------------|-------|
-| File I/O | I1 | No | CSV round-trip, sort persistence, filter correctness, UI Config persistence |
-| Pagination | I2 | No | Page slicing, target numbering, sort-aware selection |
-| SSH connectivity | I3 | Yes (SSH) | TCP check, session open, remote command, tcpkg path |
-| Read-only mode | I4 | No | tcpkg blocked, batch status prefix, credentials exempt |
-| Log system | I5 | No | Entry written, retrieved, retention preserves current log |
-| Reachability cache | I6 | Optional | Cache skip, expiry, live population |
+| Suite | Id | OsFilter | Needs SSH | Checks |
+|-------|----|----------|-----------|--------|
+| File I/O | 11 | any | No | 14 |
+| Pagination and target selection | 12 | any | No | 4 |
+| SSH connectivity | 13 | windows | Yes | 4 |
+| Read-only mode | 14 | any | No | 3 |
+| Log system | 15 | any | No | 6 |
+| Reachability cache | 16 | any | No | 8 |
+| tcpkg local | 17 | windows | No | 7 |
+| Package queries | 18 | windows | No | 4 |
+| WinGet executor | 19 | windows | No | 15 |
+| WinGet live install | 20 | windows | Yes | 8 |
+| Ansible availability | 21 | linux | No | 7 |
+| Docker operator | 22 | linux | No | 5 |
+| Ansible inventory builder | 23 | linux | No | 13 |
+| Ansible playbook builder | 24 | linux | No | 15 |
+| Ansible batch executor | 25 | linux | No | 13 |
+| Fleet executor routing | 26 | linux | No | 10 |
+| Ansible Vault helpers | 27 | linux | No | 8 |
+| Container executor | 28 | any | No | 13 |
+| Container target flow | 29 | any | No | 8 |
+| Batch dashboard pagination | 30 | any | No | 8 |
+| Phase 8.0 pre-work | 31 | any | No | 8 |
+| Container Admin menu | 32 | any | No | 10 |
+| Compose repository | 33 | any | No | 10 |
+| Container target registration | 34 | any | No | 8 |
+| Phase 8.10 compose-aware lifecycle | 35 | any | No | 8 |
+| Phase 9.1 OS/PM prompts | 36 | any | No | 8 |
+| Linux Admin live (install/verify/remove) | 37 | linux | Yes | 6 |
 
 > **OsFilter support added (2026-06-25):**
 > Suite metadata now includes `OsFilter = 'windows' | 'linux' | 'any'`.
@@ -1183,7 +1229,7 @@ New top-level fleet menu item alongside tcpkg, WinGet, Linux Admin, Containers.
 > When running all integration (option 9), Windows and Linux credentials are
 > prompted separately so mixed fleets can run all suites in one pass.
 > Tests 25i–25l updated to use PLAY RECAP output format (not JSON ad-hoc).
-> Total checks: 225 (up from 205).
+> Total checks: 231 (27 suites + Suite 37 live). Last full run: 231/231.
 
 ### 10.5.3 — Future integration suites (add as phases complete)
 
@@ -1191,31 +1237,6 @@ New top-level fleet menu item alongside tcpkg, WinGet, Linux Admin, Containers.
 - [x] Phase 5: Ansible playbook execution (I8)
 - [x] Phase 7: Docker exec batch (I9)
 - [x] Phase 7: Docker container reachability check (I10)
-
----
-
-## Phase 9.x — Prepare Linux target (`execution/LinuxPrepExecutor.ps1`) ✅
-
-New file. Bootstraps a fresh Debian VM into a managed fleet node via direct
-SSH. Accessible from Setup → select Linux target → 4. Prepare target.
-
-- [x] `LinuxPrepExecutor.ps1` — new file in `execution/`
-- [x] SUDO_ASKPASS helper — writes `/tmp/.tcflt_askpass` on remote host so
-      `sudo -A` works without a TTY; deleted after session
-- [x] `_FltPrep_Python` — adds `deb.debian.org` repo, installs python3 + python3-apt
-- [x] `_FltPrep_Docker` — adds Docker GPG key + apt repo, installs Docker Engine
-- [x] `_FltPrep_NopasswdSudo` — writes sudoers.d entry via `printf | sudo tee`
-- [x] `_FltPrep_SshKey` — reads `ansible/tcflt-ansible.pub`, appends to authorized_keys
-- [x] Menu items 1-5 (all), 6 (verify), 0 (cancel)
-- [x] Range selection: `1-4`, `1..4`, `1,2,3`, `1 2 3` all work
-- [x] `TargetMenu.ps1` verb 4 is OS-aware: Linux → LinuxPrepMenu, Windows → WinGet
-- [x] Security: no hardcoded secrets
-- [x] `README.md`: Prepare Linux target section added
-
-> **Lessons:** `sudo -S` conflicts with stdin when command also reads stdin.
-> Use `SUDO_ASKPASS` instead. `apt-get update` returns 100 on partial repo
-> failures — add `; exit 0` to continue. Nested `sh -c` quotes over SSH are
-> fragile — use `printf | sudo tee` for writing files.
 
 ---
 
@@ -1246,13 +1267,18 @@ SSH. Accessible from Setup → select Linux target → 4. Prepare target.
 
 - [x] Ansible available check — docker mode verified (Suite 21)
 - [x] Install, upgrade, remove package on one Linux target — Phase 6.7 live
-- [ ] Install on 10+ Linux targets in parallel — blocked, only 1 Linux target
+- [ ] Install on 10+ Linux targets in parallel — currently 2 Linux VMs;
+      needs DCC-4/DCC-5 converted or more VMs
 - [x] Add/remove user, manage group membership — Phase 6.7 live
 - [x] Start/stop service (`nginx`) — Phase 6.7 live
 - [x] Run custom playbook file — Phase 6.7 live
 - [ ] Log entry correct with `PackageManager = 'ansible'` — pending
 
 ### Docker containers
+
+> Docker Engine is now installed on both Linux VMs via Phase 9.5 Prepare target.
+> Container tests can proceed against these VMs.
+
 - [ ] Add container target referencing an existing Docker host target
 - [ ] Reachability check (`docker info` + `docker inspect`) returns correct state
 - [ ] Install package inside container via `docker exec apt-get`
@@ -1271,7 +1297,7 @@ SSH. Accessible from Setup → select Linux target → 4. Prepare target.
 > Run these tests in order — stop at first failure and record the error.
 
 **Test 1 — VMware Debian VM (standard Linux kernel)**
-- [ ] Install Docker Engine on the Debian VM
+- [x] Install Docker Engine on the Debian VM — done via Phase 9.5 Prepare target
 - [ ] Clone `https://github.com/Beckhoff/TC_XAR_Container_Sample` on the VM
 - [ ] Add myBeckhoff credentials to `tc31-xar-base/apt-config/bhf.conf`
 - [ ] Build: `docker build --secret id=apt,src=./apt-config/bhf.conf --network host -t tc31-xar-base .`
@@ -1421,9 +1447,28 @@ They supplement the conventions at the top of this document.
   targets match. Prompt for separate Windows and Linux credentials in
   option 9 (all integration).
 
+**Linux target bootstrapping via SSH (Phase 9.5):**
+- `sudo -S` conflicts with stdin when the same command reads stdin (e.g. `tee`).
+  Use `SUDO_ASKPASS` with a temp script (`/tmp/.tcflt_askpass`) instead.
+  Delete the script in the `finally` block.
+- `apt-get update` returns exit 100 when some repos are unauthorised (Beckhoff
+  mirrors return 401). Append `; exit 0` to ignore partial failures and
+  continue with the repos that did respond.
+- Nested `sh -c` with embedded quotes is fragile over SSH.
+  Use `printf | sudo tee` for writing files; use `@params` hashtable splat
+  for `New-SSHSession` to avoid positional parameter errors.
+- `grep -c` returns empty string (not `0`) when there are no matches and the
+  command exits non-zero. Use `|| echo 0` to guarantee numeric output,
+  then `-replace '[^0-9]',''` before casting to `[int]`.
+
 ---
 
 ## Phase 12 — Linux operator support
+
+> **Dependency:** Phase 9.5 (Prepare Linux target) makes Phase 12 setup
+> easier — the Prepare command can bootstrap the Linux operator machine
+> itself (Python, NOPASSWD sudo, SSH key). Phase 12.3 (Posh-SSH on Linux)
+> is the main unknown; all other items are straightforward config path changes.
 
 Running the fleet manager itself on a Linux machine (the operator's workstation
 or a CI/CD server). After Phase 0-A this requires only targeted work since the
