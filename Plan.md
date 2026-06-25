@@ -1130,10 +1130,17 @@ New top-level fleet menu item alongside tcpkg, WinGet, Linux Admin, Containers.
 - [x] `PackageManager` field — implement in Phase 4.4 bug fixes (Phase 3 is done)
 - [x] Add `TargetType` field per result row — completed in Phase 8.0
 
-### 10.2 — Log viewer
+### 10.2 — Log viewer ✅
 
-- [ ] Add `PackageManager` and `TargetType` columns to log output
-- [ ] Add filter options for both in Setup > Log viewer
+- [x] `PackageManager` and `TargetType` columns added to log table
+- [x] PM filter matches both `packageManager` field (batch events) and
+      command prefix (direct tcpkg/winget/ansible/docker entries)
+- [x] `TargetType` filter matches batch result entries
+- [x] Active filters shown above the table; entry count displayed
+- [x] Setup → 8. Log prompts for PM and Type filters in addition to
+      days/target/verb
+- [x] Security: no hardcoded secrets
+- [x] `README.md`: Phase 10.2 section added
 
 ---
 

@@ -1277,15 +1277,28 @@ function Invoke-SetupMenu {
         if ($choice -eq '8') {
             Clear-Host
             Write-Host '  Command Log' -ForegroundColor Cyan
-            Write-Host '  Filters: blank = last 7 days, all targets, all commands.' -ForegroundColor DarkGray
+            Write-Host '  All filters optional — blank = no filter.' -ForegroundColor DarkGray
             Write-Host ''
             $days = Read-FltValue 'Days back (blank = 7):' -AllowEmpty
-            $tgt  = Read-FltValue 'Target name filter (blank = all):' -AllowEmpty
-            $verb = Read-FltValue 'Command verb filter (blank = all):' -AllowEmpty
+            $tgt  = Read-FltValue 'Target name (blank = all):' -AllowEmpty
+            $verb = Read-FltValue 'Command verb (blank = all):' -AllowEmpty
+            Write-Host ''
+            Write-Host '  Package manager filter:' -ForegroundColor DarkGray
+            Write-Host '   tcpkg  winget  ansible  apt  apk  yum  dnf  docker  (blank = all)' -ForegroundColor DarkGray
+            $pm   = Read-FltValue 'PM filter (blank = all):' -AllowEmpty
+            Write-Host ''
+            Write-Host '  Target type filter:' -ForegroundColor DarkGray
+            Write-Host '   physical  vm  container  (blank = all)' -ForegroundColor DarkGray
+            $ttype = Read-FltValue 'Type filter (blank = all):' -AllowEmpty
+            $resolvedDays = if ($days -match '^\d+$') { [int]$days } else { 7 }
+            Clear-Host
+            Write-Host '  Command Log' -ForegroundColor Cyan
             Show-FltCommandLog `
-                -LastDays $(if ($days -match '^\d+$') { [int]$days } else { 7 }) `
-                -Target   $tgt `
-                -CmdVerb  $verb
+                -LastDays       $resolvedDays `
+                -Target         $tgt `
+                -CmdVerb        $verb `
+                -PackageManager $pm `
+                -TargetType     $ttype
             Read-Host '  Press Enter'; continue
         }
 

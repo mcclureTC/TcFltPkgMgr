@@ -1108,6 +1108,26 @@ Total: **225 checks** across 26 suites + 35 diagnostic checks.
 
 ---
 
+## Log viewer (Setup → 8. Log)
+
+The log viewer shows the last N entries from `logs/tcflt-YYYY-MM-DD.log.json`.
+
+**Columns:** Timestamp · Target · Type · PM (package manager) · Mode · Exit · Command
+
+**Filters (all optional):**
+
+| Prompt | Examples | Notes |
+|--------|---------|-------|
+| Days back | `7`, `30` | Default 7 |
+| Target name | `DCC-1`, `Beckhoff RT Linux` | Exact match |
+| Command verb | `install`, `upgrade` | Substring match |
+| Package manager | `tcpkg`, `winget`, `ansible`, `apt`, `docker` | Matches field or command prefix |
+| Target type | `physical`, `vm`, `container` | Matches batch result entries |
+
+Active filters and entry count are shown above the table.
+
+---
+
 ## File Layout
 
 ```

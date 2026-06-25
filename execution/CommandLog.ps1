@@ -161,10 +161,12 @@ function Invoke-FltLogRetention {
 # Read command history from log files for the log viewer.
 function Get-FltCommandHistory {
     param(
-        [int]    $LastDays  = 7,
-        [string] $Target    = '',
-        [string] $CmdVerb   = '',      # e.g. 'install', 'upgrade'
-        [string] $SessionId = ''
+        [int]    $LastDays      = 7,
+        [string] $Target        = '',
+        [string] $CmdVerb       = '',      # e.g. 'install', 'upgrade'
+        [string] $SessionId     = '',
+        [string] $PackageManager = '',     # e.g. 'tcpkg', 'winget', 'ansible', 'apt'
+        [string] $TargetType    = ''       # e.g. 'physical', 'vm', 'container'
     )
     if (-not (Test-Path $Script:FltLogDir)) { return @() }
 
@@ -181,9 +183,15 @@ function Get-FltCommandHistory {
                 } |
                 Where-Object { $null -ne $_ -and $null -ne $_.cmd } |
                 Where-Object {
-                    (-not $Target    -or $_.target  -eq $Target)       -and
-                    (-not $CmdVerb   -or $_.cmd -like "*$CmdVerb*")    -and
-                    (-not $SessionId -or $_.session -eq $SessionId)
+                    (-not $Target         -or $_.target  -eq $Target)                  -and
+                    (-not $CmdVerb        -or $_.cmd -like "*$CmdVerb*")               -and
+                    (-not $SessionId      -or $_.session -eq $SessionId)               -and
+                    (-not $PackageManager -or
+                        $_.packageManager -eq $PackageManager -or
+                        ($_.cmd -match ('(?i)^' + [regex]::Escape($PackageManager))))  -and
+                    (-not $TargetType     -or
+                        ($null -ne ($_.results | Where-Object { $_.targetType -eq $TargetType } |
+                        Select-Object -First 1)))
                 } |
                 ForEach-Object { $results.Add($_) }
         }
@@ -194,30 +202,58 @@ function Get-FltCommandHistory {
 # Display the command history in a simple table in the content zone.
 function Show-FltCommandLog {
     param(
-        [int]    $LastDays = 7,
-        [string] $Target   = '',
-        [string] $CmdVerb  = ''
+        [int]    $LastDays       = 7,
+        [string] $Target         = '',
+        [string] $CmdVerb        = '',
+        [string] $PackageManager = '',
+        [string] $TargetType     = '',
+        [int]    $MaxRows        = 50
     )
-    $entries = Get-FltCommandHistory -LastDays $LastDays -Target $Target -CmdVerb $CmdVerb
+    $entries = Get-FltCommandHistory -LastDays $LastDays -Target $Target -CmdVerb $CmdVerb `
+                   -PackageManager $PackageManager -TargetType $TargetType
+
     if ($entries.Count -eq 0) {
         Write-Host "  No log entries found for the last $LastDays day(s)." -ForegroundColor Yellow
         return
     }
 
-    $w = [Math]::Max([Console]::WindowWidth, 60) - 1
+    # Show filters active
+    $activeFilters = @()
+    if ($Target)         { $activeFilters += "target='$Target'" }
+    if ($CmdVerb)        { $activeFilters += "verb='$CmdVerb'" }
+    if ($PackageManager) { $activeFilters += "pm='$PackageManager'" }
+    if ($TargetType)     { $activeFilters += "type='$TargetType'" }
+    $filterStr = if ($activeFilters) { "  Filters: $($activeFilters -join ', ')" } else { "  Filters: none" }
+    Write-Host $filterStr -ForegroundColor DarkGray
+    Write-Host "  Entries: $($entries.Count) (showing last $MaxRows)" -ForegroundColor DarkGray
+
+    $w = [Math]::Max([Console]::WindowWidth, 80) - 1
     Write-Host ''
-    Write-Host ("  {0,-19}  {1,-14}  {2,-6}  {3,-5}  {4}" -f `
-        'Timestamp', 'Target', 'Mode', 'Exit', 'Command') -ForegroundColor DarkGray
+    Write-Host ("  {0,-16}  {1,-14}  {2,-5}  {3,-9}  {4,-5}  {5,-4}  {6}" -f `
+        'Timestamp', 'Target', 'Type', 'PM', 'Mode', 'Exit', 'Command') -ForegroundColor DarkGray
     Write-Host ("  " + '-' * ($w - 2)) -ForegroundColor DarkGray
 
-    foreach ($e in $entries | Select-Object -Last 50) {
-        $ts    = try { ([datetime]$e.ts).ToString('MM-dd HH:mm:ss') } catch { $e.ts }
+    foreach ($e in $entries | Select-Object -Last $MaxRows) {
+        $ts    = try { ([datetime]$e.ts).ToString('MM-dd HH:mm') } catch { $e.ts }
         $color = if ($e.exit -eq 0) { 'Green' } elseif ($e.exit -eq -1) { 'DarkGray' } else { 'Red' }
-        $mode  = if ($e.mode -eq 'read-only') { 'R/O  ' } else { 'live ' }
-        $cmdMax = $w - 52
-        $cmd   = if ($e.cmd.Length -gt $cmdMax) { $e.cmd.Substring(0, $cmdMax - 1) + '~' } else { $e.cmd }
-        Write-Host ("  {0,-19}  {1,-14}  {2,-6}  {3,-5}  {4}" -f `
-            $ts, ($e.target ?? 'local'), $mode, $e.exit, $cmd) -ForegroundColor $color
+        $mode  = if ($e.mode -eq 'read-only') { 'R/O' } else { 'live' }
+
+        # PackageManager and TargetType — from batch events or derive from cmd
+        $pm   = if ($e.packageManager) { $e.packageManager } `
+                elseif ($e.cmd -match '^(tcpkg|winget|ansible|docker)') { $Matches[1] } `
+                else { '' }
+        $type = if ($e.event -eq 'batch' -and $e.results) {
+                    ($e.results | Select-Object -First 1).targetType
+                } else { '' }
+
+        $cmdMax = $w - 68
+        $cmd    = if ($e.cmd -and $e.cmd.Length -gt $cmdMax) {
+                    $e.cmd.Substring(0, [Math]::Max(0, $cmdMax - 1)) + '~'
+                  } else { $e.cmd }
+
+        Write-Host ("  {0,-16}  {1,-14}  {2,-5}  {3,-9}  {4,-5}  {5,-4}  {6}" -f `
+            $ts, ($e.target ?? 'local'), ($type ?? ''), ($pm ?? ''), `
+            $mode, $e.exit, ($cmd ?? '')) -ForegroundColor $color
     }
     Write-Host ''
 }
