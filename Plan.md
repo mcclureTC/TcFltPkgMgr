@@ -905,11 +905,11 @@ be captured before passing to the scriptblock. Apply the same pattern in
   Choice:
 ```
 
-- [ ] `Invoke-ContainerAdminMenu` — filters to `TargetType -eq 'container'`;
+- [x] `Invoke-ContainerAdminMenu` — filters to `TargetType -eq 'container'`;
       paginates (likely needed immediately at this scale)
-- [ ] Dashboard columns: `#`, `Name`, `Host` (DockerHost), `Container`
+- [x] Dashboard columns: `#`, `Name`, `Host` (DockerHost), `Container`
       (ContainerName), `Status`
-- [ ] Status reflects Docker container state, not TCP reachability
+- [x] Status reflects Docker container state, not TCP reachability
 
 ### 8.3 — Package operations (choices 1/2) ✅
 
