@@ -12,6 +12,23 @@
 #  /ansible is a bind-mount from the host — inventory and playbooks are
 #  generated there by TcFltPkgMgr and read by the container at run time.
 #  The directory is gitignored on the host.
+#
+#  SSH key pair
+#  ------------
+#  An ed25519 key pair is generated at BUILD TIME and baked into the image.
+#  The public key is copied to /ansible/tcflt-ansible.pub at container
+#  STARTUP so the operator can retrieve it:
+#
+#    docker exec tcflt-ansible cat /ansible/tcflt-ansible.pub
+#
+#  Install the public key on each Linux fleet target:
+#    ssh-copy-id -i <(docker exec tcflt-ansible cat /ansible/tcflt-ansible.pub) user@host
+#  Or manually:
+#    echo "<public key>" >> ~/.ssh/authorized_keys
+#
+#  The private key never leaves the container. Rebuilding the image generates
+#  a NEW key pair — re-run the install-public-key step on all targets after
+#  any rebuild.
 # =============================================================================
 
 FROM python:3.12-slim
@@ -41,12 +58,22 @@ RUN ansible-galaxy collection install \
         ansible.posix \
     && ansible-galaxy collection list
 
-# ── SSH client hardening ──────────────────────────────────────────────────────
+# ── SSH client config ─────────────────────────────────────────────────────────
 RUN mkdir -p /root/.ssh && \
     printf 'Host *\n    StrictHostKeyChecking no\n    UserKnownHostsFile /dev/null\n    LogLevel ERROR\n' \
         > /root/.ssh/config && \
     chmod 700 /root/.ssh && \
     chmod 600 /root/.ssh/config
+
+# ── SSH key pair (generated at build time, baked into image) ─────────────────
+#    The public key is exported to /ansible/tcflt-ansible.pub at startup
+#    via the entrypoint so operators can retrieve it after container creation.
+RUN ssh-keygen -t ed25519 \
+        -f /root/.ssh/id_ed25519 \
+        -N "" \
+        -C "tcflt-ansible@$(hostname)" && \
+    chmod 600 /root/.ssh/id_ed25519 && \
+    chmod 644 /root/.ssh/id_ed25519.pub
 
 # ── Ansible configuration ─────────────────────────────────────────────────────
 RUN mkdir -p /etc/ansible && \
@@ -67,5 +94,9 @@ RUN mkdir -p /ansible/inventory /ansible/playbooks /ansible/logs
 VOLUME ["/ansible"]
 WORKDIR /ansible
 
-# Keep container running so docker exec calls work at any time
-CMD ["sleep", "infinity"]
+# ── Entrypoint: export public key to bind-mount then keep container alive ─────
+#    Writing to /ansible (the bind-mount) makes the public key available on the
+#    host at ansible/tcflt-ansible.pub without needing docker exec.
+CMD ["/bin/sh", "-c", \
+    "cp /root/.ssh/id_ed25519.pub /ansible/tcflt-ansible.pub 2>/dev/null || true && \
+     sleep infinity"]

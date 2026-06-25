@@ -436,8 +436,19 @@ docker run -d --name tcflt-ansible --restart unless-stopped `
   -v ${PWD}/ansible:/ansible `
   tcflt-ansible
 
-# 3. Verify in TcFltPkgMgr — Setup → 10. Diagnostics → Suite 21
+# 3. Install the SSH public key on every Linux fleet target
+#    The key is exported to ansible/tcflt-ansible.pub at container startup
+cat ansible/tcflt-ansible.pub  # view the key
+ssh-copy-id -i ansible/tcflt-ansible.pub Administrator@192.168.x.x
+
+# 4. Verify in TcFltPkgMgr — Setup → 10. Diagnostics → Suite 21
 ```
+
+> **SSH key pair:** An ed25519 key pair is generated at **build time** and baked
+> into the image. On first startup the public key is written to
+> `ansible/tcflt-ansible.pub` (the bind-mount). The private key never leaves
+> the container. **After any image rebuild, re-install the new public key on all
+> Linux targets** — the key changes with every build.
 
 ### Detection modes (in priority order)
 
@@ -1004,6 +1015,37 @@ The Setup targets view now shows a `PM` (package manager) column between Type an
 
 For targets with no explicit PackageManager set, the column shows the effective default:
 `tcpkg` for Windows, `apt` for Linux and containers.
+
+---
+
+## Ansible live testing notes (Phase 6.7)
+
+### Prerequisites for Linux targets
+
+Before TcFltPkgMgr can manage a Linux target via Ansible:
+
+1. `openssh-server`, `python3`, and `python3-apt` installed on the target
+2. The `tcflt-ansible` container public key installed on the target:
+   ```powershell
+   $pubKey = Get-Content "ansible\tcflt-ansible.pub" -Raw
+   ssh user@host "mkdir -p ~/.ssh && echo '$pubKey' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+   ```
+3. Passwordless sudo configured on the target:
+   ```bash
+   # On the Linux target
+   sudo visudo
+   # Add: username ALL=(ALL) NOPASSWD: ALL
+   ```
+
+### Custom playbooks
+
+Custom playbooks can be placed anywhere. The `ansible/playbooks/` directory is safe
+as long as the filename does not match the generated pattern
+`<action>-<timestamp>.yml` (e.g. `package-install-20260624-143705.yml`).
+Only generated files matching that pattern are deleted after each run.
+
+Use `hosts: linux` in custom playbooks to target all Linux fleet targets,
+or `hosts: all` to target everything in the generated inventory.
 
 ---
 

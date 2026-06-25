@@ -40,13 +40,23 @@ function _Get-AnsibleSshVars {
     $vars = "ansible_host=$($Target.Address) ansible_user=$user ansible_port=$port"
 
     # Auth: SSH key file only — passwords are never written to inventory.
-    # If no key is configured, Ansible uses its own key discovery at run time.
+    # Priority:
+    #   1. Explicit ssh.privateKeyPath setting (host-side path)
+    #   2. Docker mode — always use the container's baked-in key
+    #   3. Otherwise rely on Ansible's default key discovery (~/.ssh/id_ed25519)
     $keyPath = Get-FltCfgValue 'ssh' 'privateKeyPath' ''
     if (-not [string]::IsNullOrEmpty($keyPath) -and (Test-Path $keyPath)) {
-        # Normalise to forward-slash for POSIX Ansible (native / WSL / Docker)
         $posixKey = $keyPath -replace '\\', '/'
         $vars += " ansible_ssh_private_key_file=$posixKey"
+    } else {
+        $ansibleMode = Get-FltAnsibleMode
+        if ($ansibleMode -eq 'docker') {
+            # Key is baked into the container image at build time
+            $vars += ' ansible_ssh_private_key_file=/root/.ssh/id_ed25519'
+        }
     }
+
+    $vars += ' ansible_become=true'
 
     $vars
 }
@@ -128,10 +138,15 @@ function New-FltAnsibleInventory {
     $lines.Add("# $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')  Do not edit — regenerated on each Ansible run.")
     $lines.Add('')
 
+    # Sanitise name for INI alias — spaces and special chars break Ansible INI parsing.
+    # The real name is preserved via ansible_host and a comment.
+    function _FltAnsibleAlias { param([string]$Name) $Name -replace '[^a-zA-Z0-9_\-]','_' }
+
     if ($physical.Count -gt 0) {
         $lines.Add('[physical]')
         foreach ($t in $physical) {
-            $lines.Add("$($t.Name) $(_Get-AnsibleSshVars $t)")
+            $alias = _FltAnsibleAlias $t.Name
+            $lines.Add("$alias $(_Get-AnsibleSshVars $t)  # $($t.Name)")
         }
         $lines.Add('')
     }
@@ -139,7 +154,8 @@ function New-FltAnsibleInventory {
     if ($vms.Count -gt 0) {
         $lines.Add('[vm]')
         foreach ($t in $vms) {
-            $lines.Add("$($t.Name) $(_Get-AnsibleSshVars $t)")
+            $alias = _FltAnsibleAlias $t.Name
+            $lines.Add("$alias $(_Get-AnsibleSshVars $t)  # $($t.Name)")
         }
         $lines.Add('')
     }
@@ -162,18 +178,19 @@ function New-FltAnsibleInventory {
             # All vars on one line — Ansible INI does not use line continuation
             $dockerVars = "ansible_connection=community.docker.docker_api" +
                           " ansible_docker_host=tcp://${dockerAddr}:${daemonPort}"
-            $lines.Add("$($t.Name) $sshVars $dockerVars")
+            $alias = _FltAnsibleAlias $t.Name
+            $lines.Add("$alias $sshVars $dockerVars  # $($t.Name)")
         }
         $lines.Add('')
     }
 
-    # [linux:children] meta-group — only when more than one group was written
+    # [linux:children] meta-group — always written so playbooks can use hosts: linux
     $groups = @()
     if ($physical.Count   -gt 0) { $groups += 'physical' }
     if ($vms.Count        -gt 0) { $groups += 'vm' }
     if ($containers.Count -gt 0) { $groups += 'containers' }
 
-    if ($groups.Count -gt 1) {
+    if ($groups.Count -gt 0) {
         $lines.Add('[linux:children]')
         foreach ($g in $groups) { $lines.Add($g) }
         $lines.Add('')
@@ -721,18 +738,37 @@ function Invoke-FltAnsibleBatch {
     $forks      = Get-FltCfgValue 'ansible' 'forks' 10
     $ansibleCmd = _Get-FltAnsibleCmd
 
-    # Paths passed to Ansible must use forward slashes when running under
-    # Docker or WSL — the operator-side path may use backslashes on Windows.
-    $posixInv      = $invPath      -replace '\\', '/'
-    $posixPlaybook = $playbookPath -replace '\\', '/'
+    # Paths passed to Ansible must be translated depending on mode:
+    #   Docker — convert Windows absolute path to container bind-mount path (/ansible/...)
+    #   WSL    — convert Windows path to Linux path via wslpath
+    #   Native — use path as-is (forward slashes for safety)
+    if ($ansibleMode -eq 'docker') {
+        # The bind-mount maps <TcFltPkgMgr root>/ansible → /ansible in the container.
+        # Strip everything up to and including /ansible/ and prepend /ansible/.
+        $ansibleRootHost = Split-Path $Script:FltConfigDir -Parent | Join-Path -ChildPath 'ansible'
+        function _ToContainerPath {
+            param([string]$HostPath)
+            $rel = $HostPath.Substring($ansibleRootHost.Length).TrimStart('\').TrimStart('/')
+            return '/ansible/' + ($rel -replace '\\','/')
+        }
+        $posixInv      = _ToContainerPath $invPath
+        $posixPlaybook = _ToContainerPath $playbookPath
+    } else {
+        $posixInv      = $invPath      -replace '\\', '/'
+        $posixPlaybook = $playbookPath -replace '\\', '/'
+    }
 
     # Vault password file — written to a temp path if a vault password is stored.
     # Omitted entirely when no vault password is configured (playbooks without
     # encrypted vars work without it).
     $vaultFile    = _Get-VaultPasswordFile
-    $vaultFlag    = if ($vaultFile) { " --vault-password-file `"$vaultFile`"" } else { '' }
+    $posixVault   = if ($vaultFile) {
+        if ($ansibleMode -eq 'docker') { _ToContainerPath $vaultFile } 
+        else { $vaultFile -replace '\\','/' }
+    } else { '' }
+    $vaultFlag    = if ($posixVault) { " --vault-password-file `"$posixVault`"" } else { '' }
 
-    $cmdLine = "$ansibleCmd -i `"$posixInv`" `"$posixPlaybook`"$vaultFlag --one-line -o json --forks $forks 2>&1"
+    $cmdLine = "$ansibleCmd -i `"$posixInv`" `"$posixPlaybook`"$vaultFlag --forks $forks 2>&1"
 
     $rawOutput  = ''
     $exitCode   = -1
@@ -745,6 +781,7 @@ function Invoke-FltAnsibleBatch {
         $rawOutput = $_.Exception.Message
         $exitCode  = -1
     }
+
 
     $duration = ([datetime]::UtcNow - $runStarted).TotalSeconds
 
@@ -775,7 +812,15 @@ function Invoke-FltAnsibleBatch {
     # Step 6 — Clean up temp files
     # ------------------------------------------------------------------
     Remove-FltAnsibleInventory -Path $invPath
-    if (Test-Path $playbookPath) {
+    # Only delete playbook if it was generated by TcFltPkgMgr.
+    # Generated files follow the pattern: <action>-<timestamp>.yml
+    # e.g. package-install-20260624-143705.yml, service-stop-20260624.yml
+    $generatedPlaybookDir = _Get-FltAnsiblePlaybookDir
+    $generatedPattern     = '^(package|service|user)-.*-\d{8}-\d{6}\.yml$'
+    $playbookLeaf         = Split-Path $playbookPath -Leaf
+    if ((Test-Path $playbookPath) -and
+        $playbookPath.StartsWith($generatedPlaybookDir) -and
+        $playbookLeaf -match $generatedPattern) {
         try { Remove-Item $playbookPath -Force -ErrorAction SilentlyContinue } catch {}
     }
     if ($vaultFile -and (Test-Path $vaultFile)) {
@@ -804,19 +849,17 @@ function _Parse-AnsibleOutput {
         [double]        $Duration
     )
 
-    # ansible-playbook --one-line -o json writes one JSON object per host
-    # to stdout, followed by a PLAY RECAP block.  Each host line looks like:
+    # ansible-playbook text output ends with a PLAY RECAP block:
     #
-    #   hostname | SUCCESS => {"changed": false, "ansible_facts": {...}}
-    #   hostname | FAILED! => {"msg": "...", "task": "task name", ...}
-    #   hostname | UNREACHABLE! => {"msg": "..."}
+    #   PLAY RECAP *****
+    #   192.168.x.x : ok=1  changed=1  unreachable=0  failed=0  ...
     #
     # Exit code semantics:
     #   0 — all OK
-    #   2 — one or more FAILED
-    #   4 — one or more UNREACHABLE
-    #   6 — both FAILED and UNREACHABLE
-    #   8 — parse/config error (no per-host output)
+    #   2 — one or more tasks FAILED
+    #   3 — one or more hosts UNREACHABLE
+    #   4 — some FAILED, some UNREACHABLE
+    #   other — config/parse error
 
     $targetMap = @{}
     foreach ($t in $Targets) { $targetMap[$t.Name] = $t }
@@ -837,61 +880,80 @@ function _Parse-AnsibleOutput {
         $results.Add($r)
     }
 
-    # Exit code 8 or no output — config/parse error
-    if ($ExitCode -eq 8 -or [string]::IsNullOrWhiteSpace($RawOutput)) {
+    # No output at all — surface raw exit code
+    if ([string]::IsNullOrWhiteSpace($RawOutput)) {
         foreach ($r in $results) {
             $r.Status = 'Failed'
-            $r.Note   = if ($ExitCode -eq 8) { 'Ansible config/parse error' } `
-                        else                  { 'No output from ansible-playbook' }
+            $r.Note   = "No output from ansible-playbook (exit $ExitCode)"
         }
         return $results.ToArray()
     }
 
-    # Parse per-host lines
-    $parsed = @{}
+    # Parse the ansible-playbook PLAY RECAP block.
+    # The recap contains one line per host:
+    #   <host> : ok=N  changed=N  unreachable=N  failed=N  skipped=N  rescued=N  ignored=N
+    # We also scan for fatal/unreachable messages for the note field.
+
+    # Build a map of ansible_host → TargetName so recap IPs resolve back to names
+    $hostToTarget = @{}
+    foreach ($t in $Targets) { $hostToTarget[$t.Address] = $t.Name }
+
+    $parsed  = @{}
+    $lastMsg = @{}   # last fatal/unreachable message per host
+
     foreach ($line in ($RawOutput -split "`n")) {
         $line = $line.Trim()
 
-        # Pattern: "hostname | STATUS => {json}" or "hostname | STATUS!"
-        if ($line -match '^(.+?)\s*\|\s*(SUCCESS|FAILED!|UNREACHABLE!|CHANGED)(.*)$') {
-            $hostName   = $Matches[1].Trim()
-            $hostStatus = $Matches[2].Trim()
-            $rest       = $Matches[3].Trim()
+        # Fatal / unreachable task messages — capture for note
+        if ($line -match 'fatal:.*\[(.*?)\].*FAILED!.*"msg":\s*"(.+?)"') {
+            $h = $Matches[1].Trim()
+            $lastMsg[$h] = $Matches[2].Trim()
+        } elseif ($line -match 'fatal:.*\[(.*?)\].*=>') {
+            $h = $Matches[1].Trim()
+            if ($line -match '"msg":\s*"(.+?)"') { $lastMsg[$h] = $Matches[1].Trim() }
+        }
 
-            $note = ''
-            # Extract task name and msg from JSON payload when present
-            if ($rest -match '=>\s*(\{.+\})') {
-                $jsonStr = $Matches[1]
-                try {
-                    $obj = $jsonStr | ConvertFrom-Json -ErrorAction Stop
-                    if ($obj.msg)  { $note = ($obj.msg  -split "`n")[0].Trim() }
-                    if ($obj.task) { $note = "$($obj.task): $note".Trim(': ') }
-                } catch {}
-            }
+        # PLAY RECAP line
+        if ($line -match '^([\w\.\-]+)\s*:\s*ok=(\d+)\s+changed=(\d+)\s+unreachable=(\d+)\s+failed=(\d+)') {
+            $recapHost   = $Matches[1].Trim()
+            $okCount     = [int]$Matches[2]
+            $changed     = [int]$Matches[3]
+            $unreachable = [int]$Matches[4]
+            $failed      = [int]$Matches[5]
 
-            $status = switch -Wildcard ($hostStatus) {
-                'SUCCESS'     { 'OK'          }
-                'CHANGED'     { 'OK'          }
-                'FAILED!*'    { 'Failed'      }
-                'UNREACHABLE!*' { 'Unreachable' }
-                default       { 'Failed'      }
-            }
+            $status = if    ($unreachable -gt 0) { 'Unreachable' }
+                      elseif ($failed     -gt 0) { 'Failed'      }
+                      elseif ($okCount -gt 0 -or $changed -gt 0) { 'OK' }
+                      else                       { 'Failed'       }
 
-            $parsed[$hostName] = [pscustomobject]@{ Status = $status; Note = $note }
+            $note = if ($lastMsg.ContainsKey($recapHost)) { $lastMsg[$recapHost] } else { '' }
+            $parsed[$recapHost] = [pscustomobject]@{ Status = $status; Note = $note }
         }
     }
 
-    # Merge parsed results back into the seeded BatchResult list
+    # Merge parsed results — match by ansible_host (IP) or target name
     foreach ($r in $results) {
-        if ($parsed.ContainsKey($r.TargetName)) {
-            $p        = $parsed[$r.TargetName]
+        $tgt = $Targets | Where-Object { $_.Name -eq $r.TargetName } | Select-Object -First 1
+        $ip  = if ($tgt) { $tgt.Address } else { '' }
+
+        # Try IP first (ansible uses IP from inventory), then name
+        $key = if ($parsed.ContainsKey($ip))            { $ip }
+               elseif ($parsed.ContainsKey($r.TargetName)) { $r.TargetName }
+               else                                      { $null }
+
+        if ($key) {
+            $p = $parsed[$key]
             $r.Status = $p.Status
             $r.Note   = $p.Note
         } elseif ($ExitCode -eq 0) {
-            # Host not in output but exit code 0 — treat as OK
             $r.Status = 'OK'
+        } else {
+            # Host missing from recap — surface first error line from raw output
+            $errLine = $RawOutput -split "`n" |
+                       Where-Object { $_ -match 'ERROR|error:|fatal:|UNREACHABLE' } |
+                       Select-Object -First 1
+            $r.Note = if ($errLine) { $errLine.Trim() } else { "Exit $ExitCode" }
         }
-        # else: stays 'Failed' with empty note — host was expected but absent
     }
 
     return $results.ToArray()

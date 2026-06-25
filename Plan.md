@@ -691,19 +691,55 @@ remote management, and hosting the Ansible operator container.
 ---
 
 
-### 6.7 — Live testing (pending Linux target)
+### 6.7 — Live testing (VMware Debian VM) (in progress)
 
-> **Blocked on:** DCC-4 or DCC-5 being online with SSH + Python 3 + the `tcflt-ansible`
-> container able to reach it.
+> **Target:** VMware Debian 12 VM at 192.168.223.128, user Administrator.
+> `tcflt-ansible` container on operator PC, key-based auth, NOPASSWD sudo.
+>
+> **Bugs found and fixed during live testing (2026-06-24):**
+> - `--one-line -o json` flags invalid for `ansible-playbook` (ad-hoc only) — removed
+> - PLAY RECAP parser rewritten to match `ansible-playbook` text output format
+> - `$host` reserved PS7 variable used in parser — renamed to `$recapHost`
+> - Target names with spaces (e.g. "Beckhoff RT Linux") break Ansible INI inventory
+>   — names now sanitised to underscores for INI alias; IP used for PLAY RECAP matching
+> - `[linux:children]` meta-group only written when 2+ groups existed
+>   — now always written so `hosts: linux` resolves with a single VM target
+> - `ansible_ssh_private_key_file` not written to inventory in Docker mode
+>   — now always set to `/root/.ssh/id_ed25519` in Docker mode
+> - `ansible_become=true` not in inventory — now always written for Linux targets
+> - `Dockerfile.ansible` had no SSH keypair — `ssh-keygen` now runs at build time;
+>   public key exported to `ansible/tcflt-ansible.pub` on container startup
 
-- [ ] Install a package on one Linux target via Linux Admin > Install package
-- [ ] Upgrade a package on one Linux target
-- [ ] Remove a package on one Linux target
-- [ ] Add a user (with groups) to one Linux target
-- [ ] Start/stop a service on one Linux target
-- [ ] Run a custom playbook file against a Linux target
-- [ ] Run install across 3+ Linux targets simultaneously (batch dashboard pagination)
-- [ ] Write Suite 31 (Linux Admin live) integration tests once the above pass
+- [x] Install a package on one Linux target via Linux Admin > Install package
+- [x] Upgrade a package on one Linux target
+- [x] Remove a package on one Linux target
+- [x] Add a user (with groups) to one Linux target
+- [x] Start/stop a service on one Linux target (`nginx` — `cron` not installed on this VM)
+- [x] Run a custom playbook file against a Linux target
+- [ ] Run install across 3+ Linux targets simultaneously (blocked — only 1 Linux target)
+
+> **Bugs fixed in AnsibleExecutor.ps1 during live testing:**
+> - `--one-line -o json` invalid for `ansible-playbook` — removed; PLAY RECAP
+>   parser rewritten for text output format
+> - `$host` PS7 reserved variable in parser — renamed `$recapHost`
+> - Target names with spaces break Ansible INI — sanitised to underscores;
+>   IP used for PLAY RECAP result matching
+> - `[linux:children]` only written with 2+ groups — now always written
+> - `ansible_ssh_private_key_file` missing in Docker mode — always set to
+>   `/root/.ssh/id_ed25519`; `ansible_become=true` always written
+> - Playbook closure scope bug in `Invoke-LinuxPlaybookMenu` — replaced with
+>   `-PlaybookPath` parameter on `_Invoke-AnsibleBatchAction`
+> - Cleanup deleted user-supplied playbooks — now only deletes files matching
+>   generated timestamp pattern `<action>-<timestamp>.yml`
+> - `Dockerfile.ansible` had no SSH keypair — `ssh-keygen` runs at build time
+>
+> **Integration test suite (Suite 37):** To be written once all items above are
+> confirmed working. Suite 37 will be a live suite requiring SSH + Ansible.
+> Suite numbers 31-36 are taken; next free number is 37.
+> Note: original plan referenced "Suite 31 Linux Admin live" — that number is
+> now used by Phase 8.0 pre-work.
+>
+> **Security:** No hardcoded secrets. `README.md` updated with Ansible prerequisites.
 
 ---
 

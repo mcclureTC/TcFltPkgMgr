@@ -28,8 +28,9 @@ function _Invoke-AnsibleBatchAction {
     param(
         [Parameter(Mandatory)] [string]      $Action,
         [Parameter(Mandatory)] [string]      $PackageSpec,
-        [Parameter(Mandatory)] [scriptblock] $PlaybookBuilder,
-        [object[]] $PreSelected = @()
+        [scriptblock] $PlaybookBuilder = $null,
+        [string]      $PlaybookPath    = '',   # direct path — bypasses PlaybookBuilder
+        [object[]]    $PreSelected     = @()
     )
 
     $linuxTargets = @(_Get-LinuxTargets)
@@ -76,6 +77,13 @@ function _Invoke-AnsibleBatchAction {
         }
     }
 
+    # If a direct path is supplied, wrap it in a simple builder
+    if ($PlaybookPath) {
+        $capturedPath   = $PlaybookPath
+        $PlaybookBuilder = { [pscustomobject]@{ Ok = $true; Path = $capturedPath
+            Message = "Using: $capturedPath" } }.GetNewClosure()
+    }
+
     $results = Invoke-FltAnsibleBatch `
                    -Targets        $selected `
                    -PlaybookBuilder $PlaybookBuilder `
@@ -93,6 +101,17 @@ function _Invoke-AnsibleBatchAction {
     $fail = @($results | Where-Object {
         $_.Status -like 'Failed*' -or $_.Status -eq 'Unreachable' -or $_.Status -eq 'Unsupported'
     }).Count
+
+    # Show full notes for any failures below the dashboard (notes may be truncated in rows)
+    $failedResults = @($results | Where-Object { $_.Status -notlike 'OK*' -and $_.Status -ne 'Skipped' })
+    if ($failedResults.Count -gt 0) {
+        Write-Host ''
+        foreach ($r in $failedResults) {
+            if ($r.Note) {
+                Write-Host "  $($r.TargetName): $($r.Note)" -ForegroundColor Red
+            }
+        }
+    }
 
     $sumRow = $Script:FltBatchDashHeight - 1
     $sumClr = if ($fail -gt 0) { "`e[91m" } else { "`e[92m" }
@@ -280,11 +299,9 @@ function Invoke-LinuxPlaybookMenu {
     # Use a fixed playbook builder that returns the existing file
     $resolvedPath = (Resolve-Path $path).Path
     _Invoke-AnsibleBatchAction `
-        -Action         'playbook' `
-        -PackageSpec    (Split-Path $resolvedPath -Leaf) `
-        -PlaybookBuilder {
-            [pscustomobject]@{ Ok = $true; Path = $resolvedPath; Message = "Using: $resolvedPath" }
-        }
+        -Action       'playbook' `
+        -PackageSpec  (Split-Path $resolvedPath -Leaf) `
+        -PlaybookPath $resolvedPath
 }
 
 # ---------------------------------------------------------------------------

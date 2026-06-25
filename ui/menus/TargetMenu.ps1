@@ -236,17 +236,10 @@ function Invoke-TargetMenu {
     }
 
     $ok = Add-FleetTarget -Name $name -HostAddress $hostAddr -Port ([int]$port) -User $user `
-              -PlainPassword $plainPwd -KeyFile $keyFile -InternetAccess $ia
+              -PlainPassword $plainPwd -KeyFile $keyFile -InternetAccess $ia `
+              -OS $os -TargetType $targetType -PackageManager $pm
 
     if ($ok) {
-        # Set OS, TargetType, PackageManager on the newly added target
-        $newTgt = $Script:FleetTargets | Where-Object { $_.Name -eq $name } | Select-Object -First 1
-        if ($newTgt) {
-            $newTgt.OS            = $os
-            $newTgt.TargetType    = $targetType
-            $newTgt.PackageManager = $pm
-            Save-FltTargets -Targets $Script:FleetTargets | Out-Null
-        }
         Write-Host "  Added '$name' ($os/$targetType$(if ($pm) { '/' + $pm } else { '' }))." -ForegroundColor Green
     } else {
         Write-Host "  Add failed (exit $Script:FltLastExit)." -ForegroundColor Red
