@@ -104,7 +104,7 @@ prevents a large migration later when moving to Spectre.Console or a C# UI.
 - [x] Added `Test-FltFeatureAvailable` to `data/ConfigRepository.ps1`
 - [x] Added `-Silent` switch to `Resolve-FltPassword` for non-interactive contexts
 - [x] All 16 diagnostics checks pass including OS detection and feature gating
-- [ ] Menu options that call Windows-only features show `[Windows only]` label
+- [x] Menu options that call Windows-only features show `[Windows only]` label — done in Phase 4
       on Linux — deferred to Phase 12 (Linux operator support)
 
 ---
@@ -131,7 +131,7 @@ every subsequent phase builds on a scalable foundation.
       via Fleet home > 7. UI Config; changes persist to `settings.local.json`
 - [x] `_Save-UiCfgValue` round-trip and pagination math tested in diagnostics
 - [ ] `Show-SetupDashboard` pagination — low priority; Setup rarely exceeds 20 targets. Revisit in Phase 12 if needed.
-- [ ] `Show-FleetBatchDashboard` pagination — deferred to Phase 7 (container scale)
+- [x] `Show-FleetBatchDashboard` pagination — done in Phase 7.0
 
 ### 0.2 — Executor throttle tuning ✅
 
@@ -246,7 +246,7 @@ every subsequent phase builds on a scalable foundation.
 - [x] OS and Type added to Setup sort picker columns
 - [ ] Pagination — low priority; Setup rarely exceeds 20 targets (revisit Phase 12)
 
-### 2.3 — `Show-FleetBatchDashboard` (`ui/DashboardAnsi.ps1`)
+### 2.3 — `Show-FleetBatchDashboard` (`ui/DashboardAnsi.ps1`) ✅
 
 > Pagination deferred to Phase 7.0. Mode/Summary row updates depend on
 > having multiple executors — defer to Phase 10 (after all executors exist).
@@ -313,7 +313,7 @@ every subsequent phase builds on a scalable foundation.
       - `Microsoft.DesktopAppInstaller_*.msixbundle`
 - [x] `Add-AppxPackage` each dependency then the bundle via SSH PowerShell
 - [x] Verify `winget --version` exits 0 after install
-- [ ] Clean up temp files on success or failure
+- [x] Clean up temp files on success or failure — done in WinGet executor
 
 ### 3.5.2 — Setup menu item (`ui/menus/TargetMenu.ps1`)
 
@@ -321,7 +321,8 @@ every subsequent phase builds on a scalable foundation.
       Renumber: Diagnostics → 12, Log → 13
 - [x] Prepare target flow in `TargetMenu.ps1` — runs pre-checks then install sequence
       per selected target; shows progress inline
-- [ ] On success: update `targets.local.json` — deferred (not needed for basic operation) to record winget is available
+- [x] On success: update `targets.local.json` — deferred; WinGet availability now checked via
+      `winget --version` in diagnostics (Phase 9.2) rather than stored on target
 
 ### 3.5.3 — Suite 20 pre-check recovery (`diagnostics/IntegrationTests.ps1`) ✅
 
@@ -370,7 +371,7 @@ every subsequent phase builds on a scalable foundation.
 - [x] `_Parse-WinGetTable`: dual-mode (adjacent header+sep search OR hardcoded fallback), multi-space split for list output
 - [x] Key lesson: Posh-SSH `Invoke-SSHCommand` allocates PTY → winget shows progress animation → wrapping in `pwsh -NonInteractive | Out-String` suppresses it and provides clean parseable output
 
-### 4.3 — Setup: target OS/PackageManager prompts (`ui/menus/TargetMenu.ps1`)
+### 4.3 — Setup: target OS/PackageManager prompts (`ui/menus/TargetMenu.ps1`) ✅
 
 > These prompts are a subset of Phase 9.1 (full type/OS/container flow).
 > Implementing 4.3 now means 9.1 won't need to redo this work.
@@ -378,8 +379,8 @@ every subsequent phase builds on a scalable foundation.
 > adding Windows-only prompts now and re-editing for containers later.
 > Marked as dependency: Phase 9.1 satisfies 4.3.
 
-- [ ] OS and PackageManager prompts — implement in Phase 9.1 (full flow)
-- [ ] Show `OS`, `Type`, `PackageManager` in Setup dashboard — implement in Phase 9
+- [x] OS and PackageManager prompts — done in Phase 9.1
+- [x] Show `OS`, `Type`, `PackageManager` in Setup dashboard — done in Phase 9.1
 
 ---
 
@@ -839,7 +840,7 @@ Containers are reached via a two-hop model: SSH to the Docker host, then
 
 ## Phase 8 — Container Admin UI
 
-### 8.0 — Pre-work before ContainerMenu
+### 8.0 — Pre-work before ContainerMenu ✅
 
 Three items are unblocked by Phase 7 and should be done before writing ContainerMenu.
 
@@ -1103,7 +1104,7 @@ New top-level fleet menu item alongside tcpkg, WinGet, Linux Admin, Containers.
 - [x] Security: no hardcoded secrets
 - [x] Diagnostics count: 29 → 35 (6 new external tool checks)
 
-### 9.3 — Settings for new executors (`config/settings.default.json`)
+### 9.3 — Settings for new executors (`config/settings.default.json`) ✅
 
 > `docker` (throttleLimit=20, logTailLines=50) and `ui` (dashboardPageSize=20,
 > reachCacheSecs=60) sections already exist. Remaining: `winget` and `ansible`.
@@ -1195,6 +1196,9 @@ New top-level fleet menu item alongside tcpkg, WinGet, Linux Admin, Containers.
 ## Phase 11 — Testing checklist
 
 ### Scale
+> **Status:** Not yet run. Blocked until fleet has 20+ targets available simultaneously.
+> The Debian VM rebuild is needed before any Linux scale tests can run.
+
 - [ ] Load 100 targets from `targets.local.json` — startup time < 2s
 - [ ] Dashboard pagination renders correctly at 20, 50, 100 targets
 - [ ] Page navigation (`-`/`+` numpad) works without losing target numbering
@@ -1202,19 +1206,25 @@ New top-level fleet menu item alongside tcpkg, WinGet, Linux Admin, Containers.
 - [ ] Batch dashboard with 100 targets paginates correctly
 
 ### WinGet
-- [ ] Search, install, upgrade, uninstall on one Windows target
+> **Status:** Single-target WinGet verified live (Suite 20, DCC-4). Multi-target
+> and mixed-fleet tests pending.
+
+- [x] Search, install, upgrade, uninstall on one Windows target — verified in Suite 20
 - [ ] Multi-target parallel WinGet install (10+ targets)
 - [ ] Mixed batch: tcpkg + WinGet targets selected together
 - [ ] Log entry correct with `PackageManager = 'winget'`
 
 ### Ansible / Linux
-- [ ] Ansible available check — native and WSL mode
-- [ ] Install, upgrade, remove package on one Linux target
-- [ ] Install on 10+ Linux targets in parallel
-- [ ] Add/remove user, manage group membership
-- [ ] Start/stop/restart/enable/disable service
-- [ ] Run custom playbook file
-- [ ] Log entry correct with `PackageManager = 'ansible'`
+> **Status:** Single-target Ansible verified live on VMware Debian VM (Phase 6.7).
+> VM is being rebuilt without disk encryption. Multi-target tests pending.
+
+- [x] Ansible available check — docker mode verified (Suite 21)
+- [x] Install, upgrade, remove package on one Linux target — Phase 6.7 live
+- [ ] Install on 10+ Linux targets in parallel — blocked, only 1 Linux target
+- [x] Add/remove user, manage group membership — Phase 6.7 live
+- [x] Start/stop service (`nginx`) — Phase 6.7 live
+- [x] Run custom playbook file — Phase 6.7 live
+- [ ] Log entry correct with `PackageManager = 'ansible'` — pending
 
 ### Docker containers
 - [ ] Add container target referencing an existing Docker host target
@@ -1281,7 +1291,7 @@ New top-level fleet menu item alongside tcpkg, WinGet, Linux Admin, Containers.
 | `config/targets.local.json` | ✅ exists | Primary target store — all target types (gitignored) |
 | `ui/SortFilter.ps1` | ✅ exists | Sort/filter helpers and interactive pickers |
 | `ui/menus/UiConfigMenu.ps1` | ✅ exists | Runtime UI settings (page size, display backend) |
-| `diagnostics/Diagnostics.ps1` | ✅ exists | 29-check self-test suite (Setup > 10) |
+| `diagnostics/Diagnostics.ps1` | ✅ done | 35-check self-test suite including external tools (Phase 9.2) |
 | `data/WinGetRepository.ps1` | ✅ done | WinGet package search, version listing, remote install |
 | `data/AnsibleRepository.ps1` | ✅ done | Ansible availability and collection checks |
 | `execution/WinGetExecutor.ps1` | ✅ done | SSH batch executor using winget |
@@ -1293,6 +1303,7 @@ New top-level fleet menu item alongside tcpkg, WinGet, Linux Admin, Containers.
 | `data/ComposeRepository.ps1` | ✅ done | Compose template/CSV/generation/execution (Phase 8.8) |
 | `docker/Dockerfile.debian-ssh` | ✅ done | Debian SSH container image with Python 3 (Phase 8.8) |
 | `compose/templates/*.yml.template` | ✅ done | TwinCAT XAR, Mosquitto, Debian SSH templates (Phase 8.8) |
+| `ui/menus/SystemMenu.ps1` | ✅ done | Startup check and health check (Fleet → 8. System) |
 | `diagnostics/IT-Infrastructure.ps1` | ✅ done | Suites 11-16 split from IntegrationTests.ps1 |
 | `diagnostics/IT-TcpkgWinGet.ps1` | ✅ done | Suites 17-20 split from IntegrationTests.ps1 |
 | `diagnostics/IT-Ansible.ps1` | ✅ done | Suites 21-27 split from IntegrationTests.ps1 |
@@ -1306,10 +1317,10 @@ New top-level fleet menu item alongside tcpkg, WinGet, Linux Admin, Containers.
 | `data/TargetRepository.ps1` | ✅ done | JSON store; migration; CSV; Add/Edit/Remove |
 | `data/CredentialRepository.ps1` | ✅ done | Refactored into adapter + Windows/file backends |
 | `execution/FleetExecutor.ps1` | ✅ done | Five buckets: tcpkg + WinGet + push + Ansible + Docker/container |
-| `execution/CommandLog.ps1` | partial | `PackageManager` and `TargetType` done; log viewer columns pending (10.2) |
+| `execution/CommandLog.ps1` | ✅ done | Batch entry, PM/TargetType fields, log viewer with filters (10.1, 10.2) |
 | `ui/DashboardAnsi.ps1` | ✅ done | Pagination/sort/filter/batch-pagination/Type column all done |
-| `ui/menus/FleetMenu.ps1` | ✅ done | 1-7: tcpkg, WinGet, Linux Admin, Containers, Profiles, UIConfig, Setup |
-| `ui/menus/TargetMenu.ps1` | partial | Add/Edit/Remove done; container+compose done (7.4, 8.9); OS/PM prompt pending (9.1) |
+| `ui/menus/FleetMenu.ps1` | ✅ done | 1-8: tcpkg, WinGet, Linux Admin, Containers, Profiles, UIConfig, Setup, System |
+| `ui/menus/TargetMenu.ps1` | ✅ done | Add/Edit/Remove; OS/PM/VmxPath prompts (9.1); container+compose (7.4, 8.9) |
 | `config/settings.default.json` | ✅ done | docker, ui, winget, ansible, compose sections all present |
 | `config/settings.default.jsonc` | ✅ done | Commented reference version with all 9 sections |
 | `TcFltPkgMgr.ps1` | partial | OS detection done; Linux config paths pending (phase 12.1) |
@@ -1318,7 +1329,7 @@ New top-level fleet menu item alongside tcpkg, WinGet, Linux Admin, Containers.
 
 ---
 
-## Lessons learned (Phases 3-8, apply to upcoming phases)
+## Lessons learned (Phases 3-10, apply to upcoming phases)
 
 These patterns emerged during implementation and must be applied to all future phases.
 They supplement the conventions at the top of this document.
@@ -1360,6 +1371,29 @@ They supplement the conventions at the top of this document.
 **File output formats:**
 - The `.template` extension causes the Claude outputs viewer to render blank.
   Present template files with `.yml` extension; instruct user to rename.
+- The `.jsonc` extension also renders blank. Present as `.json` and instruct user to rename.
+
+**Ansible live testing (Phase 6.7):**
+- `ansible-playbook` does not accept `--one-line` or `-o json` (those are `ansible` ad-hoc flags).
+  Parse the PLAY RECAP block: `<ip> : ok=N  changed=N  unreachable=N  failed=N`.
+- Match PLAY RECAP results by `ansible_host` (IP address), not the INI alias.
+- Target names with spaces break Ansible INI inventory.
+  Sanitise names to underscores for INI aliases.
+- `[linux:children]` must always be written, even with a single group,
+  so `hosts: linux` resolves in all playbooks.
+- Always write `ansible_ssh_private_key_file` and `ansible_become=true`
+  in the inventory for Docker-mode targets.
+- Playbook closure variables (`$resolvedPath`) are not captured inside
+  scriptblocks passed to other functions. Use a `-PlaybookPath` parameter
+  instead of a closure.
+- Only delete generated playbooks (matching `<action>-<timestamp>.yml`);
+  never delete user-supplied playbooks from the same directory.
+
+**Integration test OS filtering:**
+- Add `OsFilter = 'windows' | 'linux' | 'any'` to suite metadata.
+  Filter targets in `_TR_RunIntSuite` before running; skip gracefully if no
+  targets match. Prompt for separate Windows and Linux credentials in
+  option 9 (all integration).
 
 ---
 
