@@ -1070,6 +1070,25 @@ Useful for confirming everything is ready before running fleet operations.
 
 ---
 
+## External tools check (Setup → 10. Tests → 1. All diagnostics)
+
+Phase 9.2 added an **External tools** section to the built-in diagnostics.
+It checks all external dependencies and reports PASS / WARN for each:
+
+| Tool | Required for | Action if missing |
+|------|-------------|------------------|
+| Docker CLI + daemon | Containers, Ansible | Install Docker Desktop |
+| `tcflt-ansible` container | Ansible (Linux targets) | `docker build` + `docker run` (see Ansible section) |
+| `community.docker` collection | Docker operations via Ansible | `docker exec tcflt-ansible ansible-galaxy collection install community.docker` |
+| `winget` | WinGet package management | Install via Microsoft Store: App Installer |
+| Posh-SSH | All SSH operations | `Install-Module Posh-SSH -Scope CurrentUser` |
+| `vmrun.exe` | VM auto-start in System menu | Install VMware Workstation |
+
+Missing optional tools show as **WARN** (not FAIL) — the core tool still works
+without them; only the specific feature they support is unavailable.
+
+---
+
 ## File Layout
 
 ```

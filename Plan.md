@@ -1087,21 +1087,21 @@ New top-level fleet menu item alongside tcpkg, WinGet, Linux Admin, Containers.
 > and Dropbear configured with the `tcflt-ansible` public key.
 > For now: reinstall VM without disk encryption (Option A).
 
-### 9.2 — Prerequisites check (`ui/menus/TargetMenu.ps1`)
+### 9.2 — Prerequisites check (`diagnostics/Diagnostics.ps1`) ✅
 
-> The built-in diagnostics (Setup > 10) already cover tcpkg, Posh-SSH, and
-> core subsystems. This phase adds a user-facing prerequisites check that is
-> lighter than full diagnostics — focused on external tool availability only.
-> Rename current `10. Diagnostics` → keep as-is; add new prerequisites check
-> as a separate Setup menu item or integrate into diagnostics Phase 2.
+> Integrated into the existing Diagnostics screen (Setup → 10. Tests → 1. All
+> diagnostics) as a new **External tools** section. Total checks: 35 (was 29).
 
-- [ ] Check external tools: `winget`, `ansible-playbook`, `python3`, `docker`
-- [ ] Check Ansible collection: `community.docker`
-- [ ] Green/amber/red per item; offer to fix where possible:
-      `Install-Module Posh-SSH`, `ansible-galaxy collection install community.docker`
-- [ ] Integrate into existing Diagnostics screen as a new section, not a
-      separate menu item (avoids Setup menu number inflation)
-      - community.docker: `ansible-galaxy collection install community.docker`
+- [x] `docker` CLI available and daemon running
+- [x] `tcflt-ansible` container running + `ansible-playbook` version check
+- [x] Ansible collection `community.docker` installed in container
+- [x] `winget` available (Windows only; WARN if missing)
+- [x] `Posh-SSH` module version (moved from Core subsystems)
+- [x] `vmrun.exe` available at VMware Workstation path (WARN if missing)
+- [x] All checks WARN (not FAIL) for missing optional tools
+- [x] `vmrun.exe` path built with `Join-Path` (avoid `\v` escape in double-quoted strings)
+- [x] Security: no hardcoded secrets
+- [x] Diagnostics count: 29 → 35 (6 new external tool checks)
 
 ### 9.3 — Settings for new executors (`config/settings.default.json`)
 

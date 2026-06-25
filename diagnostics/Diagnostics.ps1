@@ -389,14 +389,6 @@ function Invoke-FltDiagnostics {
         _Diag_Fail 'Reachability cache behavior' $_.Exception.Message
     }
 
-    try {
-        if (Ensure-FltPoshSsh) {
-            _Diag_Pass 'Posh-SSH module available'
-        } else {
-            _Diag_Fail 'Posh-SSH module available' 'Run: Install-Module Posh-SSH -Scope CurrentUser'
-        }
-    } catch { _Diag_Fail 'Posh-SSH module available' $_.Exception.Message }
-
     # Module load: check that all required functions exist (load test, not functional)
     $requiredFunctions = @(
         'Get-FleetTargets','Add-FleetTarget','Edit-FleetTarget','Remove-FleetTarget',
@@ -552,6 +544,97 @@ function Invoke-FltDiagnostics {
             _Diag_Fail 'Target JSON store round-trip' "Count=$($loaded.Count) Names=$($loaded.Name -join ',')"
         }
     } catch { _Diag_Fail 'Target JSON store round-trip' $_.Exception.Message }
+    # ── External tools (Phase 9.2) ────────────────────────────────────────────
+    _Diag_Section 'External tools (Phase 9.2)'
+
+    # docker — available and daemon running
+    try {
+        $dockerVer = (& cmd /c 'docker --version 2>&1') -join ''
+        $dockerOk  = $LASTEXITCODE -eq 0 -and $dockerVer -match 'Docker version'
+        if ($dockerOk) {
+            _Diag_Pass "docker CLI available: $($dockerVer.Trim())"
+        } else {
+            _Diag_Fail 'docker CLI available' 'Install Docker Desktop: https://www.docker.com/products/docker-desktop'
+        }
+    } catch { _Diag_Fail 'docker CLI available' $_.Exception.Message }
+
+    # docker daemon running
+    try {
+        $infoOut = (& cmd /c 'docker info 2>&1') -join ''
+        if ($LASTEXITCODE -eq 0) {
+            _Diag_Pass 'Docker daemon running'
+        } else {
+            _Diag_Warn 'Docker daemon running' 'Start Docker Desktop. Required for Ansible (tcflt-ansible) and container targets.'
+        }
+    } catch { _Diag_Warn 'Docker daemon running' $_.Exception.Message }
+
+    # tcflt-ansible container — running and ansible-playbook available
+    try {
+        $containerName = Get-FltCfgValue 'ansible' 'dockerContainer' 'tcflt-ansible'
+        $apVer = (& cmd /c "docker exec $containerName ansible-playbook --version 2>&1") |
+                  Select-Object -First 1
+        if ($LASTEXITCODE -eq 0 -and $apVer -match 'ansible-playbook') {
+            _Diag_Pass "ansible-playbook available in '$containerName': $($apVer.Trim())"
+        } else {
+            _Diag_Warn "ansible-playbook available in '$containerName'" `
+                "Container not running. Build and start: docker build -f docker\Dockerfile.ansible -t tcflt-ansible . ; docker run -d --name tcflt-ansible --restart unless-stopped -v `"`${PWD}/ansible:/ansible`" tcflt-ansible"
+        }
+    } catch { _Diag_Warn 'ansible-playbook in tcflt-ansible' $_.Exception.Message }
+
+    # community.docker Ansible collection
+    try {
+        $containerName = Get-FltCfgValue 'ansible' 'dockerContainer' 'tcflt-ansible'
+        $colOut = (& cmd /c "docker exec $containerName ansible-galaxy collection list community.docker 2>&1") -join ''
+        if ($LASTEXITCODE -eq 0 -and $colOut -match 'community\.docker') {
+            _Diag_Pass 'Ansible collection community.docker installed'
+        } else {
+            _Diag_Warn 'Ansible collection community.docker installed' `
+                "Run: docker exec $containerName ansible-galaxy collection install community.docker"
+        }
+    } catch { _Diag_Warn 'Ansible collection community.docker' $_.Exception.Message }
+
+    # winget — available (Windows only)
+    if ($IsWindows) {
+        try {
+            $wgVer = (& cmd /c 'winget --version 2>&1') -join ''
+            if ($LASTEXITCODE -eq 0 -and $wgVer -match 'v\d') {
+                _Diag_Pass "winget available: $($wgVer.Trim())"
+            } else {
+                _Diag_Warn 'winget available' 'Install via Microsoft Store: App Installer. Required for WinGet targets.'
+            }
+        } catch { _Diag_Warn 'winget available' $_.Exception.Message }
+    } else {
+        _Diag_Pass 'winget — skipped (Linux/macOS operator)'
+    }
+
+    # Posh-SSH module (moved from Core subsystems for grouping clarity)
+    try {
+        if (Ensure-FltPoshSsh) {
+            $sshVer = (Get-Module Posh-SSH -ListAvailable | Select-Object -First 1).Version
+            _Diag_Pass "Posh-SSH module available: v$sshVer"
+        } else {
+            _Diag_Fail 'Posh-SSH module available' 'Run: Install-Module Posh-SSH -Scope CurrentUser'
+        }
+    } catch { _Diag_Fail 'Posh-SSH module available' $_.Exception.Message }
+
+    # vmrun.exe — available (needed for VM auto-start in System > Startup check)
+    if ($IsWindows) {
+        $progFilesX86 = [System.Environment]::GetFolderPath('ProgramFilesX86')
+        $progFiles    = [System.Environment]::GetFolderPath('ProgramFiles')
+        $vmrunX86     = Join-Path $progFilesX86 'VMware' |
+                        Join-Path -ChildPath 'VMware Workstation' |
+                        Join-Path -ChildPath 'vmrun.exe'
+        $vmrun64      = Join-Path $progFiles 'VMware' |
+                        Join-Path -ChildPath 'VMware Workstation' |
+                        Join-Path -ChildPath 'vmrun.exe'
+        $vmrunFound   = @($vmrunX86, $vmrun64) | Where-Object { Test-Path $_ } | Select-Object -First 1
+        if ($vmrunFound) {
+            _Diag_Pass "vmrun.exe available: $vmrunFound"
+        } else {
+            _Diag_Warn 'vmrun.exe available' 'VMware Workstation not found. VM auto-start in System > Startup check will not work.'
+        }
+    }
+
     Write-Host ''
     Write-Host "  $('-' * 64)" -ForegroundColor DarkGray
     $total = $Script:_diagPass + $Script:_diagFail + $Script:_diagWarn
