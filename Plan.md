@@ -130,7 +130,8 @@ every subsequent phase builds on a scalable foundation.
 - [x] Added `ui/menus/UiConfigMenu.ps1` — runtime UI settings accessible
       via Fleet home > 7. UI Config; changes persist to `settings.local.json`
 - [x] `_Save-UiCfgValue` round-trip and pagination math tested in diagnostics
-- [ ] `Show-SetupDashboard` pagination — low priority; Setup rarely exceeds 20 targets. Revisit in Phase 12 if needed.
+- [ ] `Show-SetupDashboard` pagination — low priority; Setup rarely exceeds 20 targets.
+      Revisit in Phase 12 if needed (Phase 12 may run on Linux where screen space differs).
 - [x] `Show-FleetBatchDashboard` pagination — done in Phase 7.0
 
 ### 0.2 — Executor throttle tuning ✅
@@ -244,7 +245,7 @@ every subsequent phase builds on a scalable foundation.
 - [x] `Internet` column shows `---` for Linux, macOS, and container targets
 - [x] `EffectiveAddress()` used for container address column
 - [x] OS and Type added to Setup sort picker columns
-- [ ] Pagination — low priority; Setup rarely exceeds 20 targets (revisit Phase 12)
+- [ ] Pagination — low priority; deferred to Phase 12
 
 ### 2.3 — `Show-FleetBatchDashboard` (`ui/DashboardAnsi.ps1`) ✅
 
@@ -254,7 +255,7 @@ every subsequent phase builds on a scalable foundation.
 - [x] Pagination with auto-scroll to first non-OK row — done in Phase 7.0
 - [x] `Type` column in batch rows — done in Phase 8.0
 - [ ] Multi-executor `Mode` row and per-executor summary counts —
-      defer to Phase 10 (after WinGet, Ansible, Docker executors exist)
+      all executors now exist; implement in Phase 11 mixed-fleet testing
 
 ---
 
@@ -1314,7 +1315,7 @@ SSH. Accessible from Setup → select Linux target → 4. Prepare target.
 - [ ] Pull new image on Docker host — Docker Hub unreachable on lab network; credential
       timing fix applied (creds now gathered before batch dashboard)
 - [x] Stop/start/restart container — all OK; credential timing fixed
-- [ ] Recreate container
+- [x] Recreate container — choice 7 in Container Admin menu
 - [x] View last 50 log lines — OK (empty for freshly started container, correct behaviour)
 - [x] Health check — OK; `none` reported when no HEALTHCHECK defined in Dockerfile
       (10+ container batch test pending — only 1 container target currently)
@@ -1358,6 +1359,10 @@ SSH. Accessible from Setup → select Linux target → 4. Prepare target.
 - Whether TwinCAT XAR appeared in TwinCAT XAE
 
 ### Mixed fleet (full integration)
+> **Partially verified:** Windows/tcpkg and Linux/Ansible run simultaneously
+> (231/231 integration tests with both OS types selected). Full 4-executor
+> batch pending.
+
 - [ ] Fleet with Windows/tcpkg, Windows/WinGet, Linux/Ansible, and
       container targets all selected in one batch
 - [ ] Correct routing to all four executors simultaneously
@@ -1384,7 +1389,10 @@ SSH. Accessible from Setup → select Linux target → 4. Prepare target.
 | `ui/menus/LinuxMenu.ps1` | ✅ done | Linux Admin: packages, users, services, playbooks |
 | `ui/menus/ContainerMenu.ps1` | ✅ done | Container Admin: packages, lifecycle, logs, health, deploy (Phase 8) |
 | `data/ComposeRepository.ps1` | ✅ done | Compose template/CSV/generation/execution (Phase 8.8) |
-| `docker/Dockerfile.debian-ssh` | ✅ done | Debian SSH container image with Python 3 (Phase 8.8) |
+| `docker/Dockerfile.debian-ssh` | ✅ done | Debian SSH container image; standard Debian feed; `--network host` build (8.11) |
+| `docker/Dockerfile.debian-ssh-beckhoff` | ✅ done | Beckhoff feed + standard fallback; BuildKit `--secret` for credentials (8.11) |
+| `execution/LinuxPrepExecutor.ps1` | ✅ done | Bootstrap fresh Linux VM: Python, Docker, NOPASSWD sudo, SSH key (9.5) |
+| `NetworkConfiguration.md` | ✅ done | Physical/logical network guide; Docker/VMware NAT; host networking; troubleshooting |
 | `compose/templates/*.yml.template` | ✅ done | TwinCAT XAR, Mosquitto, Debian SSH templates (Phase 8.8) |
 | `ui/menus/SystemMenu.ps1` | ✅ done | Startup check and health check (Fleet → 8. System) |
 | `diagnostics/IT-Infrastructure.ps1` | ✅ done | Suites 11-16 split from IntegrationTests.ps1 |
@@ -1407,7 +1415,7 @@ SSH. Accessible from Setup → select Linux target → 4. Prepare target.
 | `config/settings.default.json` | ✅ done | docker, ui, winget, ansible, compose sections all present |
 | `config/settings.default.jsonc` | ✅ done | Commented reference version with all 9 sections |
 | `TcFltPkgMgr.ps1` | partial | OS detection done; Linux config paths pending (phase 12.1) |
-| `ui/menus/ContainerMenu.ps1` | ✅ done | All 10 choices including compose-aware lifecycle and Deploy |
+| `ui/menus/ContainerMenu.ps1` | ✅ done | 12 choices: packages, lifecycle, logs, health, deploy, build+run (8.11), remove (8.12) |
 | `data/ComposeRepository.ps1` | ✅ done | 13 compose functions: templates, CSV import/export, docker compose exec |
 
 ---
@@ -1495,6 +1503,13 @@ They supplement the conventions at the top of this document.
 ---
 
 ## Phase 12 — Linux operator support
+
+> **Note:** QuickEdit mode fix (disable on startup via Win32 API) is already
+> done in `TcFltPkgMgr.ps1`. Linux terminals do not have QuickEdit so no
+> change needed for Phase 12.
+>
+> **Dependency:** Phase 9.5 Prepare target can bootstrap the Linux operator
+> machine itself. Phase 12.3 (Posh-SSH on Linux) is the main unknown.
 
 > **Dependency:** Phase 9.5 (Prepare Linux target) makes Phase 12 setup
 > easier — the Prepare command can bootstrap the Linux operator machine
