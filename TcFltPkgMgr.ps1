@@ -50,6 +50,42 @@ param(
 )
 
 Set-StrictMode -Off
+
+# -- Disable QuickEdit mode (must be first — before module loading) -------------
+# QuickEdit mode pauses the process when the user clicks in the console window.
+# This causes the dashboard to hang during reachability checks.
+if ($IsWindows) {
+    try {
+        $sig = @'
+using System;
+using System.Runtime.InteropServices;
+public class ConsoleHelper {
+    const int STD_INPUT_HANDLE  = -10;
+    const uint ENABLE_QUICK_EDIT = 0x0040;
+    const uint ENABLE_EXTENDED_FLAGS = 0x0080;
+    [DllImport("kernel32.dll", SetLastError=true)]
+    static extern IntPtr GetStdHandle(int nStdHandle);
+    [DllImport("kernel32.dll", SetLastError=true)]
+    static extern bool GetConsoleMode(IntPtr hConsoleHandle, out uint lpMode);
+    [DllImport("kernel32.dll", SetLastError=true)]
+    static extern bool SetConsoleMode(IntPtr hConsoleHandle, uint dwMode);
+    public static void DisableQuickEdit() {
+        IntPtr handle = GetStdHandle(STD_INPUT_HANDLE);
+        uint mode;
+        GetConsoleMode(handle, out mode);
+        mode &= ~ENABLE_QUICK_EDIT;
+        mode |= ENABLE_EXTENDED_FLAGS;
+        SetConsoleMode(handle, mode);
+    }
+}
+'@
+        Add-Type -TypeDefinition $sig -Language CSharp -ErrorAction Stop
+        [ConsoleHelper]::DisableQuickEdit()
+    } catch {
+        # Non-fatal — QuickEdit remains enabled if this fails
+    }
+}
+
 $ErrorActionPreference = 'Stop'
 
 # -- Self-elevation -------------------------------------------------------------
@@ -137,6 +173,7 @@ Set-FltCredentialBackend -Backend $credBackend
 Set-FltDisplayBackend `
     -Backend (Get-FltCfgValue 'ui' 'displayBackend' 'ansi') `
     -UiRoot  (Join-Path $Root 'ui')
+
 
 # -- Global state --------------------------------------------------------------
 
