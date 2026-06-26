@@ -1,0 +1,71 @@
+# =============================================================================
+#  TcFltPkgMgr — Debian SSH management target (Beckhoff systems)
+#  Includes both the Beckhoff apt feed and standard Debian as fallback.
+#  Beckhoff credentials are passed as a BuildKit secret — never stored in
+#  image layers or visible in docker history.
+#
+#  Build (requires BuildKit and a bhf.conf credentials file):
+#    docker build --secret id=apt,src=./apt-config/bhf.conf \
+#                 --build-arg ROOT_PASSWORD=<password> \
+#                 -f docker/Dockerfile.debian-ssh-beckhoff \
+#                 -t tcflt-debian-ssh-beckhoff:latest .
+#
+#  bhf.conf format (myBeckhoff credentials):
+#    machine deb.beckhoff.com login <email> password <password>
+#    machine deb-mirror.beckhoff.com login <email> password <password>
+#
+#  SSH access: ssh root@<host> -p <SSH_PORT>
+#  Password:   stored in TcFltPkgMgr credential store
+# =============================================================================
+
+# syntax=docker/dockerfile:1
+FROM debian:bookworm-slim
+
+ARG ROOT_PASSWORD
+RUN test -n "$ROOT_PASSWORD" || (echo "ERROR: ROOT_PASSWORD build arg is required" && exit 1)
+
+# ── Apt sources — Beckhoff feed + standard Debian fallback ───────────────────
+# Standard Debian is always included so packages missing from Beckhoff feed
+# (or when Beckhoff credentials are not available) fall back gracefully.
+RUN echo "deb http://deb.debian.org/debian bookworm main" > /etc/apt/sources.list && \
+    echo "deb http://deb.debian.org/debian-security bookworm-security main" >> /etc/apt/sources.list && \
+    echo "deb http://deb.debian.org/debian bookworm-updates main" >> /etc/apt/sources.list
+
+# ── Beckhoff apt credentials (mounted as BuildKit secret — not stored in image) ──
+RUN --mount=type=secret,id=apt \
+    if [ -f /run/secrets/apt ]; then \
+        mkdir -p /etc/apt/auth.conf.d && \
+        cp /run/secrets/apt /etc/apt/auth.conf.d/beckhoff.conf && \
+        chmod 600 /etc/apt/auth.conf.d/beckhoff.conf && \
+        echo "deb https://deb.beckhoff.com/debian trixie-stable main" >> /etc/apt/sources.list && \
+        echo "deb https://deb-mirror.beckhoff.com/debian trixie main" >> /etc/apt/sources.list; \
+    else \
+        echo "INFO: No Beckhoff credentials provided — using standard Debian feed only."; \
+    fi && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        openssh-server \
+        python3 \
+        python3-apt \
+        sudo \
+        curl \
+        iputils-ping \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -f /etc/apt/auth.conf.d/beckhoff.conf
+
+# ── SSH configuration ─────────────────────────────────────────────────────────
+RUN mkdir -p /var/run/sshd && \
+    echo "root:${ROOT_PASSWORD}" | chpasswd && \
+    sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && \
+    sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config && \
+    sed -i 's/UsePAM yes/UsePAM no/' /etc/ssh/sshd_config
+
+# ── Generate host keys ────────────────────────────────────────────────────────
+RUN ssh-keygen -A
+
+# ── Python symlink (Ansible expects python3 at /usr/bin/python3) ─────────────
+RUN ln -sf /usr/bin/python3 /usr/bin/python
+
+EXPOSE 22
+
+CMD ["/usr/sbin/sshd", "-D"]

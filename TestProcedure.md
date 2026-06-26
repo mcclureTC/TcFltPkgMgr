@@ -324,7 +324,7 @@ Tests `New-FltAnsibleInventory` and `Remove-FltAnsibleInventory` in
 | 23a | No Linux targets: Ok=$false, no file | Returns `Ok=$false`, `TargetCount=0`, file not created when fleet has no Linux targets | Passes one Windows target, checks all three conditions |
 | 23b | Single physical target: file created | File is written and `Ok=$true` for one Linux physical target | Calls function, checks `Ok` and `Test-Path` on temp inventory |
 | 23c | ansible_host and ansible_port in file | SSH connection vars appear in generated INI | Reads file content, checks regex for `ansible_host=192.168.8.110` and `ansible_port=22` |
-| 23d | Target name is INI hostname key | `FleetTarget.Name` is the host entry key in the INI file | Reads file, checks `DCC-Linux-1` appears |
+| 23d | Target name is INI hostname key | `FleetTarget.Name` is the host entry key in the INI file | Reads file, checks `PC-Linux-1` appears |
 | 23e | TargetCount excludes Windows targets | Count reflects Linux targets only from a mixed fleet | Passes 2 Linux + 1 Windows, checks `TargetCount=2` |
 | 23f | VM target in [vm] group | `TargetType='vm'` target appears under `[vm]` header | Reads file, checks `[vm]` header and target name present |
 | 23g | [linux:children] meta-group present | Meta-group written when both physical and vm groups exist | Reads file, checks `[linux:children]` present |

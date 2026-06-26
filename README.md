@@ -363,7 +363,7 @@ Microsoft Store apps (`msstore` source) are automatically excluded from Install 
 ## Docker prerequisites
 
 Docker Desktop must be installed on the operator machine for:
-- Managing containers on remote Linux targets (DCC-4, DCC-5) via SSH
+- Managing containers on remote Linux targets (PC-4, PC-5) via SSH
 - Running the Ansible operator container (`tcflt-ansible`)
 - Managing Windows containers (future)
 
@@ -1008,8 +1008,8 @@ The Setup targets view now shows a `PM` (package manager) column between Type an
 
 ```
   #    Name                 OS   Type  PM      Address          Port    Internet
-  11.  DCC-1                Win  Phys  tcpkg   10.0.0.1         22      Yes
-  12.  DCC-VM-Debian        Lnx  VM    apt     192.168.1.50     22      ---
+  11.  PC-1                Win  Phys  tcpkg   10.0.0.1         22      Yes
+  12.  PC-VM-Debian        Lnx  VM    apt     192.168.1.50     22      ---
   13.  Web-1                Lnx  Cntr  apt     docker-host/...  22      ---
 ```
 
@@ -1119,7 +1119,7 @@ The log viewer shows the last N entries from `logs/tcflt-YYYY-MM-DD.log.json`.
 | Prompt | Examples | Notes |
 |--------|---------|-------|
 | Days back | `7`, `30` | Default 7 |
-| Target name | `DCC-1`, `Beckhoff RT Linux` | Exact match |
+| Target name | `PC-1`, `Beckhoff RT Linux` | Exact match |
 | Command verb | `install`, `upgrade` | Substring match |
 | Package manager | `tcpkg`, `winget`, `ansible`, `apt`, `docker` | Matches field or command prefix |
 | Target type | `physical`, `vm`, `container` | Matches batch result entries |

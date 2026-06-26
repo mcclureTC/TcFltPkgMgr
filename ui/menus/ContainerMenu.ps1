@@ -207,7 +207,8 @@ function _Invoke-ComposeOrDockerAction {
         [string]   $DockerVerb  = '',                  # docker CLI verb override (start/stop/restart/pull)
         [string]   $ExtraArgs   = '',
         [object[]] $Selected    = @(),
-        [int]      $TimeoutSecs = 300
+        [int]      $TimeoutSecs = 300,
+        [object]   $PreGatheredCreds = $null           # credentials gathered before batch dashboard
     )
 
     if ($Selected.Count -eq 0) { return }
@@ -277,8 +278,9 @@ function _Invoke-ComposeOrDockerAction {
 
     # ── Direct docker CLI path (no compose file) ──────────────────────────────
     if ($directTargets.Count -gt 0) {
-        $cliVerb = if ($DockerVerb) { $DockerVerb } else { $Verb }
-        $sshCreds = _Get-ContainerSshCreds -Targets $directTargets
+        $cliVerb  = if ($DockerVerb) { $DockerVerb } else { $Verb }
+        $sshCreds = if ($PreGatheredCreds) { $PreGatheredCreds } `
+                    else { _Get-ContainerSshCreds -Targets $directTargets }
 
         $results = Invoke-FltDockerLifecycleBatch `
                        -Targets     $directTargets `
@@ -357,6 +359,9 @@ function Invoke-ContainerPullMenu {
 
     if (-not (Read-FltYesNo -Prompt 'Pull images now?')) { return }
 
+    # Gather SSH credentials BEFORE showing the batch dashboard
+    $pullSshCreds = _Get-ContainerSshCreds -Targets $selected
+
     Show-FleetBatchDashboard -Targets $selected -Action 'pull' -PackageSpec 'image' `
         -Mode 'docker lifecycle' -TimeoutSecs 300
 
@@ -374,7 +379,8 @@ function Invoke-ContainerPullMenu {
 
     $capturedImage = $image
     $allResults = @(_Invoke-ComposeOrDockerAction -Verb 'pull' -DockerVerb 'pull' `
-                        -ExtraArgs $capturedImage -Selected $selected -TimeoutSecs 300)
+                        -ExtraArgs $capturedImage -Selected $selected -TimeoutSecs 300 `
+                        -PreGatheredCreds $pullSshCreds)
 
     $ok   = @($allResults | Where-Object { $_.Status -like 'OK*' }).Count
     $fail = @($allResults | Where-Object { $_.Status -like 'Failed*' }).Count
@@ -476,11 +482,15 @@ function Invoke-ContainerLifecycleMenu {
     Write-Host "  $($capturedAction.ToUpper()) $($selected.Count) container(s)." -ForegroundColor Cyan
     if (-not (Read-FltYesNo -Prompt 'Proceed?')) { return }
 
+    # Gather credentials BEFORE showing batch dashboard
+    $lifecycleCreds = _Get-ContainerSshCreds -Targets $selected
+
     Show-FleetBatchDashboard -Targets $selected -Action $capturedAction -PackageSpec 'container' `
         -Mode 'docker lifecycle' -TimeoutSecs 120
 
     $allResults = @(_Invoke-ComposeOrDockerAction -Verb $capturedAction `
-                        -DockerVerb $capturedAction -Selected $selected -TimeoutSecs 120)
+                        -DockerVerb $capturedAction -Selected $selected -TimeoutSecs 120 `
+                        -PreGatheredCreds $lifecycleCreds)
 
     foreach ($r in $allResults) { Update-FltBatchRow $r.TargetName $r.Status $r.DurationSec $r.Note }
 
@@ -872,6 +882,455 @@ function Invoke-ContainerDeployMenu {
     Read-FltBatchNav
 }
 
+# ---------------------------------------------------------------------------
+# Phase 8.12 — Remove container (docker rm -f)
+# ---------------------------------------------------------------------------
+
+function Invoke-ContainerRemoveContainerMenu {
+    Clear-Host
+    Write-Host '  Containers  >  Remove container' -ForegroundColor Cyan
+    Write-Host ''
+    Write-Host '  Stops and permanently deletes the selected container(s).' -ForegroundColor DarkGray
+    Write-Host '  The fleet target registration is NOT removed — do that via Setup if needed.' -ForegroundColor DarkGray
+    Write-Host ''
+
+    $containers = @(_Get-ContainerTargets)
+    if ($containers.Count -eq 0) {
+        Write-Host '  No container targets configured.' -ForegroundColor Yellow
+        Read-Host '  Press Enter'; return
+    }
+
+    Show-FleetDashboard -Targets $containers -LastCommand '' -ResultLines @(
+        'Remove container — select targets', '- / + to page'
+    )
+    $selected = @(Read-FltMultiSelect -Items $containers -Prompt 'Targets (11+)')
+    if ($selected.Count -eq 0) { return }
+
+    Write-Host ''
+    Write-Host "  This will PERMANENTLY DELETE $($selected.Count) container(s)." -ForegroundColor Yellow
+    Write-Host '  The Docker image will NOT be deleted.' -ForegroundColor DarkGray
+    if (-not (Read-FltYesNo -Prompt 'Proceed?')) { return }
+
+    # Gather credentials before batch dashboard
+    $rmCreds = _Get-ContainerSshCreds -Targets $selected
+
+    Show-FleetBatchDashboard -Targets $selected -Action 'remove' -PackageSpec 'container' `
+        -Mode 'docker lifecycle' -TimeoutSecs 60
+
+    $allResults = @(_Invoke-ComposeOrDockerAction -Verb 'rm' -DockerVerb 'rm' `
+                        -ExtraArgs '-f' -Selected $selected -TimeoutSecs 60 `
+                        -PreGatheredCreds $rmCreds)
+
+    foreach ($r in $allResults) { Update-FltBatchRow $r.TargetName $r.Status $r.DurationSec $r.Note }
+
+    $ok   = @($allResults | Where-Object { $_.Status -like 'OK*' }).Count
+    $fail = @($allResults | Where-Object { $_.Status -like 'Failed*' }).Count
+    $skip = @($allResults | Where-Object { $_.Status -like 'Skipped*' }).Count
+    $sumRow = $Script:FltBatchDashHeight - 1
+    $sumClr = if ($fail -gt 0) { "`e[91m" } else { "`e[92m" }
+    Write-Host -NoNewline "`e[${sumRow};1H${sumClr}  Complete: $ok OK  |  $skip skipped  |  $fail failed`e[0m`e[K"
+    Write-Host -NoNewline "`e[$($Script:FltBatchScrollStart);1H"
+    Write-Host ''
+    Read-FltBatchNav
+
+    # Offer to remove fleet target registrations for successfully removed containers
+    $removed = @($allResults | Where-Object { $_.Status -like 'OK*' })
+    if ($removed.Count -gt 0) {
+        Write-Host ''
+        if (Read-FltYesNo -Prompt "Also remove $($removed.Count) fleet target registration(s)?") {
+            foreach ($r in $removed) {
+                $t = $Script:FleetTargets | Where-Object { $_.Name -eq $r.TargetName }
+                if ($t) {
+                    Remove-FleetTarget -Name $r.TargetName | Out-Null
+                    Write-Host "  Removed fleet target: $($r.TargetName)" -ForegroundColor DarkGray
+                }
+            }
+            $Script:FleetTargets = @(Get-FleetTargets -Silent)
+            Write-Host '  Fleet targets updated.' -ForegroundColor Green
+        }
+    }
+    Read-Host '  Press Enter'
+}
+
+# ---------------------------------------------------------------------------
+# Phase 8.11 — Build image and run container on a remote Docker host
+# ---------------------------------------------------------------------------
+
+function Invoke-ContainerRemoteBuildMenu {
+    Clear-Host
+    Write-Host '  Containers  >  Build + Run on remote host' -ForegroundColor Cyan
+    Write-Host ''
+    Write-Host '  Builds a Docker image on a remote Linux Docker host via SSH,' -ForegroundColor DarkGray
+    Write-Host '  then starts a container from that image.' -ForegroundColor DarkGray
+    Write-Host ''
+
+    # ── 1. Select a Linux fleet target as the Docker host ─────────────────────
+    $linuxHosts = @($Script:FleetTargets | Where-Object {
+        $_.OS -eq 'linux' -and $_.TargetType -ne 'container' -and
+        $_.Address -and $_.Address -ne '__local__'
+    })
+
+    if ($linuxHosts.Count -eq 0) {
+        Write-Host '  No Linux targets configured as Docker hosts.' -ForegroundColor Yellow
+        Write-Host '  Add a Linux VM target first (Setup > Add target).' -ForegroundColor DarkGray
+        Read-Host '  Press Enter'; return
+    }
+
+    Write-Host '  Available Docker hosts:' -ForegroundColor DarkGray
+    for ($i = 0; $i -lt $linuxHosts.Count; $i++) {
+        Write-Host "   $($i+1). $($linuxHosts[$i].Name)  ($($linuxHosts[$i].Address))"
+    }
+    Write-Host '   0. Cancel'
+    Write-Host ''
+    $hostChoice = (Read-Host '  Docker host').Trim()
+    if ($hostChoice -eq '0' -or [string]::IsNullOrEmpty($hostChoice)) { return }
+    $hostIdx = [int]$hostChoice - 1
+    if ($hostIdx -lt 0 -or $hostIdx -ge $linuxHosts.Count) {
+        Write-Host '  Invalid selection.' -ForegroundColor Yellow
+        Read-Host '  Press Enter'; return
+    }
+    $dockerHost = $linuxHosts[$hostIdx]
+
+    # ── 2. Connect to remote host ────────────────────────────────────────────
+    $pwd = Get-FltStoredPassword -CredentialName $dockerHost.Name
+    if (-not $pwd) {
+        $pwd = (Read-Host "  Password for $($dockerHost.User)@$($dockerHost.Name)").Trim()
+    }
+    if (-not $pwd) { Write-Host '  No credential.' -ForegroundColor Red; Read-Host '  Press Enter'; return }
+    $sec  = ConvertTo-SecureString $pwd -AsPlainText -Force
+    $cred = [System.Management.Automation.PSCredential]::new($dockerHost.User, $sec)
+
+    Write-Host ''
+    Write-Host "  Connecting to $($dockerHost.Name)..." -ForegroundColor DarkGray
+    $sessParams2 = @{
+        ComputerName = $dockerHost.Address
+        Port         = $dockerHost.Port
+        Credential   = $cred
+        AcceptKey    = $true
+        ErrorAction  = 'Stop'
+    }
+    $session = $null
+    try {
+        $session = New-SSHSession @sessParams2
+    } catch {
+        Write-Host "  SSH failed: $($_.Exception.Message)" -ForegroundColor Red
+        Read-Host '  Press Enter'; return
+    }
+    $sid = $session.SessionId
+    Write-Host "  Connected (session $sid)" -ForegroundColor DarkGray
+
+    # Get DNS for container networking
+    $dnsResult2 = Invoke-SSHCommand -SessionId $sid -Command "resolvectl status 2>/dev/null | grep -m1 'DNS Servers' | awk '{print \$3}' || echo ''"
+    $dnsServer2 = ($dnsResult2.Output -join '').Trim()
+    $dnsFlags   = if ($dnsServer2 -and $dnsServer2 -notmatch '^127\.') { "--dns $dnsServer2" } else { '' }
+
+    # ── 3. Choose image source ────────────────────────────────────────────────
+    Write-Host ''
+    Write-Host '  Image source:' -ForegroundColor Cyan
+    Write-Host '   1. Build from Dockerfile'
+    Write-Host '   2. Use existing local image (already built on this host)'
+    Write-Host '   0. Cancel'
+    Write-Host ''
+    $srcChoice = (Read-Host '  Choice').Trim()
+    if ($srcChoice -eq '0') { return }
+
+    if ($srcChoice -eq '2') {
+        # ── Use existing image — skip build ────────────────────────────────
+        $listResult = Invoke-SSHCommand -SessionId $sid -Command 'docker images --format "{{.Repository}}:{{.Tag}}" 2>&1'
+        $images = @($listResult.Output | Where-Object { $_ -and $_ -notmatch '<none>' })
+        if ($images.Count -eq 0) {
+            Write-Host '  No local images found on this host.' -ForegroundColor Yellow
+            Read-Host '  Press Enter'; return
+        }
+        Write-Host '  Available images:'
+        for ($i = 0; $i -lt $images.Count; $i++) {
+            Write-Host ("   $($i+1). $($images[$i])")
+        }
+        Write-Host '   0. Cancel'
+        Write-Host ''
+        $imgChoice = (Read-Host '  Image').Trim()
+        if ($imgChoice -eq '0') { return }
+        $imgIdx = [int]$imgChoice - 1
+        if ($imgIdx -lt 0 -or $imgIdx -ge $images.Count) {
+            Write-Host '  Invalid selection.' -ForegroundColor Yellow
+            Read-Host '  Press Enter'; return
+        }
+        $imageName = $images[$imgIdx]
+
+        # Get container config
+        Write-Host ''
+        Write-Host '  Container configuration:' -ForegroundColor Cyan
+        $containerName = (Read-FltValue 'Container name (blank to cancel):' -CancelOnBlank)
+        if (-not $containerName) { return }
+
+        Write-Host ''
+        Write-Host '  Network mode:' -ForegroundColor DarkGray
+        Write-Host '   1. Bridge (default)   2. Host (shares VM network)'
+        Write-Host ''
+        $netChoice2 = (Read-Host '  Choice (blank = bridge)').Trim()
+        $useHostNet2 = $netChoice2 -eq '2'
+        $hostPort2   = '2222'
+        if (-not $useHostNet2) {
+            $hostPort2 = (Read-FltValue 'Host SSH port mapping (blank = 2222):' -AllowEmpty)
+            if ([string]::IsNullOrEmpty($hostPort2)) { $hostPort2 = '2222' }
+        }
+
+        if ($useHostNet2) {
+            # Host networking: each container needs a unique port — 22 is taken by VM sshd
+            # Check which ports are already in use by other host-network containers
+            $usedPorts = Invoke-SSHCommand -SessionId $sid `
+                -Command "docker ps --format '{{.Command}}' | grep -oP '(?<=-p )\d+' | sort -n"
+            $usedList  = ($usedPorts.Output | Where-Object { $_ }) -join ', '
+            Write-Host ''
+            Write-Host '  Host networking: each container needs a unique SSH port.' -ForegroundColor DarkGray
+            if ($usedList) { Write-Host "  Ports already in use: $usedList" -ForegroundColor DarkGray }
+            $sshPort2 = (Read-FltValue 'SSH port for this container (e.g. 2222, 2223 ...):'  -AllowEmpty)
+            if ([string]::IsNullOrEmpty($sshPort2)) { $sshPort2 = '2222' }
+            $runCmd2 = "docker run -d --name $containerName --restart unless-stopped --network host $imageName /usr/sbin/sshd -D -p $sshPort2"
+        } else {
+            $dnsFl = if ($dnsFlags) { $dnsFlags } else { '' }
+            $runCmd2 = "docker run -d --name $containerName --restart unless-stopped $dnsFl -p ${hostPort2}:22 $imageName"
+        }
+
+        Write-Host ''
+        Write-Host "  Starting container $containerName..." -ForegroundColor Cyan
+        Write-Host ("  > " + $runCmd2) -ForegroundColor DarkGray
+        $runRes2 = Invoke-SSHCommand -SessionId $sid -Command $runCmd2 -TimeOut 60
+        $runRes2.Output | ForEach-Object { Write-Host ("  " + $_) -ForegroundColor DarkGray }
+
+        if ($runRes2.ExitStatus -ne 0) {
+            Write-Host '  Container start FAILED.' -ForegroundColor Red
+            Read-Host '  Press Enter'; return
+        }
+        Write-Host "  Container $containerName started." -ForegroundColor Green
+
+        # Register as fleet target
+        Write-Host ''
+        if (Read-FltYesNo -Prompt "Register '$containerName' as a fleet target?") {
+            $tgtName = Read-FltValue "Fleet target name (blank = $containerName):" -AllowEmpty
+            if ([string]::IsNullOrEmpty($tgtName)) { $tgtName = $containerName }
+            $ok2 = _Register-ContainerTarget -Name $tgtName `
+                       -DockerHostName $dockerHost.Name `
+                       -ContainerName  $containerName `
+                       -PackageManager 'apt'
+            if ($ok2) {
+                Write-Host "  Registered '$tgtName'." -ForegroundColor Green
+                $Script:FleetTargets = @(Get-FleetTargets -Silent)
+            }
+        }
+        Write-Host ''
+        Read-Host '  Press Enter'
+        Remove-SSHSession -SessionId $sid | Out-Null
+        return
+    }
+
+    Write-Host ''
+    Write-Host '  What to build:' -ForegroundColor Cyan
+    $dockerfileDir = Join-Path $Script:FltScriptRoot 'docker'
+    $dockerfiles   = @(Get-ChildItem $dockerfileDir -Filter 'Dockerfile.*' -ErrorAction SilentlyContinue)
+
+    # Descriptions for known Dockerfiles
+    $dfDescriptions = @{
+        'Dockerfile.debian-ssh'           = 'Debian SSH target (standard Debian feed)'
+        'Dockerfile.debian-ssh-beckhoff'  = 'Debian SSH target (Beckhoff + standard feeds, requires bhf.conf secret)'
+        'Dockerfile.ansible'              = 'Ansible operator container'
+    }
+
+    if ($dockerfiles.Count -gt 0) {
+        Write-Host '  Available Dockerfiles:'
+        for ($i = 0; $i -lt $dockerfiles.Count; $i++) {
+            $dfDesc = $dfDescriptions[$dockerfiles[$i].Name]
+            $descStr = if ($dfDesc) { " — $dfDesc" } else { '' }
+            Write-Host "   $($i+1). $($dockerfiles[$i].Name)$descStr"
+        }
+        Write-Host "   $($dockerfiles.Count+1). Specify a custom Dockerfile path"
+        Write-Host '   0. Cancel'
+        Write-Host ''
+        $dfChoice = (Read-Host '  Choice').Trim()
+        if ($dfChoice -eq '0') { return }
+        $dfIdx = [int]$dfChoice - 1
+        if ($dfIdx -ge 0 -and $dfIdx -lt $dockerfiles.Count) {
+            $dockerfilePath = $dockerfiles[$dfIdx].FullName
+        } else {
+            $dockerfilePath = Read-FltValue 'Dockerfile path (blank to cancel):' -CancelOnBlank
+            if (-not $dockerfilePath) { return }
+        }
+    } else {
+        $dockerfilePath = Read-FltValue 'Dockerfile path (blank to cancel):' -CancelOnBlank
+        if (-not $dockerfilePath) { return }
+    }
+
+    if (-not (Test-Path $dockerfilePath)) {
+        Write-Host "  File not found: $dockerfilePath" -ForegroundColor Red
+        Read-Host '  Press Enter'; return
+    }
+
+    $imageName = (Read-FltValue 'Image name (e.g. tcflt-debian-ssh:latest):' -CancelOnBlank)
+    if (-not $imageName) { return }
+
+    # Build args (optional)
+    Write-Host ''
+    Write-Host '  Build arguments (optional, e.g. ROOT_PASSWORD=secret):' -ForegroundColor DarkGray
+    Write-Host '  Enter one per line, blank to finish.' -ForegroundColor DarkGray
+    Write-Host ''
+    $buildArgs = @()
+    while ($true) {
+        $arg = (Read-Host '  --build-arg').Trim()
+        if ([string]::IsNullOrEmpty($arg)) { break }
+        $buildArgs += $arg
+    }
+
+    # ── 3. Container run parameters ───────────────────────────────────────────
+    Write-Host ''
+    Write-Host '  Container configuration:' -ForegroundColor Cyan
+    $containerName = (Read-FltValue 'Container name (blank to cancel):' -CancelOnBlank)
+    if (-not $containerName) { return }
+
+    # Network mode
+    Write-Host ''
+    Write-Host '  Network mode:' -ForegroundColor DarkGray
+    Write-Host '   1. Bridge (default — isolated network, port mapping)'
+    Write-Host '   2. Host   (shares VM network stack — required when bridge has no internet)'
+    Write-Host ''
+    $netChoice = (Read-Host '  Choice (blank = bridge)').Trim()
+    $useHostNet = $netChoice -eq '2'
+
+    if ($useHostNet) {
+        $hostPort = (Read-FltValue 'SSH port inside container (blank = 2222):' -AllowEmpty)
+        if ([string]::IsNullOrEmpty($hostPort)) { $hostPort = '2222' }
+        $buildArgs += "SSH_PORT=$hostPort"
+        Write-Host "  Host networking: container sshd will listen on port $hostPort on the VM's IP." -ForegroundColor DarkGray
+    } else {
+        $hostPort = (Read-FltValue 'Host SSH port mapping (e.g. 2222, blank = 2222):' -AllowEmpty)
+        if ([string]::IsNullOrEmpty($hostPort)) { $hostPort = '2222' }
+    }
+
+    # ── 5. Copy Dockerfile to remote host ─────────────────────────────────────
+    try {
+        # Create temp build dir on remote
+        $remoteBuildDir = "/tmp/tcflt-build-$containerName"
+        Invoke-SSHCommand -SessionId $sid -Command "mkdir -p $remoteBuildDir" | Out-Null
+
+        # SCP the Dockerfile
+        Write-Host "  Copying Dockerfile to $($dockerHost.Name):$remoteBuildDir..." -ForegroundColor DarkGray
+        $scpParams = @{
+            Path         = $dockerfilePath
+            Destination  = "$remoteBuildDir/"
+            ComputerName = $dockerHost.Address
+            Port         = $dockerHost.Port
+            Credential   = $cred
+            AcceptKey    = $true
+        }
+        Set-SCPItem @scpParams -ErrorAction Stop
+        Write-Host '  Dockerfile copied.' -ForegroundColor DarkGray
+
+        # ── 6. Build the image ─────────────────────────────────────────────────
+        $dfName     = Split-Path $dockerfilePath -Leaf
+        $buildArgStr = ($buildArgs | ForEach-Object { "--build-arg $_" }) -join ' '
+
+        # Beckhoff Dockerfile uses BuildKit --secret for credentials
+        $secretFlag = ''
+        if ($dfName -match 'beckhoff') {
+            $bhfConfPath = Join-Path $Script:FltScriptRoot 'apt-config' | Join-Path -ChildPath 'bhf.conf'
+            if (Test-Path $bhfConfPath) {
+                # SCP bhf.conf to remote temp dir
+                $scpSecret = @{
+                    Path         = $bhfConfPath
+                    Destination  = "$remoteBuildDir/"
+                    ComputerName = $dockerHost.Address
+                    Port         = $dockerHost.Port
+                    Credential   = $cred
+                    AcceptKey    = $true
+                }
+                Set-SCPItem @scpSecret -ErrorAction SilentlyContinue
+                $secretFlag = "--secret id=apt,src=$remoteBuildDir/bhf.conf"
+                Write-Host '  Beckhoff credentials (bhf.conf) found and will be used.' -ForegroundColor DarkGray
+            } else {
+                Write-Host '  Note: apt-config/bhf.conf not found — building without Beckhoff credentials.' -ForegroundColor Yellow
+                Write-Host "  Create $bhfConfPath with your myBeckhoff credentials to enable the Beckhoff feed." -ForegroundColor DarkGray
+            }
+            # Enable BuildKit
+            $buildCmd = "DOCKER_BUILDKIT=1 docker build $secretFlag -t $imageName -f '$remoteBuildDir/$dfName' $buildArgStr '$remoteBuildDir' 2>&1"
+        } else {
+            # --network host uses the Docker host DNS — needed when container DNS differs
+            # Build context must be last argument — use single quotes for Linux shell
+            # Use legacy builder (DOCKER_BUILDKIT=0) which supports --pull=false
+            # This avoids trying to fetch base image from registry when offline
+            $buildCmd = "DOCKER_BUILDKIT=0 docker build --network host --pull=false -t $imageName -f '$remoteBuildDir/$dfName' $buildArgStr '$remoteBuildDir' 2>&1"
+        }
+
+        Write-Host ''
+        Write-Host "  Building $imageName on $($dockerHost.Name)..." -ForegroundColor Cyan
+        Write-Host "  > $buildCmd" -ForegroundColor DarkGray
+        Write-Host ''
+        $buildResult = Invoke-SSHCommand -SessionId $sid -Command $buildCmd -TimeOut 600
+        $buildOutput = @($buildResult.Output) + @($buildResult.Error) | Where-Object { $_ }
+        $buildOutput | ForEach-Object { Write-Host ("  " + $_) -ForegroundColor DarkGray }
+
+        if ($buildResult.ExitStatus -ne 0) {
+            Write-Host ''
+            Write-Host '  Build FAILED — see output above.' -ForegroundColor Red
+            # Show last 10 lines of output as a summary
+            $buildOutput | Select-Object -Last 10 |
+                ForEach-Object { Write-Host ("  " + $_) -ForegroundColor Red }
+            Read-Host '  Press Enter'; return
+        }
+        Write-Host ''
+        Write-Host "  Build OK — image $imageName ready." -ForegroundColor Green
+
+        # ── 7. Run the container ───────────────────────────────────────────────
+            if ($dnsFlags) { Write-Host "  Using DNS: $dnsServer2" -ForegroundColor DarkGray }
+        if ($useHostNet) {
+            # Host networking: add CMD override so sshd uses port 2222 not 22
+            $runCmd = "docker run -d --name $containerName --restart unless-stopped --network host $imageName /usr/sbin/sshd -D -p $hostPort"
+        } else {
+            $runCmd = "docker run -d --name $containerName --restart unless-stopped $dnsFlags -p `${hostPort}:22 $imageName"
+        }
+        Write-Host ''
+        Write-Host "  Starting container $containerName..." -ForegroundColor Cyan
+        Write-Host "  > $runCmd" -ForegroundColor DarkGray
+        $runResult = Invoke-SSHCommand -SessionId $sid -Command $runCmd -TimeOut 60
+        $runResult.Output | ForEach-Object { Write-Host ("  " + $_) -ForegroundColor DarkGray }
+
+        if ($runResult.ExitStatus -ne 0) {
+            Write-Host ''
+            Write-Host '  Container start FAILED.' -ForegroundColor Red
+            Read-Host '  Press Enter'; return
+        }
+        Write-Host ''
+        Write-Host "  Container $containerName started on $($dockerHost.Name)." -ForegroundColor Green
+
+        # Clean up temp build dir
+        Invoke-SSHCommand -SessionId $sid -Command "rm -rf $remoteBuildDir" | Out-Null
+
+    } catch {
+        Write-Host "  Error: $($_.Exception.Message)" -ForegroundColor Red
+        Read-Host '  Press Enter'; return
+    } finally {
+        Remove-SSHSession -SessionId $sid | Out-Null
+    }
+
+    # ── 8. Offer to register as fleet target ──────────────────────────────────
+    Write-Host ''
+    if (Read-FltYesNo -Prompt "Register '$containerName' as a fleet target?") {
+        $targetName = Read-FltValue "Fleet target name (blank = $containerName):" -AllowEmpty
+        if ([string]::IsNullOrEmpty($targetName)) { $targetName = $containerName }
+        $ok = _Register-ContainerTarget -Name $targetName `
+                  -DockerHostName $dockerHost.Name `
+                  -ContainerName  $containerName `
+                  -PackageManager 'apt'
+        if ($ok) {
+            Write-Host "  Registered '$targetName' as a fleet target." -ForegroundColor Green
+            $Script:FleetTargets = @(Get-FleetTargets -Silent)
+        } else {
+            Write-Host '  Registration failed.' -ForegroundColor Red
+        }
+    }
+
+    Write-Host ''
+    Read-Host '  Press Enter'
+}
+
 function Invoke-ContainerAdminMenu {
     $containers = @(_Get-ContainerTargets)
 
@@ -898,6 +1357,8 @@ function Invoke-ContainerAdminMenu {
         Write-Host '  4. Start             5. Stop              6. Restart' -ForegroundColor White
         Write-Host '  7. Recreate          8. View logs         9. Health check' -ForegroundColor White
         Write-Host ' 10. Deploy            (docker compose up -d — first-time creation)' -ForegroundColor White
+        Write-Host ' 11. Build + run       (build image and start container on remote host)' -ForegroundColor White
+        Write-Host ' 12. Remove container  (docker rm -f — stop and delete)' -ForegroundColor White
         Write-Host ''
         Write-Host '  0. Back' -ForegroundColor DarkGray
         Write-Host ''
@@ -915,9 +1376,11 @@ function Invoke-ContainerAdminMenu {
             '8'  { Invoke-ContainerLogsMenu }
             '9'  { Invoke-ContainerHealthMenu }
             '10' { Invoke-ContainerDeployMenu }
+            '11' { Invoke-ContainerRemoteBuildMenu }
+            '12' { Invoke-ContainerRemoveContainerMenu }
             '0'  { return }
             default {
-                Write-Host '  Enter 1-10 for an operation, 0 to go back.' -ForegroundColor Yellow
+                Write-Host '  Enter 1-12 for an operation, 0 to go back.' -ForegroundColor Yellow
                 Start-Sleep -Milliseconds 800
             }
         }

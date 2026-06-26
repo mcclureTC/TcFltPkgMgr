@@ -38,6 +38,9 @@ ansible/*.retry
 
 # Docker build cache (not source files)
 docker/.build-cache/
+# Beckhoff apt credentials — never commit
+apt-config/bhf.conf
+
 # Ansible — generated at container startup, changes on image rebuild
 ansible/tcflt-ansible.pub
 

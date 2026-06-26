@@ -81,10 +81,10 @@ function _Get-FltContainerPkgCmd {
     switch ($pm) {
         'apt' {
             switch ($Action) {
-                'install' { "apt-get install -y $PackageName" }
-                'upgrade' { "apt-get install --only-upgrade -y $PackageName" }
+                'install' { "sh -c 'apt-get update -qq && apt-get install -y $PackageName'" }
+                'upgrade' { "sh -c 'apt-get update -qq && apt-get install --only-upgrade -y $PackageName'" }
                 'remove'  { "apt-get remove -y $PackageName" }
-                default   { "apt-get install -y $PackageName" }
+                default   { "sh -c 'apt-get update -qq && apt-get install -y $PackageName'" }
             }
         }
         'apk' {
@@ -112,7 +112,7 @@ function _Get-FltContainerPkgCmd {
             }
         }
         default {
-            "apt-get install -y $PackageName"
+            "sh -c 'apt-get update -qq && apt-get install -y $PackageName'"
         }
     }
 }
