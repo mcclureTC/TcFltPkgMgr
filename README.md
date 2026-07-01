@@ -1,4 +1,4 @@
-# TcFltPkgMgr
+# RemotePcMgr
 
 A PowerShell 7 fleet management tool for mixed industrial automation environments.
 Manages packages, users, services, and containers across Windows (TwinCAT/tcpkg and WinGet),
@@ -17,7 +17,7 @@ Linux (Ansible), and Docker container targets from a single operator interface.
 
 ## Fleet topology
 
-TcFltPkgMgr manages four categories of target from a single Windows operator machine.
+RemotePcMgr manages four categories of target from a single Windows operator machine.
 The diagram shows what runs on each target type and how TcFltPkgMgr reaches it.
 
 ```mermaid
